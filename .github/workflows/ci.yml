@@ -22,15 +22,18 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: intl, mbstring
+          extensions: dom, intl, mbstring, tokenizer, xml, xmlwriter
           tools: composer:v2
           coverage: none
+
+      - name: Assert ext-mongodb is not loaded
+        run: "! php --ri mongodb"
 
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
 
       - name: Run unit tests
-        run: PHP_INI_SCAN_DIR="" vendor/bin/phpunit --testsuite unit
+        run: vendor/bin/phpunit --testsuite unit
 
   # ---------------------------------------------------------------------------
   # Driver phpt compatibility tests — runs the ext-mongodb .phpt suite against
@@ -63,15 +66,18 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: intl, mbstring
+          extensions: dom, intl, mbstring, tokenizer, xml, xmlwriter
           tools: composer:v2
           coverage: none
+
+      - name: Assert ext-mongodb is not loaded
+        run: "! php --ri mongodb"
 
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
 
       - name: Run phpt tests
-        run: PHP_INI_SCAN_DIR="" vendor/bin/phpunit --testsuite phpt
+        run: vendor/bin/phpunit --testsuite phpt
         env:
           MONGODB_URI: ${{ steps.setup-mongodb.outputs.cluster-uri }}
 
@@ -105,15 +111,18 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: intl, mbstring
+          extensions: dom, intl, mbstring, tokenizer, xml, xmlwriter
           tools: composer:v2
           coverage: none
+
+      - name: Assert ext-mongodb is not loaded
+        run: "! php --ri mongodb"
 
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
 
       - name: Run integration tests
-        run: PHP_INI_SCAN_DIR="" vendor/bin/phpunit --testsuite integration
+        run: vendor/bin/phpunit --testsuite integration
         env:
           MONGODB_URI: ${{ steps.setup-mongodb.outputs.cluster-uri }}
 
@@ -148,9 +157,12 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: intl, mbstring
+          extensions: dom, intl, mbstring, tokenizer, xml, xmlwriter
           tools: composer:v2
           coverage: none
+
+      - name: Assert ext-mongodb is not loaded
+        run: "! php --ri mongodb"
 
       - name: Install driver dependencies
         run: composer install --no-interaction --prefer-dist
@@ -174,7 +186,7 @@ jobs:
 
       - name: Run library tests
         working-directory: tests/references/mongo-php-library
-        run: PHP_INI_SCAN_DIR="" vendor/bin/phpunit
+        run: vendor/bin/phpunit
         env:
           MONGODB_URI: ${{ steps.setup-mongodb.outputs.cluster-uri }}
           MONGODB_DATABASE: phplib_test
