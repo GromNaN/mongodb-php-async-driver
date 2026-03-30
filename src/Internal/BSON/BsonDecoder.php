@@ -382,16 +382,22 @@ private static function readTimestamp(string $bson, int &$offset): Timestamp
 
 /**
  * Read a 16-byte BSON Decimal128.
- * The raw bytes are stored as a binary string internally (not parsed to decimal).
  */
 private static function readDecimal128(string $bson, int &$offset): Decimal128
 {
     $bytes  = substr($bson, $offset, 16);
     $offset += 16;
 
-    // Store the raw 16 bytes as the Decimal128 string representation for
-    // round-trip fidelity.  A full IEEE 754 decimal128 parser is out of scope;
-    // here we keep the raw bytes so the encoder can reconstruct the value.
+    // If these look like a null-padded ASCII decimal string (produced by our
+    // own encoder which cannot convert strings to proper IEEE 754 bytes), strip
+    // the padding and restore the original string.  Real IEEE 754 decimal128
+    // bytes from a MongoDB server start with non-ASCII bytes in practice.
+    $trimmed = rtrim($bytes, "\x00");
+    if ($trimmed !== '' && ctype_print($trimmed)) {
+        return new Decimal128($trimmed);
+    }
+
+    // Raw IEEE 754 bytes – store as-is; a full binary decoder is out of scope.
     return new Decimal128($bytes);
 }
 

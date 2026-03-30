@@ -50,14 +50,12 @@ final class OperationExecutor
     private array $pools = [];
 
     /**
-     * @param TopologyManager $topology    Live topology manager.
-     * @param ConnectionPool  $pool        Default pool (for the primary seed).
-     * @param UriOptions      $options     Parsed URI options.
+     * @param TopologyManager  $topology    Live topology manager.
+     * @param UriOptions       $options     Parsed URI options.
      * @param list<Subscriber> $subscribers Monitoring subscribers.
      */
     public function __construct(
         private TopologyManager $topology,
-        private ConnectionPool  $pool,
         private UriOptions      $options,
         private array           $subscribers = [],
     ) {}

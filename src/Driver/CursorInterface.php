@@ -2,4 +2,4 @@
 
 namespace MongoDB\Driver;
 
-interface CursorInterface extends \Traversable {}
+interface CursorInterface extends \Iterator {}

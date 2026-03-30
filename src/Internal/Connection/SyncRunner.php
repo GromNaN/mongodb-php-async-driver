@@ -30,9 +30,9 @@ final class SyncRunner
      *   the callable is wrapped in `\Amp\async()` and awaited in place – the
      *   current fiber suspends while other fibers can make progress.
      *
-     * - If no event-loop is running (the typical synchronous entry-point),
-     *   `EventLoop::run()` is used to drive the loop to completion and then
-     *   the result (or exception) is returned / re-thrown.
+     * - If no event-loop is running (the typical synchronous entry-point), a
+     *   Revolt suspension is used: the operation is queued as a fiber, and
+     *   `suspension->suspend()` drives the event loop until the fiber completes.
      *
      * @template T
      * @param callable(): T $operation
@@ -48,22 +48,30 @@ final class SyncRunner
             return async($operation)->await();
         }
 
-        // Synchronous entry-point: spin up the event loop for this one call.
-        $result    = null;
-        $exception = null;
+        // Synchronous entry-point.
+        // 1. Obtain a suspension for the current (main) context.
+        // 2. Queue the operation as a fiber; when done it resumes / throws the suspension.
+        // 3. suspension->suspend() drives the event loop until resumed.
+        $suspension = EventLoop::getSuspension();
 
-        EventLoop::run(function () use ($operation, &$result, &$exception): void {
-            try {
-                $result = async($operation)->await();
-            } catch (Throwable $e) {
-                $exception = $e;
-            }
+        EventLoop::queue(static function () use ($operation, $suspension): void {
+            // This runs as a regular callback (main context) inside the event loop.
+            // We start our own fiber here so that async()->await() inside
+            // $operation works correctly.
+            $fiber = new \Fiber(static function () use ($operation, $suspension): void {
+                try {
+                    $suspension->resume($operation());
+                } catch (Throwable $e) {
+                    $suspension->throw($e);
+                }
+            });
+
+            $fiber->start();
+            // The fiber may suspend internally (e.g. via delay()), in which case
+            // the event loop will resume it when the timer fires.  The suspension
+            // will be resolved only after $operation() returns or throws.
         });
 
-        if ($exception !== null) {
-            throw $exception;
-        }
-
-        return $result;
+        return $suspension->suspend();
     }
 }

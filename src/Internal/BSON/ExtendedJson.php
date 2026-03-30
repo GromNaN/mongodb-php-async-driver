@@ -184,19 +184,29 @@ final class ExtendedJson
             if (array_is_list($v)) {
                 return array_map(self::canonicalizeValue(...), $v);
             }
-            $result = [];
+            // Non-list (string-keyed) array represents a BSON document.
+            // Return stdClass so json_encode produces {} for empty documents.
+            $result = new stdClass();
             foreach ($v as $key => $item) {
-                $result[$key] = self::canonicalizeValue($item);
+                $result->$key = self::canonicalizeValue($item);
             }
             return $result;
         }
 
         if ($v instanceof stdClass) {
-            return self::canonicalizeValue((array) $v);
+            $result = new stdClass();
+            foreach ((array) $v as $key => $item) {
+                $result->$key = self::canonicalizeValue($item);
+            }
+            return $result;
         }
 
         if (is_object($v)) {
-            return self::canonicalizeValue((array) $v);
+            $result = new stdClass();
+            foreach ((array) $v as $key => $item) {
+                $result->$key = self::canonicalizeValue($item);
+            }
+            return $result;
         }
 
         return $v;
@@ -323,19 +333,28 @@ final class ExtendedJson
             if (array_is_list($v)) {
                 return array_map(self::relaxValue(...), $v);
             }
-            $result = [];
+            // Non-list (string-keyed) array represents a BSON document.
+            $result = new stdClass();
             foreach ($v as $key => $item) {
-                $result[$key] = self::relaxValue($item);
+                $result->$key = self::relaxValue($item);
             }
             return $result;
         }
 
         if ($v instanceof stdClass) {
-            return self::relaxValue((array) $v);
+            $result = new stdClass();
+            foreach ((array) $v as $key => $item) {
+                $result->$key = self::relaxValue($item);
+            }
+            return $result;
         }
 
         if (is_object($v)) {
-            return self::relaxValue((array) $v);
+            $result = new stdClass();
+            foreach ((array) $v as $key => $item) {
+                $result->$key = self::relaxValue($item);
+            }
+            return $result;
         }
 
         return $v;
@@ -346,13 +365,13 @@ final class ExtendedJson
     // -------------------------------------------------------------------------
 
     /**
-     * Format a PHP float as a decimal string suitable for Extended JSON.
-     * Ensures at least one decimal place so it round-trips as a double.
+     * Format a PHP float as a decimal string suitable for Canonical Extended JSON.
+     * Uses 20 significant digits (%.20g) to match the libbson / ext-mongodb output
+     * format. Appends ".0" for integer-looking results (e.g. 4 → "4.0").
      */
     private static function doubleToString(float $v): string
     {
-        // Use enough precision to represent the value exactly
-        $s = sprintf('%.17g', $v);
+        $s = sprintf('%.20g', $v);
 
         // Ensure a decimal point or exponent is present so consumers know it's a float
         if (!str_contains($s, '.') && !str_contains($s, 'e') && !str_contains($s, 'E')) {
