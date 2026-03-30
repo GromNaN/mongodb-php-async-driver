@@ -17,6 +17,9 @@
         <testsuite name="integration">
             <directory>tests/Integration</directory>
         </testsuite>
+        <testsuite name="phpt">
+            <directory>tests/Phpt</directory>
+        </testsuite>
     </testsuites>
 
     <php>
