@@ -9,24 +9,29 @@ use PHPUnit\Framework\TestCase;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 
-use function bin2hex;
+use function array_keys;
 use function dirname;
 use function escapeshellarg;
+use function explode;
+use function fclose;
 use function file_get_contents;
-use function file_put_contents;
+use function fwrite;
 use function implode;
+use function proc_close;
+use function proc_open;
 use function preg_match;
 use function preg_quote;
-use function preg_replace;
 use function preg_split;
-use function random_bytes;
 use function rtrim;
 use function str_contains;
 use function str_replace;
 use function str_starts_with;
+use function strrpos;
+use function stream_get_contents;
+use function strtolower;
 use function substr;
 use function trim;
-use function unlink;
+use function var_export;
 
 use const PREG_SPLIT_DELIM_CAPTURE;
 
@@ -36,16 +41,21 @@ use const PREG_SPLIT_DELIM_CAPTURE;
  * Each .phpt file becomes a single PHPUnit test case.  The FILE section is
  * executed in a subprocess with PHP_INI_SCAN_DIR="" (so ext-mongodb is not
  * loaded) and with a prepend file that boots the Composer autoloader.
+ *
+ * Tests that cannot be made compliant in pure PHP are listed in skip_list.php.
  */
 class PhptRunnerTest extends TestCase
 {
     private static string $prependFile;
     private static string $phptRoot;
+    /** @var array<string, string> */
+    private static array $skipList;
 
     public static function setUpBeforeClass(): void
     {
         self::$prependFile = __DIR__ . '/prepend.php';
         self::$phptRoot    = dirname(__DIR__, 2) . '/.refs/mongo-php-driver/tests';
+        self::$skipList    = require __DIR__ . '/skip_list.php';
     }
 
     /** @return Generator<string, array{string}> */
@@ -59,7 +69,6 @@ class PhptRunnerTest extends TestCase
                 continue;
             }
 
-            // Key is the relative path; used as the test name in the output.
             $relative = substr($file->getPathname(), strlen($root) + 1);
             yield $relative => [$file->getPathname()];
         }
@@ -68,10 +77,17 @@ class PhptRunnerTest extends TestCase
     /** @dataProvider phptFiles */
     public function testPhpt(string $filePath): void
     {
+        $relative = substr($filePath, strlen(self::$phptRoot) + 1);
+
+        // --SKIP LIST-- (permanently impossible tests) ----------------------
+        if (isset(self::$skipList[$relative])) {
+            $this->markTestSkipped(self::$skipList[$relative]);
+        }
+
         $sections = $this->parseSections($filePath);
         $dir      = dirname($filePath);
 
-        // --SKIPIF-- --------------------------------------------------------
+        // --SKIPIF-- ---------------------------------------------------------
         if (isset($sections['SKIPIF'])) {
             $skipOutput = $this->runPhpCode($sections['SKIPIF'], $dir);
             if (str_contains(strtolower($skipOutput), 'skip')) {
@@ -90,10 +106,10 @@ class PhptRunnerTest extends TestCase
             }
         }
 
-        // --FILE-- ----------------------------------------------------------
+        // --FILE-- -----------------------------------------------------------
         $actual = $this->runPhpCode($sections['FILE'], $dir, $extraIni);
 
-        // --EXPECT* -- -------------------------------------------------------
+        // --EXPECT*-- --------------------------------------------------------
         if (isset($sections['EXPECT'])) {
             $this->assertSame(
                 $this->normalise($sections['EXPECT']),
@@ -128,8 +144,8 @@ class PhptRunnerTest extends TestCase
 
         foreach (explode("\n", file_get_contents($file)) as $line) {
             if (preg_match('/^--([A-Z_]+)--\s*$/', $line, $m)) {
-                $current              = $m[1];
-                $sections[$current]   = '';
+                $current            = $m[1];
+                $sections[$current] = '';
             } elseif ($current !== null) {
                 $sections[$current] .= $line . "\n";
             }
@@ -139,37 +155,43 @@ class PhptRunnerTest extends TestCase
     }
 
     /**
-     * Execute a block of PHP code in a subprocess and return its combined
-     * stdout + stderr output.
+     * Execute a block of PHP code in a subprocess and return combined output.
      *
-     * The code is written to a temp file placed in $dir so that __DIR__ inside
-     * the test code resolves to the original test's directory.
+     * Code is passed via stdin (no temp file).  __DIR__ occurrences are
+     * replaced with the literal original directory so that relative
+     * require_once calls inside the test code still resolve correctly.
      *
-     * @param list<string> $extraIni  Additional -d ini=value flags.
+     * @param list<string> $extraIni  Additional ini=value settings.
      */
     private function runPhpCode(string $code, string $dir, array $extraIni = []): string
     {
-        $tmpFile = $dir . '/_phpunit_phpt_' . bin2hex(random_bytes(4)) . '.php';
-        file_put_contents($tmpFile, $code);
+        // Replace the __DIR__ magic constant with the real directory so that
+        // require_once __DIR__ . '/../utils/basic.inc' works when code is fed
+        // through stdin (where __DIR__ would otherwise be empty).
+        $code = str_replace('__DIR__', var_export($dir, true), $code);
 
-        try {
-            $iniFlags = '';
-            foreach ($extraIni as $setting) {
-                $iniFlags .= ' -d ' . escapeshellarg($setting);
-            }
-
-            $cmd = 'PHP_INI_SCAN_DIR="" php'
-                . ' -d auto_prepend_file=' . escapeshellarg(self::$prependFile)
-                . $iniFlags
-                . ' ' . escapeshellarg($tmpFile)
-                . ' 2>&1';
-
-            exec($cmd, $output);
-
-            return implode("\n", $output);
-        } finally {
-            unlink($tmpFile);
+        $iniArgs = ' -d ' . escapeshellarg('auto_prepend_file=' . self::$prependFile);
+        foreach ($extraIni as $setting) {
+            $iniArgs .= ' -d ' . escapeshellarg($setting);
         }
+
+        // 2>&1 merges stderr into stdout so error messages appear inline,
+        // matching the format the .phpt EXPECT sections are written for.
+        $cmd = 'PHP_INI_SCAN_DIR="" php' . $iniArgs . ' 2>&1';
+
+        $process = proc_open($cmd, [
+            0 => ['pipe', 'r'],  // stdin  – we write the code here
+            1 => ['pipe', 'w'],  // stdout (stderr already merged via 2>&1)
+        ], $pipes, $dir);
+
+        fwrite($pipes[0], $code);
+        fclose($pipes[0]);
+
+        $output = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        proc_close($process);
+
+        return $output;
     }
 
     /** Normalise line endings and strip trailing whitespace. */
@@ -194,7 +216,7 @@ class PhptRunnerTest extends TestCase
      *   %x   → one or more hexadecimal digits
      *   %c   → any single character
      *   %%   → a literal %
-     *   %r…%r → content is already a regex fragment
+     *   %r…%r → the content between is already a regex fragment
      */
     private function expectfToRegex(string $expectf): string
     {
@@ -214,8 +236,6 @@ class PhptRunnerTest extends TestCase
             '%%' => '%',
         ];
 
-        // Split on %r...%r blocks and on plain % tokens so we can handle them
-        // independently.
         $parts = preg_split('/(%r.+?%r|%[disaSAwexXfFci%])/s', trim($expectf), -1, PREG_SPLIT_DELIM_CAPTURE);
 
         $regex = '';
