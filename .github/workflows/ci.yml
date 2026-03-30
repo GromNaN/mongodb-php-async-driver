@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  test-unit:
+    name: Unit Tests (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.4']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP (no ext-mongodb)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: intl, mbstring
+          # intentionally no mongodb extension
+          tools: composer:v2
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+      - name: Run unit tests
+        run: vendor/bin/phpunit --testsuite unit
+
+  test-integration:
+    name: Integration Tests (PHP ${{ matrix.php }}, MongoDB ${{ matrix.mongodb }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.4']
+        mongodb: ['7.0', '8.0']
+    services:
+      mongodb:
+        image: mongo:${{ matrix.mongodb }}
+        ports:
+          - 27017:27017
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP (no ext-mongodb)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: intl, mbstring
+          tools: composer:v2
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+      - name: Wait for MongoDB
+        run: sleep 5
+      - name: Run integration tests
+        run: vendor/bin/phpunit --testsuite integration
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017

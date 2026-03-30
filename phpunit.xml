@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+         failOnWarning="true"
+         failOnRisky="true">
+
+    <testsuites>
+        <testsuite name="unit">
+            <directory>tests/BSON</directory>
+            <directory>tests/Driver</directory>
+            <directory>tests/Protocol</directory>
+            <directory>tests/Auth</directory>
+            <directory>tests/Topology</directory>
+        </testsuite>
+        <testsuite name="integration">
+            <directory>tests/Integration</directory>
+        </testsuite>
+    </testsuites>
+
+    <php>
+        <env name="MONGODB_URI" value="mongodb://127.0.0.1:27017" />
+    </php>
+</phpunit>

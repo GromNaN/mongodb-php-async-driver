@@ -1,0 +1,43 @@
+{
+    "name": "mongodb/mongodb-driver-revoltphp",
+    "description": "Pure userland async PHP 8.4+ MongoDB driver using RevoltPHP",
+    "type": "library",
+    "license": "Apache-2.0",
+    "require": {
+        "php": "^8.4",
+        "revolt/event-loop": "^1.0",
+        "amphp/socket": "^2.0",
+        "amphp/amp": "^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.0",
+        "amphp/phpunit-util": "^3.0"
+    },
+    "autoload": {
+        "files": [
+            "src/bootstrap.php"
+        ],
+        "psr-4": {
+            "MongoDB\\BSON\\": "src/BSON/",
+            "MongoDB\\Driver\\": "src/Driver/",
+            "MongoDB\\Internal\\": "src/Internal/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "MongoDB\\Tests\\": "tests/"
+        }
+    },
+    "provide": {
+        "ext-mongodb": "*"
+    },
+    "conflict": {
+        "ext-mongodb": "*"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "composer/package-versions-deprecated": true
+        }
+    }
+}

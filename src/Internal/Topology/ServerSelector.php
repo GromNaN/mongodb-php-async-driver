@@ -1,0 +1,219 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MongoDB\Internal\Topology;
+
+use MongoDB\Driver\ReadPreference;
+
+/**
+ * Stateless server-selection logic (SDAM spec §Server Selection).
+ *
+ * All methods are pure functions that operate on the snapshot of topology state
+ * passed to them; no I/O or blocking is performed here.
+ *
+ * @internal
+ */
+final class ServerSelector
+{
+    /**
+     * Select servers matching a read preference from the current server map.
+     *
+     * Returns the subset of {@see InternalServerDescription} objects that are
+     * eligible for the requested operation, after applying:
+     *  - availability filter (type != Unknown)
+     *  - mode-specific type filter
+     *  - tag-set matching
+     *  - latency window filter (localThresholdMs)
+     *
+     * @param array<string, InternalServerDescription> $servers
+     * @return list<InternalServerDescription>
+     */
+    public static function select(
+        array          $servers,
+        TopologyType   $topologyType,
+        ReadPreference $readPreference,
+        int            $localThresholdMs = 15,
+    ): array {
+        // ----------------------------------------------------------------
+        // Special topology handling
+        // ----------------------------------------------------------------
+
+        if ($topologyType === TopologyType::Single) {
+            // Single topology: return the sole available server regardless of RP.
+            $available = self::filterAvailable($servers);
+            return array_values($available);
+        }
+
+        if ($topologyType === TopologyType::LoadBalanced) {
+            // Load-balanced topology: always exactly one load-balancer entry.
+            $available = self::filterAvailable($servers);
+            return array_values($available);
+        }
+
+        if ($topologyType === TopologyType::Sharded) {
+            // Sharded: all available mongos servers.
+            return array_values(self::filterByType($servers, InternalServerDescription::TYPE_MONGOS));
+        }
+
+        // ----------------------------------------------------------------
+        // Replica-set / unknown topology — honour the read preference.
+        // ----------------------------------------------------------------
+
+        $mode    = $readPreference->getModeString();
+        $tagSets = $readPreference->getTagSets();
+
+        switch ($mode) {
+            case ReadPreference::PRIMARY:
+                return array_values(self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY));
+
+            case ReadPreference::PRIMARY_PREFERRED:
+                $primaries = self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY);
+                if ($primaries !== []) {
+                    return array_values($primaries);
+                }
+                // Fall back to secondaries.
+                return self::selectSecondaries($servers, $tagSets, $localThresholdMs);
+
+            case ReadPreference::SECONDARY:
+                return self::selectSecondaries($servers, $tagSets, $localThresholdMs);
+
+            case ReadPreference::SECONDARY_PREFERRED:
+                $secondaries = self::selectSecondaries($servers, $tagSets, $localThresholdMs);
+                if ($secondaries !== []) {
+                    return $secondaries;
+                }
+                // Fall back to primary (ignoring tag sets for the primary fallback).
+                return array_values(self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY));
+
+            case ReadPreference::NEAREST:
+                // All available servers (any type), filtered by tags then latency.
+                $available = self::filterAvailable($servers);
+                $tagged    = self::filterByTagSets($available, $tagSets);
+                return array_values(self::filterByLatency($tagged, $localThresholdMs));
+
+            default:
+                // Should never happen with a well-constructed ReadPreference.
+                return [];
+        }
+    }
+
+    // =========================================================================
+    // Private helpers
+    // =========================================================================
+
+    /**
+     * Return servers whose type is not Unknown (i.e., they responded to hello).
+     *
+     * @param array<string, InternalServerDescription> $servers
+     * @return array<string, InternalServerDescription>
+     */
+    private static function filterAvailable(array $servers): array
+    {
+        return array_filter($servers, static fn (InternalServerDescription $sd) => $sd->isAvailable());
+    }
+
+    /**
+     * @param array<string, InternalServerDescription> $servers
+     * @return array<string, InternalServerDescription>
+     */
+    private static function filterByType(array $servers, string $type): array
+    {
+        return array_filter($servers, static fn (InternalServerDescription $sd) => $sd->type === $type);
+    }
+
+    /**
+     * Select secondaries, apply tag-set filtering, then apply the latency window.
+     *
+     * @param array<string, InternalServerDescription> $servers
+     * @param array<array<string, string>>             $tagSets
+     * @return list<InternalServerDescription>
+     */
+    private static function selectSecondaries(array $servers, array $tagSets, int $localThresholdMs): array
+    {
+        $secondaries = self::filterByType($servers, InternalServerDescription::TYPE_RS_SECONDARY);
+        $tagged      = self::filterByTagSets($secondaries, $tagSets);
+        return array_values(self::filterByLatency($tagged, $localThresholdMs));
+    }
+
+    /**
+     * Filter servers by the given tag sets.
+     *
+     * An empty $tagSets list is treated as "match all".
+     * A server matches if it satisfies *at least one* tag set (a tag set is
+     * satisfied when the server has *all* tags in that set).
+     *
+     * @param array<string, InternalServerDescription> $servers
+     * @param array<array<string, string>>             $tagSets
+     * @return array<string, InternalServerDescription>
+     */
+    private static function filterByTagSets(array $servers, array $tagSets): array
+    {
+        if ($tagSets === []) {
+            return $servers;
+        }
+
+        return array_filter(
+            $servers,
+            static function (InternalServerDescription $sd) use ($tagSets): bool {
+                foreach ($tagSets as $tagSet) {
+                    if (self::serverMatchesTagSet($sd, $tagSet)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        );
+    }
+
+    /**
+     * Return true when $sd has every key→value pair in $tagSet.
+     *
+     * @param array<string, string> $tagSet
+     */
+    private static function serverMatchesTagSet(InternalServerDescription $sd, array $tagSet): bool
+    {
+        foreach ($tagSet as $key => $value) {
+            if (!isset($sd->tags[$key]) || $sd->tags[$key] !== $value) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Apply the latency window: keep only servers within
+     *   min(RTT across candidates) + $localThresholdMs
+     *
+     * Servers with no RTT measurement are excluded.
+     *
+     * @param array<string, InternalServerDescription> $servers
+     * @return array<string, InternalServerDescription>
+     */
+    private static function filterByLatency(array $servers, int $localThresholdMs): array
+    {
+        // Collect servers that have a measured RTT.
+        $withRtt = array_filter(
+            $servers,
+            static fn (InternalServerDescription $sd) => $sd->roundTripTimeMs !== null
+        );
+
+        if ($withRtt === []) {
+            return $servers; // No RTT data: cannot filter, return all candidates.
+        }
+
+        $minRtt = min(
+            array_map(
+                static fn (InternalServerDescription $sd) => $sd->roundTripTimeMs,
+                $withRtt
+            )
+        );
+
+        $threshold = $minRtt + $localThresholdMs;
+
+        return array_filter(
+            $withRtt,
+            static fn (InternalServerDescription $sd) => $sd->roundTripTimeMs <= $threshold
+        );
+    }
+}

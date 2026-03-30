@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Read(//Users/jerome/Develop/one-shot-workplaces/mongodb-driver-revoltphp/**)",
+      "Bash(done)",
+      "Bash(php -l /Users/jerome/Develop/one-shot-workplaces/mongodb-driver-revoltphp/src/Driver/Exception/Exception.php)",
+      "Bash(php -l /Users/jerome/Develop/one-shot-workplaces/mongodb-driver-revoltphp/src/Driver/Exception/ServerException.php)",
+      "Bash(php -l /Users/jerome/Develop/one-shot-workplaces/mongodb-driver-revoltphp/src/Driver/ReadPreference.php)",
+      "Bash(php -l /Users/jerome/Develop/one-shot-workplaces/mongodb-driver-revoltphp/src/Driver/BulkWrite.php)",
+      "Bash(php -l /Users/jerome/Develop/one-shot-workplaces/mongodb-driver-revoltphp/src/Driver/Server.php)",
+      "Bash(php -l src/Internal/BSON/BsonEncoder.php)",
+      "Bash(php -l src/Internal/BSON/BsonDecoder.php)",
+      "Bash(php -l src/Internal/BSON/TypeMapper.php)",
+      "Bash(php -l src/Internal/BSON/ExtendedJson.php)",
+      "Bash(php -l src/Internal/Protocol/MessageHeader.php)",
+      "Bash(php -l src/Internal/Protocol/RequestIdGenerator.php)",
+      "Bash(php -l src/Internal/Protocol/OpMsgEncoder.php)",
+      "Bash(php -l src/Internal/Protocol/OpMsgDecoder.php)",
+      "Bash(php -l src/Internal/Connection/Connection.php)",
+      "Bash(do)",
+      "Bash(echo -n \"$f: \")",
+      "Bash(php -l \"$f\")",
+      "Bash(php:*)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(grep -v \"^/Users/jerome/Develop/one-shot-workplaces/mongodb-driver-revoltphp$\")",
+      "Bash(composer install:*)",
+      "Bash(./vendor/bin/phpunit --testdox --testsuite unit 2>&1)",
+      "Bash(PHP_INI_SCAN_DIR=\"\" php --ri mongodb 2>&1)",
+      "Bash(PHP_INI_SCAN_DIR=\"\" ./vendor/bin/phpunit --testdox --testsuite unit 2>&1)",
+      "Bash(grep:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
