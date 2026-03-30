@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * Tests that cannot be made compliant in a pure-PHP userland driver.
  *
- * The map is keyed by the test path relative to .refs/mongo-php-driver/tests/
+ * The map is keyed by the test path relative to tests/references/mongo-php-driver/tests/
  * and the value is the human-readable reason the test is skipped.
  *
  * Two categories of tests are permanently impossible:
