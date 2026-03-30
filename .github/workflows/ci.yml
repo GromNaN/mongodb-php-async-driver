@@ -48,9 +48,14 @@ jobs:
         with:
           submodules: true
 
+      - name: Install latest Python version
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
       - name: Set up MongoDB
         id: setup-mongodb
-        uses: ./tests/drivers-evergreen-tools
+        uses: mongodb-labs/drivers-evergreen-tools@master
         with:
           version: ${{ matrix.mongodb }}
 
@@ -85,9 +90,14 @@ jobs:
         with:
           submodules: true
 
+      - name: Install latest Python version
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
       - name: Set up MongoDB
         id: setup-mongodb
-        uses: ./tests/drivers-evergreen-tools
+        uses: mongodb-labs/drivers-evergreen-tools@master
         with:
           version: ${{ matrix.mongodb }}
 
@@ -123,9 +133,14 @@ jobs:
         with:
           submodules: true
 
+      - name: Install latest Python version
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
       - name: Set up MongoDB
         id: setup-mongodb
-        uses: ./tests/drivers-evergreen-tools
+        uses: mongodb-labs/drivers-evergreen-tools@master
         with:
           version: ${{ matrix.mongodb }}
 
