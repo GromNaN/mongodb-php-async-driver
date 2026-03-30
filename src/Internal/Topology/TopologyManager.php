@@ -86,7 +86,7 @@ final class TopologyManager
         foreach ($this->seeds as $seed) {
             $host    = $seed['host'];
             $port    = (int) ($seed['port'] ?? 27017);
-            $address = "{$host}:{$port}";
+            $address = $host . ':' . $port;
 
             // Register an Unknown placeholder so selectServer can tell the server exists.
             $this->servers[$address] = new InternalServerDescription(

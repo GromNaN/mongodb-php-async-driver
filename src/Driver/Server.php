@@ -36,6 +36,7 @@ final class Server
     }
 
     /** @internal Creates a new Server instance. */
+    // phpcs:ignore PSR2.Methods.MethodDeclaration.Underscore
     public static function _createFromInternal(
         string $host,
         int $port,

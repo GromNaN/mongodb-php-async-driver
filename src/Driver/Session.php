@@ -35,6 +35,7 @@ final class Session
     }
 
     /** @internal Creates a new Session instance. */
+    // phpcs:ignore PSR2.Methods.MethodDeclaration.Underscore
     public static function _createFromInternal(
         object $logicalSessionId,
         ?object $clusterTime = null,

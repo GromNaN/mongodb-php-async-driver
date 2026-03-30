@@ -29,6 +29,7 @@ final class WriteConcern implements Serializable
     }
 
     /** @internal Create a WriteConcern that reports isDefault() = true (driver default, not user-specified). */
+    // phpcs:ignore PSR2.Methods.MethodDeclaration.Underscore
     public static function _createDefault(): self
     {
         $wc = new self(1);

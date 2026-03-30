@@ -590,7 +590,7 @@ final class OperationExecutor
      */
     private function getOrCreatePool(string $host, int $port): ConnectionPool
     {
-        $address = "{$host}:{$port}";
+        $address = $host . ':' . $port;
 
         if (! isset($this->pools[$address])) {
             $this->pools[$address] = new ConnectionPool(
@@ -709,7 +709,7 @@ final class OperationExecutor
         $pos = strpos($namespace, '.');
         if ($pos === false) {
             throw new DriverRuntimeException(
-                "Invalid namespace \"{$namespace}\": missing dot separator",
+                'Invalid namespace "' . $namespace . '": missing dot separator',
             );
         }
 

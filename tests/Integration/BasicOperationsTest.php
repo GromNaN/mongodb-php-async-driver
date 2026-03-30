@@ -48,10 +48,6 @@ class BasicOperationsTest extends TestCase
         );
     }
 
-    // -------------------------------------------------------------------------
-    // Tests
-    // -------------------------------------------------------------------------
-
     public function testPing(): void
     {
         $cursor = $this->manager->executeCommand(
@@ -70,11 +66,11 @@ class BasicOperationsTest extends TestCase
     {
         $bw  = new BulkWrite();
         $id  = $bw->insert(['name' => 'Alice', 'age' => 30]);
-        $this->manager->executeBulkWrite("{$this->dbName}.{$this->collection}", $bw);
+        $this->manager->executeBulkWrite($this->dbName . '.' . $this->collection, $bw);
 
         $query  = new Query(['_id' => $id]);
         $cursor = $this->manager->executeQuery(
-            "{$this->dbName}.{$this->collection}",
+            $this->dbName . '.' . $this->collection,
             $query,
             ['readPreference' => new ReadPreference(ReadPreference::PRIMARY)],
         );
@@ -92,18 +88,18 @@ class BasicOperationsTest extends TestCase
         // Insert a document
         $bw = new BulkWrite();
         $id = $bw->insert(['counter' => 0]);
-        $this->manager->executeBulkWrite("{$this->dbName}.{$this->collection}", $bw);
+        $this->manager->executeBulkWrite($this->dbName . '.' . $this->collection, $bw);
 
         // Update it
         $bw2 = new BulkWrite();
         $bw2->update(['_id' => $id], ['$set' => ['counter' => 42]]);
-        $result = $this->manager->executeBulkWrite("{$this->dbName}.{$this->collection}", $bw2);
+        $result = $this->manager->executeBulkWrite($this->dbName . '.' . $this->collection, $bw2);
 
         $this->assertSame(1, $result->getModifiedCount());
 
         // Verify
         $cursor  = $this->manager->executeQuery(
-            "{$this->dbName}.{$this->collection}",
+            $this->dbName . '.' . $this->collection,
             new Query(['_id' => $id]),
         );
         $results = iterator_to_array($cursor);
@@ -116,17 +112,17 @@ class BasicOperationsTest extends TestCase
         // Insert then delete
         $bw = new BulkWrite();
         $id = $bw->insert(['x' => 1]);
-        $this->manager->executeBulkWrite("{$this->dbName}.{$this->collection}", $bw);
+        $this->manager->executeBulkWrite($this->dbName . '.' . $this->collection, $bw);
 
         $bw2 = new BulkWrite();
         $bw2->delete(['_id' => $id]);
-        $result = $this->manager->executeBulkWrite("{$this->dbName}.{$this->collection}", $bw2);
+        $result = $this->manager->executeBulkWrite($this->dbName . '.' . $this->collection, $bw2);
 
         $this->assertSame(1, $result->getDeletedCount());
 
         // Verify the document is gone
         $cursor  = $this->manager->executeQuery(
-            "{$this->dbName}.{$this->collection}",
+            $this->dbName . '.' . $this->collection,
             new Query(['_id' => $id]),
         );
         $results = iterator_to_array($cursor);
@@ -139,7 +135,7 @@ class BasicOperationsTest extends TestCase
         $bw->insert(['n' => 1]);
         $bw->insert(['n' => 2]);
         $bw->insert(['n' => 3]);
-        $this->manager->executeBulkWrite("{$this->dbName}.{$this->collection}", $bw);
+        $this->manager->executeBulkWrite($this->dbName . '.' . $this->collection, $bw);
 
         $cursor  = $this->manager->executeCommand(
             $this->dbName,

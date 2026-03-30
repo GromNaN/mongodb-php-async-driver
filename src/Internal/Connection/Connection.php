@@ -66,7 +66,7 @@ final class Connection
     public function connect(?UriOptions $options = null): void
     {
         $this->state  = self::STATE_CONNECTING;
-        $uri          = "tcp://{$this->host}:{$this->port}";
+        $uri          = 'tcp://' . $this->host . ':' . $this->port;
 
         // amphp/socket connect() suspends the fiber internally.
         $this->socket = connect($uri);

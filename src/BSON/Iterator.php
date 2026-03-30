@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
+use Iterator as IteratorInterface;
+
 use function array_keys;
 
 /**
@@ -13,7 +15,7 @@ use function array_keys;
  * {@see self::_createFromDecodedData()}.  The constructor is private to
  * prevent userland instantiation.
  */
-final class Iterator implements \Iterator
+final class Iterator implements IteratorInterface
 {
     /** @var list<string|int> Ordered list of keys. */
     private array $keys;
@@ -42,6 +44,7 @@ final class Iterator implements \Iterator
      *
      * @param array<string|int, mixed> $data
      */
+    // phpcs:ignore PSR2.Methods.MethodDeclaration.Underscore
     public static function _createFromDecodedData(array $data): static
     {
         return new static($data);

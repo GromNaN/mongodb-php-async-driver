@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver\Exception;
 
-class RuntimeException extends \RuntimeException implements Exception
+use RuntimeException as BaseRuntimeException;
+
+class RuntimeException extends BaseRuntimeException implements Exception
 {
 }

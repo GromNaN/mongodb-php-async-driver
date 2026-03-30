@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver\Exception;
 
-class LogicException extends \LogicException implements Exception
+use LogicException as BaseLogicException;
+
+class LogicException extends BaseLogicException implements Exception
 {
 }

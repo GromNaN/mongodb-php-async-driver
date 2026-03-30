@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
+use InvalidArgumentException as PhpInvalidArgumentException;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Exception\RuntimeException;
 use MongoDB\Driver\Monitoring\Subscriber;
@@ -42,7 +43,7 @@ final class Manager
 
         try {
             $this->connectionString = new ConnectionString($uri);
-        } catch (\InvalidArgumentException $e) {
+        } catch (PhpInvalidArgumentException $e) {
             throw new InvalidArgumentException($e->getMessage(), 0, $e);
         }
 

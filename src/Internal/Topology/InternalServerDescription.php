@@ -118,7 +118,7 @@ final class InternalServerDescription
      */
     public function getAddress(): string
     {
-        return "{$this->host}:{$this->port}";
+        return $this->host . ':' . $this->port;
     }
 
     // -----------------------------------------------------------------

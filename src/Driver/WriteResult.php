@@ -30,6 +30,7 @@ final class WriteResult
      * @internal Creates a new WriteResult instance.
      * Used by \MongoDB\Internal\WriteResult\WriteResultFactory
      */
+    // phpcs:ignore PSR2.Methods.MethodDeclaration.Underscore
     public static function _createFromInternal(
         int $insertedCount,
         int $matchedCount,
