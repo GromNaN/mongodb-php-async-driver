@@ -54,14 +54,14 @@ class PhptRunnerTest extends TestCase
     public static function setUpBeforeClass(): void
     {
         self::$prependFile = __DIR__ . '/prepend.php';
-        self::$phptRoot    = dirname(__DIR__, 2) . '/.refs/mongo-php-driver/tests';
+        self::$phptRoot    = dirname(__DIR__) . '/references/mongo-php-driver/tests';
         self::$skipList    = require __DIR__ . '/skip_list.php';
     }
 
     /** @return Generator<string, array{string}> */
     public static function phptFiles(): Generator
     {
-        $root     = dirname(__DIR__, 2) . '/.refs/mongo-php-driver/tests';
+        $root     = dirname(__DIR__) . '/references/mongo-php-driver/tests';
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root));
 
         foreach ($iterator as $file) {

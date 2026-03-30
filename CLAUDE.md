@@ -14,6 +14,9 @@ PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox --testsuite unit
 
 # Integration tests (MongoDB on localhost:27017)
 PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox --testsuite integration
+
+# ext-mongodb phpt compatibility tests
+PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox --testsuite phpt
 ```
 
 Run tests after every non-trivial change. Commit only when all tests pass.
@@ -51,11 +54,13 @@ src/bootstrap.php            Global Monitoring functions (not autoloadable)
 
 ## References
 
+Git submodules in `tests/references/` — initialise with `git submodule update --init`:
+
 | What | Where |
 |---|---|
-| Driver API stubs | `.refs/mongo-php-driver/src/MongoDB/*.stub.php` and `.refs/mongo-php-driver/src/BSON/*.stub.php` |
-| High-level library | `.refs/mongo-php-library/src/` |
-| Client specifications | `.refs/specifications/source/` (BSON, OP_MSG, SDAM, Server Selection, Auth, Sessions, …) |
+| Driver API stubs | `tests/references/mongo-php-driver/src/MongoDB/*.stub.php` and `tests/references/mongo-php-driver/src/BSON/*.stub.php` |
+| High-level library | `tests/references/mongo-php-library/src/` |
+| Client specifications | `tests/references/specifications/source/` (BSON, OP_MSG, SDAM, Server Selection, Auth, Sessions, …) |
 
 ## Common pitfalls
 

@@ -1,6 +1,5 @@
 .claude
-.refs/*
-!.refs/README.md
+.refs
 .phpcs-cache
 .phpunit.result.cache
 composer.lock

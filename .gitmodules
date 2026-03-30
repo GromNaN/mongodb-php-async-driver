@@ -1,0 +1,12 @@
+[submodule "tests/references/mongo-php-driver"]
+	path = tests/references/mongo-php-driver
+	url = https://github.com/mongodb/mongo-php-driver
+	shallow = true
+[submodule "tests/references/mongo-php-library"]
+	path = tests/references/mongo-php-library
+	url = https://github.com/mongodb/mongo-php-library
+	shallow = true
+[submodule "tests/references/specifications"]
+	path = tests/references/specifications
+	url = https://github.com/mongodb/specifications
+	shallow = true

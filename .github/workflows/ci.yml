@@ -6,28 +6,75 @@ on:
   pull_request:
 
 jobs:
-  test-unit:
+  # ---------------------------------------------------------------------------
+  # Driver unit tests — no database, no submodules needed
+  # ---------------------------------------------------------------------------
+  unit:
     name: Unit Tests (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        php: ['8.4']
+        php: ['8.4', '8.5']
     steps:
       - uses: actions/checkout@v4
-      - name: Setup PHP (no ext-mongodb)
+
+      - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
           extensions: intl, mbstring
-          # intentionally no mongodb extension
           tools: composer:v2
           coverage: none
+
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
-      - name: Run unit tests
-        run: vendor/bin/phpunit --testsuite unit
 
-  test-integration:
+      - name: Run unit tests
+        run: PHP_INI_SCAN_DIR="" vendor/bin/phpunit --testsuite unit
+
+  # ---------------------------------------------------------------------------
+  # Driver phpt compatibility tests — runs the ext-mongodb .phpt suite against
+  # our userland driver; requires the mongo-php-driver submodule
+  # ---------------------------------------------------------------------------
+  phpt:
+    name: phpt Compatibility Tests (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.4']
+    services:
+      mongodb:
+        image: mongo:8.0
+        ports:
+          - 27017:27017
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: intl, mbstring
+          tools: composer:v2
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Wait for MongoDB
+        run: sleep 5
+
+      - name: Run phpt tests
+        run: PHP_INI_SCAN_DIR="" vendor/bin/phpunit --testsuite phpt
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017
+
+  # ---------------------------------------------------------------------------
+  # Driver integration tests — needs a running MongoDB instance
+  # ---------------------------------------------------------------------------
+  integration:
     name: Integration Tests (PHP ${{ matrix.php }}, MongoDB ${{ matrix.mongodb }})
     runs-on: ubuntu-latest
     strategy:
@@ -41,18 +88,81 @@ jobs:
           - 27017:27017
     steps:
       - uses: actions/checkout@v4
-      - name: Setup PHP (no ext-mongodb)
+
+      - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
           extensions: intl, mbstring
           tools: composer:v2
           coverage: none
+
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
+
       - name: Wait for MongoDB
         run: sleep 5
+
       - name: Run integration tests
-        run: vendor/bin/phpunit --testsuite integration
+        run: PHP_INI_SCAN_DIR="" vendor/bin/phpunit --testsuite integration
         env:
           MONGODB_URI: mongodb://127.0.0.1:27017
+
+  # ---------------------------------------------------------------------------
+  # Library tests — runs the mongodb/mongodb test suite against our driver;
+  # requires the mongo-php-library submodule and a running MongoDB instance
+  # ---------------------------------------------------------------------------
+  library:
+    name: Library Tests (PHP ${{ matrix.php }}, MongoDB ${{ matrix.mongodb }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.4']
+        mongodb: ['7.0', '8.0']
+    services:
+      mongodb:
+        image: mongo:${{ matrix.mongodb }}
+        ports:
+          - 27017:27017
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: intl, mbstring
+          tools: composer:v2
+          coverage: none
+
+      - name: Install driver dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Configure library to use userland driver
+        # The upstream library requires ext-mongodb; replace it with our
+        # driver package and add a path repository pointing to the driver root.
+        run: |
+          composer -d tests/references/mongo-php-library config --unset require.ext-mongodb
+          composer -d tests/references/mongo-php-library config \
+            repositories.driver \
+            '{"type":"path","url":"../../..","options":{"symlink":true}}'
+          composer -d tests/references/mongo-php-library \
+            require --no-update mongodb/mongodb-driver-revoltphp:@dev
+
+      - name: Install library dependencies
+        # --no-scripts avoids running "git submodule update" inside the submodule
+        run: |
+          composer -d tests/references/mongo-php-library install \
+            --no-interaction --prefer-dist --no-scripts
+
+      - name: Wait for MongoDB
+        run: sleep 5
+
+      - name: Run library tests
+        working-directory: tests/references/mongo-php-library
+        run: PHP_INI_SCAN_DIR="" vendor/bin/phpunit
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017
+          MONGODB_DATABASE: phplib_test
