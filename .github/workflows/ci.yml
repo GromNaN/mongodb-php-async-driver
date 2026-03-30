@@ -11,7 +11,7 @@ jobs:
   # ---------------------------------------------------------------------------
   unit:
     name: Unit Tests (PHP ${{ matrix.php }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         php: ['8.4', '8.5']
@@ -38,7 +38,7 @@ jobs:
   # ---------------------------------------------------------------------------
   phpt:
     name: phpt Compatibility Tests (PHP ${{ matrix.php }}, MongoDB ${{ matrix.mongodb }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         php: ['8.4']
@@ -80,7 +80,7 @@ jobs:
   # ---------------------------------------------------------------------------
   integration:
     name: Integration Tests (PHP ${{ matrix.php }}, MongoDB ${{ matrix.mongodb }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         php: ['8.4']
@@ -123,7 +123,7 @@ jobs:
   # ---------------------------------------------------------------------------
   library:
     name: Library Tests (PHP ${{ matrix.php }}, MongoDB ${{ matrix.mongodb }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         php: ['8.4']
