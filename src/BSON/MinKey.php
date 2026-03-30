@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-final class MinKey implements MinKeyInterface, \JsonSerializable, Type
+use JsonSerializable;
+
+final class MinKey implements MinKeyInterface, JsonSerializable, Type
 {
     // ------------------------------------------------------------------
     // JsonSerializable

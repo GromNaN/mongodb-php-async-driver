@@ -4,11 +4,17 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Operation;
 
+use InvalidArgumentException;
 use MongoDB\Driver\ReadConcern;
 use MongoDB\Driver\ReadPreference;
 use MongoDB\Driver\ServerApi;
 use MongoDB\Driver\Session;
 use MongoDB\Driver\WriteConcern;
+
+use function array_key_first;
+use function is_array;
+use function is_object;
+use function lcfirst;
 
 /**
  * Utility class for preparing MongoDB command documents before wire transmission.
@@ -25,7 +31,6 @@ final class CommandHelper
     // Command name sets
     // -----------------------------------------------------------------
 
-    /** @var array<string, true> */
     private const WRITE_COMMANDS = [
         'insert'              => true,
         'update'              => true,
@@ -46,7 +51,6 @@ final class CommandHelper
         'dropSearchIndex'     => true,
     ];
 
-    /** @var array<string, true> */
     private const READ_COMMANDS = [
         'find'            => true,
         'aggregate'       => true,
@@ -72,25 +76,25 @@ final class CommandHelper
      * The returned array is ready for BSON encoding and wire transmission.
      * The source $command is not mutated.
      *
-     * @param array|object          $command       Raw command document.
-     * @param string                $db            Target database name.
-     * @param ReadPreference|null   $readPreference If non-primary and topology is
-     *                                              not Single, injected as `$readPreference`.
-     * @param ReadConcern|null      $readConcern    Injected only when not default.
-     * @param WriteConcern|null     $writeConcern   Injected only when not default.
-     * @param Session|null          $session        Provides `lsid`.
-     * @param ServerApi|null        $serverApi      Provides `apiVersion` + optional fields.
+     * @param array|object        $command        Raw command document.
+     * @param string              $db             Target database name.
+     * @param ReadPreference|null $readPreference If non-primary and topology is
+     *                                            not Single, injected as `$readPreference`.
+     * @param ReadConcern|null    $readConcern    Injected only when not default.
+     * @param WriteConcern|null   $writeConcern   Injected only when not default.
+     * @param Session|null        $session        Provides `lsid`.
+     * @param ServerApi|null      $serverApi      Provides `apiVersion` + optional fields.
      *
      * @return array The normalised, fully-decorated command document.
      */
     public static function prepareCommand(
-        array|object   $command,
-        string         $db,
+        array|object $command,
+        string $db,
         ?ReadPreference $readPreference = null,
-        ?ReadConcern   $readConcern    = null,
-        ?WriteConcern  $writeConcern   = null,
-        ?Session       $session        = null,
-        ?ServerApi     $serverApi      = null,
+        ?ReadConcern $readConcern = null,
+        ?WriteConcern $writeConcern = null,
+        ?Session $session = null,
+        ?ServerApi $serverApi = null,
     ): array {
         // 1. Normalise to array.
         $doc = is_array($command) ? $command : (array) $command;
@@ -101,7 +105,8 @@ final class CommandHelper
         // 3. Read preference — inject only for non-primary preferences and only
         //    when the topology is not Single (caller is responsible for the
         //    topology check; we encode when the object is provided and non-primary).
-        if ($readPreference !== null
+        if (
+            $readPreference !== null
             && $readPreference->getModeString() !== ReadPreference::PRIMARY
         ) {
             $rpDoc = ['mode' => $readPreference->getModeString()];
@@ -125,16 +130,17 @@ final class CommandHelper
         }
 
         // 4. Read concern — skip when default (null level).
-        if ($readConcern !== null && !$readConcern->isDefault()) {
+        if ($readConcern !== null && ! $readConcern->isDefault()) {
             $rcDoc = [];
             if ($readConcern->getLevel() !== null) {
                 $rcDoc['level'] = $readConcern->getLevel();
             }
+
             $doc['readConcern'] = $rcDoc;
         }
 
         // 5. Write concern — skip when default (w:1, j:null, wtimeout:0).
-        if ($writeConcern !== null && !$writeConcern->isDefault()) {
+        if ($writeConcern !== null && ! $writeConcern->isDefault()) {
             $wcDoc = ['w' => $writeConcern->getW()];
 
             if ($writeConcern->getWtimeout() !== 0) {
@@ -190,7 +196,7 @@ final class CommandHelper
     /**
      * Extract the command name (i.e. the key of the first element).
      *
-     * @throws \InvalidArgumentException if the document is empty.
+     * @throws InvalidArgumentException if the document is empty.
      */
     public static function getCommandName(array|object $command): string
     {
@@ -199,7 +205,7 @@ final class CommandHelper
         }
 
         if ($command === []) {
-            throw new \InvalidArgumentException('Command document must not be empty');
+            throw new InvalidArgumentException('Command document must not be empty');
         }
 
         return (string) array_key_first($command);

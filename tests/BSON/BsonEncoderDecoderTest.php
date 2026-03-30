@@ -16,6 +16,8 @@ use MongoDB\Internal\BSON\BsonEncoder;
 use PHPUnit\Framework\TestCase;
 use stdClass;
 
+use const PHP_INT_MAX;
+
 class BsonEncoderDecoderTest extends TestCase
 {
     // -------------------------------------------------------------------------
@@ -24,14 +26,12 @@ class BsonEncoderDecoderTest extends TestCase
 
     /**
      * Encode $doc then decode it back to an array.
-     *
-     * @param array|object $doc
-     * @return array
      */
     private function roundTrip(array|object $doc): array
     {
         $bson   = BsonEncoder::encode($doc);
         $result = BsonDecoder::decode($bson, ['root' => 'array', 'document' => 'array', 'array' => 'array']);
+
         return (array) $result;
     }
 

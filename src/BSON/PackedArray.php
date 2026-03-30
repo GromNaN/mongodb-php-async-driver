@@ -4,6 +4,25 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
+use ArrayAccess;
+use BadMethodCallException;
+use IteratorAggregate;
+use MongoDB\Internal\BSON\BsonDecoder;
+use MongoDB\Internal\BSON\BsonEncoder;
+use MongoDB\Internal\BSON\ExtendedJson;
+use RuntimeException;
+use Stringable;
+
+use function array_key_exists;
+use function array_values;
+use function base64_decode;
+use function base64_encode;
+use function is_array;
+use function json_decode;
+use function sprintf;
+
+use const JSON_THROW_ON_ERROR;
+
 /**
  * Represents a BSON array (packed array – keys must be sequential integers
  * starting at 0).
@@ -15,7 +34,7 @@ namespace MongoDB\BSON;
  *
  * The constructor is private; the class is immutable once created.
  */
-final class PackedArray implements \IteratorAggregate, \ArrayAccess, Type, \Stringable
+final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringable
 {
     /** Raw BSON bytes. Lazily populated by encoder when created from PHP. */
     private ?string $bson;
@@ -79,8 +98,8 @@ final class PackedArray implements \IteratorAggregate, \ArrayAccess, Type, \Stri
     {
         $decoded = $this->decode();
 
-        if (!array_key_exists($index, $decoded)) {
-            throw new \RuntimeException(
+        if (! array_key_exists($index, $decoded)) {
+            throw new RuntimeException(
                 sprintf('Index %d does not exist in the packed array.', $index),
             );
         }
@@ -99,17 +118,17 @@ final class PackedArray implements \IteratorAggregate, \ArrayAccess, Type, \Stri
      */
     public function toPHP(?array $typeMap = null): array|object
     {
-        return \MongoDB\Internal\BSON\BsonDecoder::decode($this->getBson(), $typeMap ?? []);
+        return BsonDecoder::decode($this->getBson(), $typeMap ?? []);
     }
 
     public function toCanonicalExtendedJSON(): string
     {
-        return \MongoDB\Internal\BSON\ExtendedJson::toCanonical(\MongoDB\Internal\BSON\BsonDecoder::decode($this->getBson(), ['root' => 'array']));
+        return ExtendedJson::toCanonical(BsonDecoder::decode($this->getBson(), ['root' => 'array']));
     }
 
     public function toRelaxedExtendedJSON(): string
     {
-        return \MongoDB\Internal\BSON\ExtendedJson::toRelaxed(\MongoDB\Internal\BSON\BsonDecoder::decode($this->getBson(), ['root' => 'array']));
+        return ExtendedJson::toRelaxed(BsonDecoder::decode($this->getBson(), ['root' => 'array']));
     }
 
     // ------------------------------------------------------------------
@@ -147,12 +166,12 @@ final class PackedArray implements \IteratorAggregate, \ArrayAccess, Type, \Stri
 
     public function offsetSet(mixed $offset, mixed $value): void
     {
-        throw new \BadMethodCallException('MongoDB\BSON\PackedArray is immutable and does not support offsetSet().');
+        throw new BadMethodCallException('MongoDB\BSON\PackedArray is immutable and does not support offsetSet().');
     }
 
     public function offsetUnset(mixed $offset): void
     {
-        throw new \BadMethodCallException('MongoDB\BSON\PackedArray is immutable and does not support offsetUnset().');
+        throw new BadMethodCallException('MongoDB\BSON\PackedArray is immutable and does not support offsetUnset().');
     }
 
     // ------------------------------------------------------------------
@@ -180,7 +199,7 @@ final class PackedArray implements \IteratorAggregate, \ArrayAccess, Type, \Stri
     private function getBson(): string
     {
         if ($this->bson === null) {
-            $this->bson = \MongoDB\Internal\BSON\BsonEncoder::encodeArray($this->decoded ?? []);
+            $this->bson = BsonEncoder::encodeArray($this->decoded ?? []);
         }
 
         return $this->bson;
@@ -195,7 +214,7 @@ final class PackedArray implements \IteratorAggregate, \ArrayAccess, Type, \Stri
     {
         if ($this->decoded === null) {
             $this->decoded = array_values(
-                (array) \MongoDB\Internal\BSON\BsonDecoder::decode($this->bson, ['root' => 'array']),
+                (array) BsonDecoder::decode($this->bson, ['root' => 'array']),
             );
         }
 

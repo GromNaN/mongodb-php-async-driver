@@ -1,6 +1,9 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver\Monitoring;
+
+use MongoDB\Driver\ServerDescription;
 
 final class ServerChangedEvent
 {
@@ -8,9 +11,10 @@ final class ServerChangedEvent
         private readonly string $host,
         private readonly int $port,
         private readonly string $topologyId,
-        private readonly \MongoDB\Driver\ServerDescription $previousDescription,
-        private readonly \MongoDB\Driver\ServerDescription $newDescription,
-    ) {}
+        private readonly ServerDescription $previousDescription,
+        private readonly ServerDescription $newDescription,
+    ) {
+    }
 
     public function getHost(): string
     {
@@ -27,12 +31,12 @@ final class ServerChangedEvent
         return $this->topologyId;
     }
 
-    public function getPreviousDescription(): \MongoDB\Driver\ServerDescription
+    public function getPreviousDescription(): ServerDescription
     {
         return $this->previousDescription;
     }
 
-    public function getNewDescription(): \MongoDB\Driver\ServerDescription
+    public function getNewDescription(): ServerDescription
     {
         return $this->newDescription;
     }

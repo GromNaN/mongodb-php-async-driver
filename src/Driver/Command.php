@@ -1,15 +1,14 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
 final class Command
 {
-    private array|object $document;
     private array $options;
 
-    public function __construct(array|object $document, ?array $commandOptions = null)
+    public function __construct(private array|object $document, ?array $commandOptions = null)
     {
-        $this->document = $document;
         $this->options = $commandOptions ?? [];
     }
 

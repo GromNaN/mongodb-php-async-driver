@@ -5,6 +5,16 @@ declare(strict_types=1);
 namespace MongoDB\Internal\Session;
 
 use MongoDB\BSON\Binary;
+use stdClass;
+
+use function array_filter;
+use function array_pop;
+use function array_values;
+use function chr;
+use function max;
+use function ord;
+use function random_bytes;
+use function time;
 
 /**
  * Server-session pool.
@@ -54,7 +64,7 @@ final class SessionPool
         while ($this->pool !== []) {
             $entry = array_pop($this->pool);
 
-            if (!$this->isExpired($entry->lastUse)) {
+            if (! $this->isExpired($entry->lastUse)) {
                 return $entry->lsid;
             }
             // Discard expired session and try the next one.
@@ -71,7 +81,7 @@ final class SessionPool
      */
     public function release(object $lsid): void
     {
-        $entry = new \stdClass();
+        $entry = new stdClass();
         $entry->lsid    = $lsid;
         $entry->lastUse = time();
 
@@ -86,8 +96,8 @@ final class SessionPool
         $this->pool = array_values(
             array_filter(
                 $this->pool,
-                fn (object $entry): bool => !$this->isExpired($entry->lastUse)
-            )
+                fn (object $entry): bool => ! $this->isExpired($entry->lastUse),
+            ),
         );
     }
 
@@ -121,7 +131,7 @@ final class SessionPool
         $bytes[6] = chr((ord($bytes[6]) & 0x0F) | 0x40); // version 4
         $bytes[8] = chr((ord($bytes[8]) & 0x3F) | 0x80); // variant bits
 
-        $lsid     = new \stdClass();
+        $lsid     = new stdClass();
         $lsid->id = new Binary($bytes, Binary::TYPE_UUID);
 
         return $lsid;
@@ -135,8 +145,8 @@ final class SessionPool
      */
     private function isExpired(int $lastUse): bool
     {
-        $timeoutSeconds = max(0, ($this->sessionTimeoutMinutes - 1)) * 60;
+        $timeoutSeconds = max(0, $this->sessionTimeoutMinutes - 1) * 60;
 
-        return (time() - $lastUse) >= $timeoutSeconds;
+        return time() - $lastUse >= $timeoutSeconds;
     }
 }

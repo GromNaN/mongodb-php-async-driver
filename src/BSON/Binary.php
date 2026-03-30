@@ -4,7 +4,15 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-final class Binary implements BinaryInterface, \JsonSerializable, Type, \Stringable
+use InvalidArgumentException;
+use JsonSerializable;
+use Stringable;
+
+use function base64_decode;
+use function base64_encode;
+use function sprintf;
+
+final class Binary implements BinaryInterface, JsonSerializable, Type, Stringable
 {
     public const TYPE_GENERIC      = 0;
     public const TYPE_FUNCTION     = 1;
@@ -18,19 +26,13 @@ final class Binary implements BinaryInterface, \JsonSerializable, Type, \Stringa
     public const TYPE_VECTOR       = 9;
     public const TYPE_USER_DEFINED = 128;
 
-    private string $data;
-    private int    $type;
-
-    public function __construct(string $data, int $type = self::TYPE_GENERIC)
+    public function __construct(private string $data, private int $type = self::TYPE_GENERIC)
     {
         if ($type < 0 || $type > 255) {
-            throw new \InvalidArgumentException(
+            throw new InvalidArgumentException(
                 sprintf('Binary type must be between 0 and 255, %d given.', $type),
             );
         }
-
-        $this->data = $data;
-        $this->type = $type;
     }
 
     // ------------------------------------------------------------------

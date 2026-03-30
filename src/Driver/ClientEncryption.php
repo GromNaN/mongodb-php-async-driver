@@ -1,4 +1,5 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
@@ -6,7 +7,9 @@ use MongoDB\Driver\Exception\RuntimeException;
 
 final class ClientEncryption
 {
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 
     public function addKeyAltName(Binary $keyId, string $keyAltName): ?object
     {

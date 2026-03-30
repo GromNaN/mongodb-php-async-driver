@@ -5,14 +5,20 @@ declare(strict_types=1);
 namespace MongoDB\Internal\Connection;
 
 use Amp\Socket\Socket;
+use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Driver\Exception\ConnectionException;
 use MongoDB\Internal\Protocol\MessageHeader;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
 use MongoDB\Internal\Uri\UriOptions;
-use RuntimeException;
 
 use function Amp\Socket\connect;
+use function is_array;
+use function min;
+use function sprintf;
+use function strlen;
+use function time;
+use function unpack;
 
 /**
  * A single async TCP connection to a MongoDB server.
@@ -32,17 +38,17 @@ final class Connection
 
     private Socket $socket;
     private string $state = self::STATE_CONNECTING;
-    private int    $maxWireVersion = 0;
-    private int    $minWireVersion = 0;
+    private int $maxWireVersion = 0;
+    private int $minWireVersion = 0;
     private ?string $serviceId     = null;
-    private int    $lastUsedAt;
+    private int $lastUsedAt;
 
     /**
      * Create a new (not yet connected) Connection.
      */
     public function __construct(
         private readonly string $host,
-        private readonly int    $port,
+        private readonly int $port,
     ) {
         $this->lastUsedAt = time();
     }
@@ -91,10 +97,11 @@ final class Connection
      *
      * @param string       $db      Target database name.
      * @param array|object $command Command document.
+     *
      * @return array|object Decoded response body.
      *
      * @throws ConnectionException on I/O errors.
-     * @throws \MongoDB\Driver\Exception\CommandException on server error (ok != 1).
+     * @throws CommandException on server error (ok != 1).
      */
     public function sendCommand(string $db, array|object $command): array|object
     {
@@ -139,7 +146,7 @@ final class Connection
 
         if ($messageLength < MessageHeader::HEADER_SIZE) {
             throw new ConnectionException(
-                sprintf('Received malformed message: length %d is too small', $messageLength)
+                sprintf('Received malformed message: length %d is too small', $messageLength),
             );
         }
 
@@ -192,12 +199,16 @@ final class Connection
 
     public function close(): void
     {
-        if ($this->state !== self::STATE_CLOSED) {
-            $this->state = self::STATE_CLOSED;
-            if (isset($this->socket)) {
-                $this->socket->close();
-            }
+        if ($this->state === self::STATE_CLOSED) {
+            return;
         }
+
+        $this->state = self::STATE_CLOSED;
+        if (! isset($this->socket)) {
+            return;
+        }
+
+        $this->socket->close();
     }
 
     public function getHost(): string
@@ -268,10 +279,11 @@ final class Connection
                         'Connection closed while reading: expected %d more bytes (got %d of %d)',
                         $remaining,
                         strlen($buffer),
-                        $length
-                    )
+                        $length,
+                    ),
                 );
             }
+
             $buffer    .= $chunk;
             $remaining -= strlen($chunk);
         }

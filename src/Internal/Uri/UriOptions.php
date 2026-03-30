@@ -4,7 +4,18 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Uri;
 
+use Closure;
 use InvalidArgumentException;
+
+use function array_key_exists;
+use function array_values;
+use function ctype_digit;
+use function get_debug_type;
+use function is_array;
+use function is_bool;
+use function is_int;
+use function is_string;
+use function sprintf;
 
 /**
  * Validated, strongly-typed DTO for MongoDB URI options.
@@ -119,19 +130,23 @@ final class UriOptions
         $self = new self();
 
         // ----- String options -------------------------------------------------
-        foreach ([
-            'replicaSet'            => 'replicaSet',
-            'authMechanism'         => 'authMechanism',
-            'authSource'            => 'authSource',
-            'readPreference'        => 'readPreference',
-            'tlsCAFile'             => 'tlsCAFile',
-            'tlsCertificateKeyFile' => 'tlsCertificateKeyFile',
-        ] as $key => $prop) {
-            if (isset($options[$key])) {
-                self::assertString($key, $options[$key]);
-                // @phpstan-ignore-next-line (dynamic readonly assignment via Closure trick)
-                self::assignReadonly($self, $prop, (string) $options[$key]);
+        foreach (
+            [
+                'replicaSet'            => 'replicaSet',
+                'authMechanism'         => 'authMechanism',
+                'authSource'            => 'authSource',
+                'readPreference'        => 'readPreference',
+                'tlsCAFile'             => 'tlsCAFile',
+                'tlsCertificateKeyFile' => 'tlsCertificateKeyFile',
+            ] as $key => $prop
+        ) {
+            if (! isset($options[$key])) {
+                continue;
             }
+
+            self::assertString($key, $options[$key]);
+            // @phpstan-ignore-next-line (dynamic readonly assignment via Closure trick)
+            self::assignReadonly($self, $prop, (string) $options[$key]);
         }
 
         // ----- Integer options with defaults ----------------------------------
@@ -151,17 +166,21 @@ final class UriOptions
         }
 
         // ----- Optional integer options (only set when present) ---------------
-        foreach ([
-            'connectTimeoutMS',
-            'socketTimeoutMS',
-            'maxIdleTimeMS',
-            'wTimeoutMS',
-            'zlibCompressionLevel',
-        ] as $key) {
-            if (isset($options[$key])) {
-                self::assertNonNegativeInt($key, $options[$key]);
-                self::assignReadonly($self, $key, (int) $options[$key]);
+        foreach (
+            [
+                'connectTimeoutMS',
+                'socketTimeoutMS',
+                'maxIdleTimeMS',
+                'wTimeoutMS',
+                'zlibCompressionLevel',
+            ] as $key
+        ) {
+            if (! isset($options[$key])) {
+                continue;
             }
+
+            self::assertNonNegativeInt($key, $options[$key]);
+            self::assignReadonly($self, $key, (int) $options[$key]);
         }
 
         // ----- Nullable integer options ---------------------------------------
@@ -186,38 +205,44 @@ final class UriOptions
         }
 
         // ----- Optional boolean options ---------------------------------------
-        foreach ([
-            'ssl',
-            'tls',
-            'tlsAllowInvalidCertificates',
-            'tlsAllowInvalidHostnames',
-            'journal',
-        ] as $key) {
-            if (isset($options[$key])) {
-                self::assertBool($key, $options[$key]);
-                self::assignReadonly($self, $key, (bool) $options[$key]);
+        foreach (
+            [
+                'ssl',
+                'tls',
+                'tlsAllowInvalidCertificates',
+                'tlsAllowInvalidHostnames',
+                'journal',
+            ] as $key
+        ) {
+            if (! isset($options[$key])) {
+                continue;
             }
+
+            self::assertBool($key, $options[$key]);
+            self::assignReadonly($self, $key, (bool) $options[$key]);
         }
 
         // ----- w (string or int) ----------------------------------------------
         if (isset($options['w'])) {
             $w = $options['w'];
-            if (!is_string($w) && !is_int($w)) {
+            if (! is_string($w) && ! is_int($w)) {
                 throw new InvalidArgumentException(
-                    sprintf('Option "w" must be a string or integer, got %s.', get_debug_type($w))
+                    sprintf('Option "w" must be a string or integer, got %s.', get_debug_type($w)),
                 );
             }
+
             self::assignReadonly($self, 'w', $w);
         }
 
         // ----- readPreferenceTags (array) -------------------------------------
         if (isset($options['readPreferenceTags'])) {
             $tags = $options['readPreferenceTags'];
-            if (!is_array($tags)) {
+            if (! is_array($tags)) {
                 throw new InvalidArgumentException(
-                    sprintf('Option "readPreferenceTags" must be an array, got %s.', get_debug_type($tags))
+                    sprintf('Option "readPreferenceTags" must be an array, got %s.', get_debug_type($tags)),
                 );
             }
+
             self::assignReadonly($self, 'readPreferenceTags', array_values($tags));
         } else {
             self::assignReadonly($self, 'readPreferenceTags', []);
@@ -226,11 +251,12 @@ final class UriOptions
         // ----- compressors (array) --------------------------------------------
         if (isset($options['compressors'])) {
             $compressors = $options['compressors'];
-            if (!is_array($compressors)) {
+            if (! is_array($compressors)) {
                 throw new InvalidArgumentException(
-                    sprintf('Option "compressors" must be an array, got %s.', get_debug_type($compressors))
+                    sprintf('Option "compressors" must be an array, got %s.', get_debug_type($compressors)),
                 );
             }
+
             self::assignReadonly($self, 'compressors', array_values($compressors));
         } else {
             self::assignReadonly($self, 'compressors', []);
@@ -239,14 +265,15 @@ final class UriOptions
         // ----- authMechanismProperties (array) --------------------------------
         if (isset($options['authMechanismProperties'])) {
             $props = $options['authMechanismProperties'];
-            if (!is_array($props)) {
+            if (! is_array($props)) {
                 throw new InvalidArgumentException(
                     sprintf(
                         'Option "authMechanismProperties" must be an array, got %s.',
-                        get_debug_type($props)
-                    )
+                        get_debug_type($props),
+                    ),
                 );
             }
+
             self::assignReadonly($self, 'authMechanismProperties', $props);
         } else {
             self::assignReadonly($self, 'authMechanismProperties', []);
@@ -266,12 +293,12 @@ final class UriOptions
      */
     private static function assignReadonly(self $obj, string $property, mixed $value): void
     {
-        $assign = \Closure::bind(
+        $assign = Closure::bind(
             static function (self $o, string $p, mixed $v): void {
                 $o->$p = $v;
             },
             null,
-            self::class
+            self::class,
         );
 
         $assign($obj, $property, $value);
@@ -279,32 +306,33 @@ final class UriOptions
 
     private static function assertString(string $key, mixed $value): void
     {
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             throw new InvalidArgumentException(
-                sprintf('Option "%s" must be a string, got %s.', $key, get_debug_type($value))
+                sprintf('Option "%s" must be a string, got %s.', $key, get_debug_type($value)),
             );
         }
     }
 
     private static function assertNonNegativeInt(string $key, mixed $value): void
     {
-        if (!is_int($value) && !ctype_digit((string) $value)) {
+        if (! is_int($value) && ! ctype_digit((string) $value)) {
             throw new InvalidArgumentException(
-                sprintf('Option "%s" must be a non-negative integer, got %s.', $key, get_debug_type($value))
+                sprintf('Option "%s" must be a non-negative integer, got %s.', $key, get_debug_type($value)),
             );
         }
+
         if ((int) $value < 0) {
             throw new InvalidArgumentException(
-                sprintf('Option "%s" must be >= 0, got %d.', $key, (int) $value)
+                sprintf('Option "%s" must be >= 0, got %d.', $key, (int) $value),
             );
         }
     }
 
     private static function assertBool(string $key, mixed $value): void
     {
-        if (!is_bool($value)) {
+        if (! is_bool($value)) {
             throw new InvalidArgumentException(
-                sprintf('Option "%s" must be a boolean, got %s.', $key, get_debug_type($value))
+                sprintf('Option "%s" must be a boolean, got %s.', $key, get_debug_type($value)),
             );
         }
     }

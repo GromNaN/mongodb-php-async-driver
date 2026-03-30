@@ -1,4 +1,5 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver\Monitoring;
 
@@ -8,7 +9,8 @@ final class TopologyChangedEvent
         private readonly string $topologyId,
         private readonly string $previousTopologyType,
         private readonly string $newTopologyType,
-    ) {}
+    ) {
+    }
 
     public function getTopologyId(): string
     {

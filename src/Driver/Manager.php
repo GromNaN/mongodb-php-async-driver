@@ -1,4 +1,5 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
@@ -11,6 +12,12 @@ use MongoDB\Internal\Operation\OperationExecutor;
 use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\ConnectionString;
 use MongoDB\Internal\Uri\UriOptions;
+
+use function array_merge;
+use function array_search;
+use function array_values;
+use function in_array;
+use function is_string;
 
 final class Manager
 {
@@ -65,27 +72,31 @@ final class Manager
         );
 
         // Start server monitoring
-        SyncRunner::run(function () {
+        SyncRunner::run(function (): void {
             $this->topologyManager->start();
         });
     }
 
     public function addSubscriber(Subscriber $subscriber): void
     {
-        if (!in_array($subscriber, $this->subscribers, true)) {
-            $this->subscribers[] = $subscriber;
-            $this->executor->addSubscriber($subscriber);
+        if (in_array($subscriber, $this->subscribers, true)) {
+            return;
         }
+
+        $this->subscribers[] = $subscriber;
+        $this->executor->addSubscriber($subscriber);
     }
 
     public function removeSubscriber(Subscriber $subscriber): void
     {
         $key = array_search($subscriber, $this->subscribers, true);
-        if ($key !== false) {
-            unset($this->subscribers[$key]);
-            $this->subscribers = array_values($this->subscribers);
-            $this->executor->removeSubscriber($subscriber);
+        if ($key === false) {
+            return;
         }
+
+        unset($this->subscribers[$key]);
+        $this->subscribers = array_values($this->subscribers);
+        $this->executor->removeSubscriber($subscriber);
     }
 
     public function executeBulkWrite(
@@ -96,9 +107,7 @@ final class Manager
         $writeConcern = $this->extractWriteConcern($options) ?? $this->writeConcern;
         $session = $this->extractSession($options);
 
-        return SyncRunner::run(function () use ($namespace, $bulk, $writeConcern, $session) {
-            return $this->executor->executeBulkWrite($namespace, $bulk, $writeConcern, $session);
-        });
+        return SyncRunner::run(fn () => $this->executor->executeBulkWrite($namespace, $bulk, $writeConcern, $session));
     }
 
     public function executeCommand(
@@ -109,9 +118,7 @@ final class Manager
         $readPreference = $this->extractReadPreference($options);
         $session = $this->extractSession($options);
 
-        return SyncRunner::run(function () use ($db, $command, $readPreference, $session) {
-            return $this->executor->executeCommand($db, $command, $readPreference, $session);
-        });
+        return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, $readPreference, $session));
     }
 
     public function executeQuery(
@@ -122,9 +129,7 @@ final class Manager
         $readPreference = $this->extractReadPreference($options) ?? $this->readPreference;
         $session = $this->extractSession($options);
 
-        return SyncRunner::run(function () use ($namespace, $query, $readPreference, $session) {
-            return $this->executor->executeQuery($namespace, $query, $readPreference, $session);
-        });
+        return SyncRunner::run(fn () => $this->executor->executeQuery($namespace, $query, $readPreference, $session));
     }
 
     public function executeReadCommand(
@@ -132,9 +137,10 @@ final class Manager
         Command $command,
         ?array $options = null,
     ): CursorInterface {
-        if (!isset($options['readPreference'])) {
+        if (! isset($options['readPreference'])) {
             $options['readPreference'] = $this->readPreference;
         }
+
         return $this->executeCommand($db, $command, $options);
     }
 
@@ -143,9 +149,10 @@ final class Manager
         Command $command,
         ?array $options = null,
     ): CursorInterface {
-        if (!isset($options['writeConcern'])) {
+        if (! isset($options['writeConcern'])) {
             $options['writeConcern'] = $this->writeConcern;
         }
+
         return $this->executeCommand($db, $command, $options);
     }
 
@@ -179,6 +186,7 @@ final class Manager
             foreach ($this->topologyManager->getServers() as $sd) {
                 $servers[] = Server::_createFromDescription($sd, $this->executor);
             }
+
             return $servers;
         });
     }
@@ -186,8 +194,10 @@ final class Manager
     public function selectServer(?ReadPreference $readPreference = null): Server
     {
         $rp = $readPreference ?? $this->readPreference;
+
         return SyncRunner::run(function () use ($rp) {
             $sd = $this->topologyManager->selectServer($rp);
+
             return Server::_createFromDescription($sd, $this->executor);
         });
     }
@@ -228,12 +238,12 @@ final class Manager
 
     private function buildWriteConcern(array $options): WriteConcern
     {
-        if (!isset($options['w']) && !isset($options['wTimeoutMS']) && !isset($options['journal'])) {
+        if (! isset($options['w']) && ! isset($options['wTimeoutMS']) && ! isset($options['journal'])) {
             return new WriteConcern(1); // default: w=1
         }
 
         $w = $options['w'] ?? 1;
-        $wtimeout = isset($options['wTimeoutMS']) ? (int)$options['wTimeoutMS'] : 0;
+        $wtimeout = isset($options['wTimeoutMS']) ? (int) $options['wTimeoutMS'] : 0;
         $journal = $options['journal'] ?? null;
 
         return new WriteConcern($w, $wtimeout, $journal);
@@ -242,12 +252,13 @@ final class Manager
     private function buildReadConcern(array $options): ReadConcern
     {
         $level = $options['readConcernLevel'] ?? null;
+
         return new ReadConcern($level);
     }
 
     private function extractReadPreference(?array $options): ?ReadPreference
     {
-        if ($options === null || !isset($options['readPreference'])) {
+        if ($options === null || ! isset($options['readPreference'])) {
             return null;
         }
 
@@ -265,7 +276,7 @@ final class Manager
 
     private function extractWriteConcern(?array $options): ?WriteConcern
     {
-        if ($options === null || !isset($options['writeConcern'])) {
+        if ($options === null || ! isset($options['writeConcern'])) {
             return null;
         }
 

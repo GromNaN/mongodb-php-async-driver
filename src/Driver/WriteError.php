@@ -1,4 +1,5 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
@@ -9,7 +10,8 @@ final class WriteError
         private readonly int $index,
         private readonly string $message,
         private readonly ?object $info = null,
-    ) {}
+    ) {
+    }
 
     public function getCode(): int
     {

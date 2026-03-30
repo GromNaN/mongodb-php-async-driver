@@ -6,6 +6,10 @@ namespace MongoDB\Internal\Auth;
 
 use InvalidArgumentException;
 
+use function in_array;
+use function is_array;
+use function sprintf;
+
 /**
  * Factory for creating {@see AuthMechanism} instances.
  *
@@ -18,6 +22,7 @@ final class AuthMechanismFactory
      *
      * @param string $mechanism The wire-protocol name of the mechanism.
      *                          Case-sensitive (e.g. 'SCRAM-SHA-256').
+     *
      * @throws InvalidArgumentException When the mechanism name is unsupported.
      */
     public static function create(string $mechanism): AuthMechanism
@@ -28,8 +33,8 @@ final class AuthMechanismFactory
             default         => throw new InvalidArgumentException(
                 sprintf(
                     'Unsupported authentication mechanism "%s". Supported: SCRAM-SHA-256, SCRAM-SHA-1.',
-                    $mechanism
-                )
+                    $mechanism,
+                ),
             ),
         };
     }

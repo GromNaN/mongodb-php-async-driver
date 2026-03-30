@@ -4,6 +4,12 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Topology;
 
+use function array_keys;
+use function is_array;
+use function strrpos;
+use function strtolower;
+use function substr;
+
 /**
  * Pure, stateless SDAM state-transition logic.
  *
@@ -19,23 +25,23 @@ final class SdamStateMachine
     /**
      * Apply a new server description to the topology and return the updated state.
      *
-     * @param TopologyType                          $topologyType Current topology type.
-     * @param array<string, InternalServerDescription> $servers     Current server map keyed by "host:port".
-     * @param InternalServerDescription             $newSd        Freshly-observed server description.
-     * @param string|null                           $replicaSetName Known replica-set name (if any).
+     * @param TopologyType                             $topologyType   Current topology type.
+     * @param array<string, InternalServerDescription> $servers        Current server map keyed by "host:port".
+     * @param InternalServerDescription                $newSd          Freshly-observed server description.
+     * @param string|null                              $replicaSetName Known replica-set name (if any).
      *
      * @return array{type: TopologyType, servers: array<string, InternalServerDescription>, setName: string|null}
      */
     public static function applyServerDescription(
-        TopologyType              $topologyType,
-        array                     $servers,
+        TopologyType $topologyType,
+        array $servers,
         InternalServerDescription $newSd,
-        ?string                   $replicaSetName = null,
+        ?string $replicaSetName = null,
     ): array {
         $address = $newSd->getAddress();
 
         // Ensure the server is tracked even if we received it out-of-band.
-        if (!isset($servers[$address])) {
+        if (! isset($servers[$address])) {
             $servers[$address] = $newSd;
         }
 
@@ -43,7 +49,10 @@ final class SdamStateMachine
             // -----------------------------------------------------------------
             case TopologyType::Unknown:
                 [$topologyType, $servers, $replicaSetName] = self::applyToUnknown(
-                    $topologyType, $servers, $newSd, $replicaSetName
+                    $topologyType,
+                    $servers,
+                    $newSd,
+                    $replicaSetName,
                 );
                 break;
 
@@ -62,7 +71,10 @@ final class SdamStateMachine
             case TopologyType::ReplicaSetNoPrimary:
             case TopologyType::ReplicaSetWithPrimary:
                 [$topologyType, $servers, $replicaSetName] = self::applyToReplicaSet(
-                    $topologyType, $servers, $newSd, $replicaSetName
+                    $topologyType,
+                    $servers,
+                    $newSd,
+                    $replicaSetName,
                 );
                 break;
 
@@ -86,13 +98,14 @@ final class SdamStateMachine
 
     /**
      * @param array<string, InternalServerDescription> $servers
+     *
      * @return array{TopologyType, array<string, InternalServerDescription>, string|null}
      */
     private static function applyToUnknown(
-        TopologyType              $topologyType,
-        array                     $servers,
+        TopologyType $topologyType,
+        array $servers,
         InternalServerDescription $newSd,
-        ?string                   $replicaSetName,
+        ?string $replicaSetName,
     ): array {
         $address = $newSd->getAddress();
 
@@ -126,6 +139,7 @@ final class SdamStateMachine
                 if ($newSd->setName !== null && $replicaSetName === null) {
                     $replicaSetName = $newSd->setName;
                 }
+
                 break;
 
             case InternalServerDescription::TYPE_LOAD_BALANCER:
@@ -144,10 +158,11 @@ final class SdamStateMachine
 
     /**
      * @param array<string, InternalServerDescription> $servers
+     *
      * @return array{TopologyType, array<string, InternalServerDescription>}
      */
     private static function applyToSharded(
-        array                     $servers,
+        array $servers,
         InternalServerDescription $newSd,
     ): array {
         $address = $newSd->getAddress();
@@ -167,13 +182,14 @@ final class SdamStateMachine
 
     /**
      * @param array<string, InternalServerDescription> $servers
+     *
      * @return array{TopologyType, array<string, InternalServerDescription>, string|null}
      */
     private static function applyToReplicaSet(
-        TopologyType              $topologyType,
-        array                     $servers,
+        TopologyType $topologyType,
+        array $servers,
         InternalServerDescription $newSd,
-        ?string                   $replicaSetName,
+        ?string $replicaSetName,
     ): array {
         $address = $newSd->getAddress();
 
@@ -185,6 +201,7 @@ final class SdamStateMachine
         ) {
             $servers[$address] = $newSd->withType(InternalServerDescription::TYPE_UNKNOWN);
             $topologyType = self::checkForPrimary($servers);
+
             return [$topologyType, $servers, $replicaSetName];
         }
 
@@ -200,12 +217,15 @@ final class SdamStateMachine
                 // Invalidate any other servers currently claiming to be primary.
                 foreach ($servers as $addr => $sd) {
                     if (
-                        $addr !== $address
-                        && $sd->type === InternalServerDescription::TYPE_RS_PRIMARY
+                        $addr === $address
+                        || $sd->type !== InternalServerDescription::TYPE_RS_PRIMARY
                     ) {
-                        $servers[$addr] = $sd->withType(InternalServerDescription::TYPE_UNKNOWN);
+                        continue;
                     }
+
+                    $servers[$addr] = $sd->withType(InternalServerDescription::TYPE_UNKNOWN);
                 }
+
                 break;
 
             case InternalServerDescription::TYPE_RS_SECONDARY:
@@ -237,10 +257,11 @@ final class SdamStateMachine
      * removed; newly-mentioned servers are initialised as Unknown.
      *
      * @param array<string, InternalServerDescription> $servers
+     *
      * @return array<string, InternalServerDescription>
      */
     private static function updateRsMembersFromPrimary(
-        array                     $servers,
+        array $servers,
         InternalServerDescription $primarySd,
     ): array {
         $response = $primarySd->helloResponse;
@@ -248,10 +269,12 @@ final class SdamStateMachine
         // Collect all members reported by the primary.
         $reported = [];
         foreach (['hosts', 'passives', 'arbiters'] as $key) {
-            if (isset($response[$key]) && is_array($response[$key])) {
-                foreach ($response[$key] as $addr) {
-                    $reported[strtolower((string) $addr)] = true;
-                }
+            if (! isset($response[$key]) || ! is_array($response[$key])) {
+                continue;
+            }
+
+            foreach ($response[$key] as $addr) {
+                $reported[strtolower((string) $addr)] = true;
             }
         }
 
@@ -260,21 +283,25 @@ final class SdamStateMachine
 
         // Remove servers not in the primary's view.
         foreach (array_keys($servers) as $addr) {
-            if (!isset($reported[strtolower($addr)])) {
-                unset($servers[$addr]);
+            if (isset($reported[strtolower($addr)])) {
+                continue;
             }
+
+            unset($servers[$addr]);
         }
 
         // Add newly-reported servers as Unknown placeholders.
         foreach (array_keys($reported) as $addr) {
-            if (!isset($servers[$addr])) {
-                [$h, $p] = self::splitAddress($addr);
-                $servers[$addr] = new InternalServerDescription(
-                    host: $h,
-                    port: $p,
-                    type: InternalServerDescription::TYPE_UNKNOWN,
-                );
+            if (isset($servers[$addr])) {
+                continue;
             }
+
+            [$h, $p] = self::splitAddress($addr);
+            $servers[$addr] = new InternalServerDescription(
+                host: $h,
+                port: $p,
+                type: InternalServerDescription::TYPE_UNKNOWN,
+            );
         }
 
         return $servers;

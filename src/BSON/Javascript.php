@@ -4,18 +4,17 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-final class Javascript implements JavascriptInterface, \JsonSerializable, Type, \Stringable
+use JsonSerializable;
+use Stringable;
+
+use function is_array;
+
+final class Javascript implements JavascriptInterface, JsonSerializable, Type, Stringable
 {
-    private string  $code;
     private ?object $scope;
 
-    /**
-     * @param array|object|null $scope
-     */
-    public function __construct(string $code, array|object|null $scope = null)
+    public function __construct(private string $code, array|object|null $scope = null)
     {
-        $this->code = $code;
-
         if (is_array($scope)) {
             $this->scope = (object) $scope;
         } else {

@@ -1,15 +1,14 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
 final class Query
 {
-    private array|object $filter;
     private array $options;
 
-    public function __construct(array|object $filter, ?array $queryOptions = null)
+    public function __construct(private array|object $filter, ?array $queryOptions = null)
     {
-        $this->filter = $filter;
         $this->options = $queryOptions ?? [];
     }
 

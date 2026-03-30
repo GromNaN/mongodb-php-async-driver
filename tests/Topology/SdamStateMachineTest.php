@@ -17,9 +17,9 @@ class SdamStateMachineTest extends TestCase
 
     private function makeServer(
         string $host,
-        int    $port,
+        int $port,
         string $type,
-        array  $helloResponse = [],
+        array $helloResponse = [],
         ?string $setName = null,
     ): InternalServerDescription {
         return new InternalServerDescription(
@@ -32,10 +32,10 @@ class SdamStateMachineTest extends TestCase
     }
 
     private function apply(
-        TopologyType              $topologyType,
-        array                     $servers,
+        TopologyType $topologyType,
+        array $servers,
         InternalServerDescription $newSd,
-        ?string                   $replicaSetName = null,
+        ?string $replicaSetName = null,
     ): array {
         return SdamStateMachine::applyServerDescription(
             $topologyType,

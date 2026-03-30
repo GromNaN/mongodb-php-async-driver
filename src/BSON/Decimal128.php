@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-final class Decimal128 implements Decimal128Interface, \JsonSerializable, Type, \Stringable
-{
-    private string $value;
+use JsonSerializable;
+use Stringable;
 
-    public function __construct(string $value)
+final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, Stringable
+{
+    public function __construct(private string $value)
     {
-        $this->value = $value;
     }
 
     // ------------------------------------------------------------------

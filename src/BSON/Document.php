@@ -4,6 +4,26 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
+use ArrayAccess;
+use BadMethodCallException;
+use InvalidArgumentException;
+use IteratorAggregate;
+use MongoDB\Internal\BSON\BsonDecoder;
+use MongoDB\Internal\BSON\BsonEncoder;
+use MongoDB\Internal\BSON\ExtendedJson;
+use RuntimeException;
+use Stringable;
+
+use function array_key_exists;
+use function base64_decode;
+use function base64_encode;
+use function is_array;
+use function is_object;
+use function json_decode;
+use function sprintf;
+
+use const JSON_THROW_ON_ERROR;
+
 /**
  * Represents a BSON document.
  *
@@ -14,7 +34,7 @@ namespace MongoDB\BSON;
  *
  * The constructor is private; the class is immutable once created.
  */
-final class Document implements \IteratorAggregate, \ArrayAccess, Type, \Stringable
+final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
 {
     /** Raw BSON bytes. Lazily populated by encoder when created from PHP. */
     private ?string $bson;
@@ -51,9 +71,10 @@ final class Document implements \IteratorAggregate, \ArrayAccess, Type, \Stringa
     {
         // Parse Extended JSON by decoding it as a PHP array then re-encoding
         $phpValue = json_decode($json, associative: true, flags: JSON_THROW_ON_ERROR);
-        if (!is_array($phpValue) && !is_object($phpValue)) {
-            throw new \InvalidArgumentException('Invalid Extended JSON string');
+        if (! is_array($phpValue) && ! is_object($phpValue)) {
+            throw new InvalidArgumentException('Invalid Extended JSON string');
         }
+
         $decoded = (array) $phpValue;
 
         return new static(null, $decoded);
@@ -82,8 +103,8 @@ final class Document implements \IteratorAggregate, \ArrayAccess, Type, \Stringa
     {
         $decoded = $this->decode();
 
-        if (!array_key_exists($key, $decoded)) {
-            throw new \RuntimeException(sprintf('Key "%s" does not exist in the document.', $key));
+        if (! array_key_exists($key, $decoded)) {
+            throw new RuntimeException(sprintf('Key "%s" does not exist in the document.', $key));
         }
 
         return $decoded[$key];
@@ -100,19 +121,21 @@ final class Document implements \IteratorAggregate, \ArrayAccess, Type, \Stringa
      */
     public function toPHP(?array $typeMap = null): array|object
     {
-        return \MongoDB\Internal\BSON\BsonDecoder::decode($this->getBson(), $typeMap ?? []);
+        return BsonDecoder::decode($this->getBson(), $typeMap ?? []);
     }
 
     public function toCanonicalExtendedJSON(): string
     {
-        $decoded = \MongoDB\Internal\BSON\BsonDecoder::decode($this->getBson(), ['root' => 'array']);
-        return \MongoDB\Internal\BSON\ExtendedJson::toCanonical($decoded);
+        $decoded = BsonDecoder::decode($this->getBson(), ['root' => 'array']);
+
+        return ExtendedJson::toCanonical($decoded);
     }
 
     public function toRelaxedExtendedJSON(): string
     {
-        $decoded = \MongoDB\Internal\BSON\BsonDecoder::decode($this->getBson(), ['root' => 'array']);
-        return \MongoDB\Internal\BSON\ExtendedJson::toRelaxed($decoded);
+        $decoded = BsonDecoder::decode($this->getBson(), ['root' => 'array']);
+
+        return ExtendedJson::toRelaxed($decoded);
     }
 
     // ------------------------------------------------------------------
@@ -150,12 +173,12 @@ final class Document implements \IteratorAggregate, \ArrayAccess, Type, \Stringa
 
     public function offsetSet(mixed $offset, mixed $value): void
     {
-        throw new \BadMethodCallException('MongoDB\BSON\Document is immutable and does not support offsetSet().');
+        throw new BadMethodCallException('MongoDB\BSON\Document is immutable and does not support offsetSet().');
     }
 
     public function offsetUnset(mixed $offset): void
     {
-        throw new \BadMethodCallException('MongoDB\BSON\Document is immutable and does not support offsetUnset().');
+        throw new BadMethodCallException('MongoDB\BSON\Document is immutable and does not support offsetUnset().');
     }
 
     // ------------------------------------------------------------------
@@ -183,7 +206,7 @@ final class Document implements \IteratorAggregate, \ArrayAccess, Type, \Stringa
     private function getBson(): string
     {
         if ($this->bson === null) {
-            $this->bson = \MongoDB\Internal\BSON\BsonEncoder::encode($this->decoded ?? []);
+            $this->bson = BsonEncoder::encode($this->decoded ?? []);
         }
 
         return $this->bson;
@@ -197,7 +220,7 @@ final class Document implements \IteratorAggregate, \ArrayAccess, Type, \Stringa
     private function decode(): array
     {
         if ($this->decoded === null) {
-            $this->decoded = (array) \MongoDB\Internal\BSON\BsonDecoder::decode($this->bson, ['root' => 'array']);
+            $this->decoded = (array) BsonDecoder::decode($this->bson, ['root' => 'array']);
         }
 
         return $this->decoded;

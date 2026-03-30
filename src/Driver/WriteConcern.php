@@ -1,17 +1,21 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
-final class WriteConcern implements \MongoDB\BSON\Serializable
+use MongoDB\BSON\Serializable;
+use stdClass;
+
+use function is_int;
+
+final class WriteConcern implements Serializable
 {
     public const string MAJORITY = 'majority';
 
-    private string|int $w;
     private int $wtimeout;
-    private ?bool $journal;
     private bool $isDefaultConcern = false;
 
-    public function __construct(string|int $w, ?int $wtimeout = null, ?bool $journal = null)
+    public function __construct(private string|int $w, ?int $wtimeout = null, private ?bool $journal = null)
     {
         if (is_int($w) && $w < -1) {
             throw new Exception\InvalidArgumentException('w cannot be less than -1');
@@ -21,9 +25,7 @@ final class WriteConcern implements \MongoDB\BSON\Serializable
             throw new Exception\InvalidArgumentException('wtimeout cannot be negative');
         }
 
-        $this->w = $w;
         $this->wtimeout = $wtimeout ?? 0;
-        $this->journal = $journal;
     }
 
     /** @internal Create a WriteConcern that reports isDefault() = true (driver default, not user-specified). */
@@ -31,6 +33,7 @@ final class WriteConcern implements \MongoDB\BSON\Serializable
     {
         $wc = new self(1);
         $wc->isDefaultConcern = true;
+
         return $wc;
     }
 
@@ -54,9 +57,9 @@ final class WriteConcern implements \MongoDB\BSON\Serializable
         return $this->isDefaultConcern;
     }
 
-    public function bsonSerialize(): \stdClass
+    public function bsonSerialize(): stdClass
     {
-        $doc = new \stdClass();
+        $doc = new stdClass();
         $doc->w = $this->w;
 
         if ($this->wtimeout !== 0) {

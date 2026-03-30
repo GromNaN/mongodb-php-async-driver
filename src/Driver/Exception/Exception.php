@@ -1,5 +1,10 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver\Exception;
 
-interface Exception extends \Throwable {}
+use Throwable;
+
+interface Exception extends Throwable
+{
+}

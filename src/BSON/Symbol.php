@@ -4,18 +4,17 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
+use Stringable;
+
 /**
  * Represents a BSON symbol type (deprecated in the BSON spec).
  *
  * @deprecated The BSON symbol type is deprecated. Use strings instead.
  */
-final class Symbol implements Type, \Stringable
+final class Symbol implements Type, Stringable
 {
-    private string $symbol;
-
-    private function __construct(string $symbol)
+    private function __construct(private string $symbol)
     {
-        $this->symbol = $symbol;
     }
 
     /**

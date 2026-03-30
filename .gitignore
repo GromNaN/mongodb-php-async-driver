@@ -1,2 +1,7 @@
+.claude
 .refs/*
 !.refs/README.md
+.phpcs-cache
+.phpunit.result.cache
+composer.lock
+vendor

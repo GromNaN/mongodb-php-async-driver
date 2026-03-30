@@ -1,5 +1,10 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
-interface CursorInterface extends \Iterator {}
+use Iterator;
+
+interface CursorInterface extends Iterator
+{
+}

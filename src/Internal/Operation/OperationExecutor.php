@@ -31,6 +31,17 @@ use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\UriOptions;
 use Throwable;
 
+use function array_map;
+use function array_slice;
+use function array_values;
+use function count;
+use function explode;
+use function is_array;
+use function iterator_to_array;
+use function microtime;
+use function strpos;
+use function substr;
+
 /**
  * Central execution layer for all MongoDB operations.
  *
@@ -56,9 +67,10 @@ final class OperationExecutor
      */
     public function __construct(
         private TopologyManager $topology,
-        private UriOptions      $options,
-        private array           $subscribers = [],
-    ) {}
+        private UriOptions $options,
+        private array $subscribers = [],
+    ) {
+    }
 
     // -------------------------------------------------------------------------
     // Public API
@@ -68,10 +80,10 @@ final class OperationExecutor
      * Execute a command and return a cursor over the result set.
      */
     public function executeCommand(
-        string          $db,
-        Command         $command,
+        string $db,
+        Command $command,
         ?ReadPreference $readPreference = null,
-        ?Session        $session        = null,
+        ?Session $session = null,
     ): CursorInterface {
         $readPreference ??= new ReadPreference(ReadPreference::PRIMARY);
 
@@ -95,10 +107,10 @@ final class OperationExecutor
      * Execute a query and return a cursor over the matched documents.
      */
     public function executeQuery(
-        string          $namespace,
-        Query           $query,
+        string $namespace,
+        Query $query,
         ?ReadPreference $readPreference = null,
-        ?Session        $session        = null,
+        ?Session $session = null,
     ): CursorInterface {
         [$db, $collection] = $this->splitNamespace($namespace);
 
@@ -109,16 +121,20 @@ final class OperationExecutor
 
         $opts = $query->getOptions();
 
-        foreach ([
-            'sort', 'projection', 'skip', 'limit', 'batchSize',
-            'singleBatch', 'comment', 'maxTimeMS', 'hint',
-            'allowPartialResults', 'noCursorTimeout', 'tailable',
-            'awaitData', 'oplogReplay', 'returnKey', 'showRecordId',
-            'snapshot', 'min', 'max',
-        ] as $optKey) {
-            if (isset($opts[$optKey])) {
-                $findCmd[$optKey] = $opts[$optKey];
+        foreach (
+            [
+                'sort', 'projection', 'skip', 'limit', 'batchSize',
+                'singleBatch', 'comment', 'maxTimeMS', 'hint',
+                'allowPartialResults', 'noCursorTimeout', 'tailable',
+                'awaitData', 'oplogReplay', 'returnKey', 'showRecordId',
+                'snapshot', 'min', 'max',
+            ] as $optKey
+        ) {
+            if (! isset($opts[$optKey])) {
+                continue;
             }
+
+            $findCmd[$optKey] = $opts[$optKey];
         }
 
         $server = $this->topology->selectServer($readPreference);
@@ -138,10 +154,10 @@ final class OperationExecutor
      * Execute a bulk write and return an aggregated WriteResult.
      */
     public function executeBulkWrite(
-        string         $namespace,
-        BulkWrite      $bulk,
-        ?WriteConcern  $writeConcern = null,
-        ?Session       $session      = null,
+        string $namespace,
+        BulkWrite $bulk,
+        ?WriteConcern $writeConcern = null,
+        ?Session $session = null,
     ): WriteResult {
         [$db, $collection] = $this->splitNamespace($namespace);
 
@@ -198,12 +214,12 @@ final class OperationExecutor
                 $result = iterator_to_array($cursor)[0] ?? [];
 
                 $totalInserted += (int) ($result['n'] ?? count($docs));
-                $acknowledged   = !($result['acknowledged'] ?? true) ? false : $acknowledged;
+                $acknowledged   = ! ($result['acknowledged'] ?? true) ? false : $acknowledged;
 
                 foreach ((array) ($result['writeErrors'] ?? []) as $e) {
                     $writeErrors[] = new WriteError(
-                        code:    (int)    ($e['code']    ?? 0),
-                        index:   (int)    ($e['index']   ?? 0),
+                        code:    (int) ($e['code']    ?? 0),
+                        index:   (int) ($e['index']   ?? 0),
                         message: (string) ($e['errmsg']  ?? ''),
                     );
                 }
@@ -211,7 +227,7 @@ final class OperationExecutor
                 if (isset($result['writeConcernError'])) {
                     $wce     = $result['writeConcernError'];
                     $wcError = new WriteConcernError(
-                        code:    (int)    ($wce['code']   ?? 0),
+                        code:    (int) ($wce['code']   ?? 0),
                         message: (string) ($wce['errmsg'] ?? ''),
                     );
                 }
@@ -231,15 +247,19 @@ final class OperationExecutor
                 if ($opts['multi']  ?? false) {
                     $spec['multi']  = true;
                 }
+
                 if ($opts['upsert'] ?? false) {
                     $spec['upsert'] = true;
                 }
+
                 if (isset($opts['arrayFilters'])) {
                     $spec['arrayFilters'] = $opts['arrayFilters'];
                 }
+
                 if (isset($opts['hint'])) {
                     $spec['hint'] = $opts['hint'];
                 }
+
                 if (isset($opts['collation'])) {
                     $spec['collation'] = $opts['collation'];
                 }
@@ -269,8 +289,8 @@ final class OperationExecutor
 
                 foreach ((array) ($result['writeErrors'] ?? []) as $e) {
                     $writeErrors[] = new WriteError(
-                        code:    (int)    ($e['code']   ?? 0),
-                        index:   (int)    ($e['index']  ?? 0),
+                        code:    (int) ($e['code']   ?? 0),
+                        index:   (int) ($e['index']  ?? 0),
                         message: (string) ($e['errmsg'] ?? ''),
                     );
                 }
@@ -278,7 +298,7 @@ final class OperationExecutor
                 if (isset($result['writeConcernError']) && $wcError === null) {
                     $wce     = $result['writeConcernError'];
                     $wcError = new WriteConcernError(
-                        code:    (int)    ($wce['code']   ?? 0),
+                        code:    (int) ($wce['code']   ?? 0),
                         message: (string) ($wce['errmsg'] ?? ''),
                     );
                 }
@@ -293,12 +313,13 @@ final class OperationExecutor
         if ($deletes !== []) {
             $deleteSpecs = array_map(static function ($op): array {
                 [, $filter, $opts] = $op;
-                $limit = ($opts['limit'] ?? 1) ? 1 : 0;
+                $limit = $opts['limit'] ?? 1 ? 1 : 0;
                 $spec  = ['q' => $filter, 'limit' => $limit];
 
                 if (isset($opts['collation'])) {
                     $spec['collation'] = $opts['collation'];
                 }
+
                 if (isset($opts['hint'])) {
                     $spec['hint'] = $opts['hint'];
                 }
@@ -321,8 +342,8 @@ final class OperationExecutor
 
                 foreach ((array) ($result['writeErrors'] ?? []) as $e) {
                     $writeErrors[] = new WriteError(
-                        code:    (int)    ($e['code']   ?? 0),
-                        index:   (int)    ($e['index']  ?? 0),
+                        code:    (int) ($e['code']   ?? 0),
+                        index:   (int) ($e['index']  ?? 0),
                         message: (string) ($e['errmsg'] ?? ''),
                     );
                 }
@@ -330,7 +351,7 @@ final class OperationExecutor
                 if (isset($result['writeConcernError']) && $wcError === null) {
                     $wce     = $result['writeConcernError'];
                     $wcError = new WriteConcernError(
-                        code:    (int)    ($wce['code']   ?? 0),
+                        code:    (int) ($wce['code']   ?? 0),
                         message: (string) ($wce['errmsg'] ?? ''),
                     );
                 }
@@ -371,10 +392,10 @@ final class OperationExecutor
      * @param array $prepared Fully-decorated command array (output of CommandHelper::prepareCommand).
      */
     private function sendCommand(
-        ConnectionPool            $pool,
-        string                    $db,
-        string                    $cmdName,
-        array                     $prepared,
+        ConnectionPool $pool,
+        string $db,
+        string $cmdName,
+        array $prepared,
         InternalServerDescription $server,
     ): CursorInterface {
         $conn      = $pool->acquire();
@@ -424,10 +445,10 @@ final class OperationExecutor
      * @param array $body Decoded command response body.
      */
     private function buildCursor(
-        array                     $body,
-        string                    $db,
-        string                    $cmdName,
-        ConnectionPool            $pool,
+        array $body,
+        string $db,
+        string $cmdName,
+        ConnectionPool $pool,
         InternalServerDescription $server,
     ): CursorInterface {
         // Commands that return a cursor sub-document.
@@ -437,25 +458,25 @@ final class OperationExecutor
             $ns        = $cursorDoc['ns'] ?? $db;
             $firstBatch = $cursorDoc['firstBatch'] ?? [];
 
-            return new class(
+            return new class (
                 $firstBatch,
-                (int)   $cursorId,
-                (string)$ns,
+                (int) $cursorId,
+                (string) $ns,
                 $db,
                 $pool,
                 $server,
             ) implements CursorInterface {
                 /** @var list<array|object> */
                 private array $buffer;
-                private int   $position = 0;
+                private int $position = 0;
 
                 public function __construct(
-                    array                                   $firstBatch,
-                    private int                             $cursorId,
-                    private string                          $ns,
-                    private string                          $db,
-                    private ConnectionPool                  $pool,
-                    private InternalServerDescription       $server,
+                    array $firstBatch,
+                    private int $cursorId,
+                    private string $ns,
+                    private string $db,
+                    private ConnectionPool $pool,
+                    private InternalServerDescription $server,
                 ) {
                     $this->buffer = $firstBatch;
                 }
@@ -475,9 +496,11 @@ final class OperationExecutor
                     ++$this->position;
 
                     // Fetch next batch when the local buffer is exhausted.
-                    if ($this->position >= count($this->buffer) && $this->cursorId !== 0) {
-                        $this->fetchNextBatch();
+                    if ($this->position < count($this->buffer) || $this->cursorId === 0) {
+                        return;
                     }
+
+                    $this->fetchNextBatch();
                 }
 
                 public function rewind(): void
@@ -514,6 +537,7 @@ final class OperationExecutor
                         foreach ($nextBatch as $doc) {
                             $this->buffer[] = $doc;
                         }
+
                         $this->position = 0;
                     } finally {
                         $this->pool->release($conn);
@@ -523,16 +547,37 @@ final class OperationExecutor
         }
 
         // Non-cursor commands: return the single response document as a one-element cursor.
-        return new class([$body]) implements CursorInterface {
+        return new class ([$body]) implements CursorInterface {
             private int $position = 0;
 
-            public function __construct(private readonly array $items) {}
+            public function __construct(private readonly array $items)
+            {
+            }
 
-            public function current(): mixed       { return $this->items[$this->position]; }
-            public function key(): int             { return $this->position; }
-            public function next(): void           { ++$this->position; }
-            public function rewind(): void         { $this->position = 0; }
-            public function valid(): bool          { return isset($this->items[$this->position]); }
+            public function current(): mixed
+            {
+                return $this->items[$this->position];
+            }
+
+            public function key(): int
+            {
+                return $this->position;
+            }
+
+            public function next(): void
+            {
+                ++$this->position;
+            }
+
+            public function rewind(): void
+            {
+                $this->position = 0;
+            }
+
+            public function valid(): bool
+            {
+                return isset($this->items[$this->position]);
+            }
         };
     }
 
@@ -547,7 +592,7 @@ final class OperationExecutor
     {
         $address = "{$host}:{$port}";
 
-        if (!isset($this->pools[$address])) {
+        if (! isset($this->pools[$address])) {
             $this->pools[$address] = new ConnectionPool(
                 host:               $host,
                 port:               $port,
@@ -569,7 +614,7 @@ final class OperationExecutor
         string $cmdName,
         object $cmd,
         string $db,
-        int    $requestId,
+        int $requestId,
     ): void {
         $event = new CommandStartedEvent(
             commandName: $cmdName,
@@ -580,12 +625,14 @@ final class OperationExecutor
         );
 
         foreach ($this->subscribers as $subscriber) {
-            if ($subscriber instanceof CommandSubscriber) {
-                try {
-                    $subscriber->commandStarted($event);
-                } catch (Throwable) {
-                    // Subscribers must not interfere with operation execution.
-                }
+            if (! ($subscriber instanceof CommandSubscriber)) {
+                continue;
+            }
+
+            try {
+                $subscriber->commandStarted($event);
+            } catch (Throwable) {
+                // Subscribers must not interfere with operation execution.
             }
         }
     }
@@ -594,8 +641,8 @@ final class OperationExecutor
         string $cmdName,
         object $reply,
         string $db,
-        int    $requestId,
-        int    $durationMicros,
+        int $requestId,
+        int $durationMicros,
     ): void {
         $event = new CommandSucceededEvent(
             commandName:  $cmdName,
@@ -607,22 +654,24 @@ final class OperationExecutor
         );
 
         foreach ($this->subscribers as $subscriber) {
-            if ($subscriber instanceof CommandSubscriber) {
-                try {
-                    $subscriber->commandSucceeded($event);
-                } catch (Throwable) {
-                    // Subscribers must not interfere with operation execution.
-                }
+            if (! ($subscriber instanceof CommandSubscriber)) {
+                continue;
+            }
+
+            try {
+                $subscriber->commandSucceeded($event);
+            } catch (Throwable) {
+                // Subscribers must not interfere with operation execution.
             }
         }
     }
 
     private function fireCommandFailed(
-        string     $cmdName,
-        Throwable  $e,
-        string     $db,
-        int        $requestId,
-        int        $durationMicros,
+        string $cmdName,
+        Throwable $e,
+        string $db,
+        int $requestId,
+        int $durationMicros,
     ): void {
         $event = new CommandFailedEvent(
             commandName:  $cmdName,
@@ -634,12 +683,14 @@ final class OperationExecutor
         );
 
         foreach ($this->subscribers as $subscriber) {
-            if ($subscriber instanceof CommandSubscriber) {
-                try {
-                    $subscriber->commandFailed($event);
-                } catch (Throwable) {
-                    // Subscribers must not interfere with operation execution.
-                }
+            if (! ($subscriber instanceof CommandSubscriber)) {
+                continue;
+            }
+
+            try {
+                $subscriber->commandFailed($event);
+            } catch (Throwable) {
+                // Subscribers must not interfere with operation execution.
             }
         }
     }
@@ -658,7 +709,7 @@ final class OperationExecutor
         $pos = strpos($namespace, '.');
         if ($pos === false) {
             throw new DriverRuntimeException(
-                "Invalid namespace \"{$namespace}\": missing dot separator"
+                "Invalid namespace \"{$namespace}\": missing dot separator",
             );
         }
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
+use function array_keys;
+
 /**
  * A forward-only iterator over a decoded BSON document or array.
  *
@@ -13,9 +15,6 @@ namespace MongoDB\BSON;
  */
 final class Iterator implements \Iterator
 {
-    /** @var array<string|int, mixed> */
-    private array $data;
-
     /** @var list<string|int> Ordered list of keys. */
     private array $keys;
 
@@ -26,9 +25,8 @@ final class Iterator implements \Iterator
      *
      * @param array<string|int, mixed> $data
      */
-    private function __construct(array $data)
+    private function __construct(private array $data)
     {
-        $this->data     = $data;
         $this->keys     = array_keys($data);
         $this->position = 0;
     }

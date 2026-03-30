@@ -5,6 +5,22 @@ declare(strict_types=1);
 namespace MongoDB\Internal\Auth;
 
 use MongoDB\Internal\Connection\Connection;
+use Normalizer;
+
+use function base64_decode;
+use function base64_encode;
+use function class_exists;
+use function explode;
+use function hash;
+use function hash_equals;
+use function hash_hmac;
+use function hash_pbkdf2;
+use function random_bytes;
+use function sprintf;
+use function str_replace;
+use function str_starts_with;
+use function strpos;
+use function substr;
 
 /**
  * SCRAM-SHA-256 authentication mechanism (RFC 5802 + RFC 7677).
@@ -84,9 +100,9 @@ final class ScramSha256 implements AuthMechanism
         // ------------------------------------------------------------------
         $serverFirstParts = $this->parseKvMessage($serverFirstMsg);
 
-        if (!isset($serverFirstParts['r'], $serverFirstParts['s'], $serverFirstParts['i'])) {
+        if (! isset($serverFirstParts['r'], $serverFirstParts['s'], $serverFirstParts['i'])) {
             throw new AuthenticationException(
-                'Malformed SCRAM server-first-message: missing r, s, or i fields.'
+                'Malformed SCRAM server-first-message: missing r, s, or i fields.',
             );
         }
 
@@ -94,9 +110,9 @@ final class ScramSha256 implements AuthMechanism
         $salt        = base64_decode($serverFirstParts['s']);
         $iterations  = (int) $serverFirstParts['i'];
 
-        if (!str_starts_with($serverNonce, $clientNonce)) {
+        if (! str_starts_with($serverNonce, $clientNonce)) {
             throw new AuthenticationException(
-                'Server nonce does not start with client nonce — possible replay attack.'
+                'Server nonce does not start with client nonce — possible replay attack.',
             );
         }
 
@@ -104,8 +120,8 @@ final class ScramSha256 implements AuthMechanism
             throw new AuthenticationException(
                 sprintf(
                     'SCRAM iteration count %d is below the minimum of 4096.',
-                    $iterations
-                )
+                    $iterations,
+                ),
             );
         }
 
@@ -155,21 +171,21 @@ final class ScramSha256 implements AuthMechanism
 
         if (isset($serverFinalParts['e'])) {
             throw new AuthenticationException(
-                sprintf('SCRAM authentication error from server: %s', $serverFinalParts['e'])
+                sprintf('SCRAM authentication error from server: %s', $serverFinalParts['e']),
             );
         }
 
-        if (!isset($serverFinalParts['v'])) {
+        if (! isset($serverFinalParts['v'])) {
             throw new AuthenticationException(
-                'SCRAM server-final-message missing server signature (v).'
+                'SCRAM server-final-message missing server signature (v).',
             );
         }
 
         $receivedServerSig = base64_decode($serverFinalParts['v']);
 
-        if (!hash_equals($serverSignature, $receivedServerSig)) {
+        if (! hash_equals($serverSignature, $receivedServerSig)) {
             throw new AuthenticationException(
-                'SCRAM server signature verification failed — server identity cannot be confirmed.'
+                'SCRAM server signature verification failed — server identity cannot be confirmed.',
             );
         }
 
@@ -178,17 +194,19 @@ final class ScramSha256 implements AuthMechanism
         // ------------------------------------------------------------------
         $done = (bool) ($continueReply['done'] ?? false);
 
-        if (!$done) {
-            $finalAckCmd = [
-                'saslContinue'   => 1,
-                'conversationId' => $conversationId,
-                'payload'        => base64_encode(''),
-                '$db'            => $authSource,
-            ];
-
-            $ackReply = $connection->sendCommand($authSource, $finalAckCmd);
-            $this->assertCommandOk($ackReply, 'saslContinue (final ack)');
+        if ($done) {
+            return;
         }
+
+        $finalAckCmd = [
+            'saslContinue'   => 1,
+            'conversationId' => $conversationId,
+            'payload'        => base64_encode(''),
+            '$db'            => $authSource,
+        ];
+
+        $ackReply = $connection->sendCommand($authSource, $finalAckCmd);
+        $this->assertCommandOk($ackReply, 'saslContinue (final ack)');
     }
 
     // -------------------------------------------------------------------------
@@ -206,15 +224,17 @@ final class ScramSha256 implements AuthMechanism
     private function clientFirstMessageBare(string $username, string $nonce): string
     {
         $escapedUser = str_replace(['=', ','], ['=3D', '=2C'], $username);
+
         return 'n=' . $escapedUser . ',r=' . $nonce;
     }
 
     /**
      * Perform PBKDF2-SHA-256 key derivation (SCRAM Hi() function).
      *
-     * @param string $password  SASLprep-normalised password
-     * @param string $salt      Raw binary salt
+     * @param string $password   SASLprep-normalised password
+     * @param string $salt       Raw binary salt
      * @param int    $iterations Iteration count
+     *
      * @return string Raw binary derived key
      */
     private function hi(string $password, string $salt, int $iterations): string
@@ -269,8 +289,8 @@ final class ScramSha256 implements AuthMechanism
      */
     private function saslPrep(string $str): string
     {
-        if (class_exists(\Normalizer::class)) {
-            $normalized = \Normalizer::normalize($str, \Normalizer::FORM_KC);
+        if (class_exists(Normalizer::class)) {
+            $normalized = Normalizer::normalize($str, Normalizer::FORM_KC);
             if ($normalized !== false) {
                 return $normalized;
             }
@@ -296,10 +316,12 @@ final class ScramSha256 implements AuthMechanism
             if ($eqPos === false) {
                 continue;
             }
+
             $key         = substr($pair, 0, $eqPos);
             $value       = substr($pair, $eqPos + 1);
             $parts[$key] = $value;
         }
+
         return $parts;
     }
 
@@ -307,6 +329,7 @@ final class ScramSha256 implements AuthMechanism
      * Assert that a command response contains ok: 1.
      *
      * @param array<string, mixed> $reply
+     *
      * @throws AuthenticationException
      */
     private function assertCommandOk(array $reply, string $commandName): void
@@ -316,13 +339,14 @@ final class ScramSha256 implements AuthMechanism
         if ((float) $ok !== 1.0) {
             $errmsg = $reply['errmsg'] ?? 'unknown error';
             $code   = $reply['code']   ?? 0;
+
             throw new AuthenticationException(
                 sprintf(
                     '%s failed (code %d): %s',
                     $commandName,
                     $code,
-                    $errmsg
-                )
+                    $errmsg,
+                ),
             );
         }
     }

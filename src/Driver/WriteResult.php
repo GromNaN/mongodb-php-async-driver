@@ -1,4 +1,5 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
@@ -21,7 +22,9 @@ final class WriteResult
      *
      * @see \MongoDB\Internal\WriteResult\WriteResultFactory::create()
      */
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 
     /**
      * @internal Creates a new WriteResult instance.
@@ -94,9 +97,7 @@ final class WriteResult
         return $this->writeConcernError;
     }
 
-    /**
-     * @return WriteError[]
-     */
+    /** @return WriteError[] */
     public function getWriteErrors(): array
     {
         return $this->writeErrors;

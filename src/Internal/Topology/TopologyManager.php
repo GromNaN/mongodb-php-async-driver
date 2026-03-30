@@ -5,20 +5,31 @@ declare(strict_types=1);
 namespace MongoDB\Internal\Topology;
 
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
-use MongoDB\Driver\Monitoring\CommandSubscriber;
 use MongoDB\Driver\Monitoring\SDAMSubscriber;
-use MongoDB\Driver\Monitoring\Subscriber;
 use MongoDB\Driver\Monitoring\ServerChangedEvent;
-use MongoDB\Driver\Monitoring\ServerOpeningEvent;
 use MongoDB\Driver\Monitoring\ServerClosedEvent;
+use MongoDB\Driver\Monitoring\ServerOpeningEvent;
+use MongoDB\Driver\Monitoring\Subscriber;
 use MongoDB\Driver\Monitoring\TopologyChangedEvent;
-use MongoDB\Driver\Monitoring\TopologyOpeningEvent;
 use MongoDB\Driver\Monitoring\TopologyClosedEvent;
+use MongoDB\Driver\Monitoring\TopologyOpeningEvent;
 use MongoDB\Driver\ReadPreference;
 use MongoDB\Driver\ServerDescription;
 use MongoDB\Internal\Uri\UriOptions;
+use Throwable;
 
 use function Amp\delay;
+use function array_filter;
+use function array_keys;
+use function array_rand;
+use function array_values;
+use function bin2hex;
+use function count;
+use function implode;
+use function method_exists;
+use function microtime;
+use function random_bytes;
+use function sprintf;
 
 /**
  * Orchestrates multiple {@see ServerMonitor} instances and maintains the
@@ -53,11 +64,11 @@ final class TopologyManager
      * @param UriOptions                            $options Parsed URI options.
      */
     public function __construct(
-        private array      $seeds,
+        private array $seeds,
         private UriOptions $options,
     ) {
         $this->topologyType = TopologyType::Unknown;
-        $this->setName      = isset($options->replicaSet) ? $options->replicaSet : null;
+        $this->setName      = $options->replicaSet ?? null;
         $this->topologyId   = bin2hex(random_bytes(8));
     }
 
@@ -133,7 +144,7 @@ final class TopologyManager
      */
     public function selectServer(
         ReadPreference $readPreference,
-        ?int           $timeoutMs = null,
+        ?int $timeoutMs = null,
     ): InternalServerDescription {
         $timeoutMs ??= $this->options->serverSelectionTimeoutMS;
 
@@ -157,9 +168,7 @@ final class TopologyManager
     // Accessors
     // -------------------------------------------------------------------------
 
-    /**
-     * @return array<string, InternalServerDescription>
-     */
+    /** @return array<string, InternalServerDescription> */
     public function getServers(): array
     {
         return $this->servers;
@@ -182,7 +191,7 @@ final class TopologyManager
     public function removeSubscriber(Subscriber $subscriber): void
     {
         $this->subscribers = array_values(
-            array_filter($this->subscribers, static fn ($s) => $s !== $subscriber)
+            array_filter($this->subscribers, static fn ($s) => $s !== $subscriber),
         );
     }
 
@@ -218,7 +227,8 @@ final class TopologyManager
         $this->setName      = $result['setName'];
 
         // Fire serverChanged event if the server description actually changed.
-        if ($previousSd->type !== ($this->servers[$address]->type ?? InternalServerDescription::TYPE_UNKNOWN)
+        if (
+            $previousSd->type !== ($this->servers[$address]->type ?? InternalServerDescription::TYPE_UNKNOWN)
             || $previousSd->roundTripTimeMs !== ($this->servers[$address]->roundTripTimeMs ?? null)
         ) {
             $this->fireSdamEvent('serverChanged', new ServerChangedEvent(
@@ -241,32 +251,36 @@ final class TopologyManager
 
         // Ensure monitors exist for any newly-discovered servers (e.g. RS members).
         foreach ($this->servers as $addr => $knownSd) {
-            if (!isset($this->monitors[$addr])) {
-                $this->fireSdamEvent('serverOpening', new ServerOpeningEvent(
-                    $knownSd->host,
-                    $knownSd->port,
-                    $this->topologyId,
-                ));
-
-                $monitor = new ServerMonitor(
-                    host:                   $knownSd->host,
-                    port:                   $knownSd->port,
-                    onUpdate:               fn (InternalServerDescription $s) => $this->onServerUpdate($s),
-                    heartbeatFrequencyMs:   $this->options->heartbeatFrequencyMS,
-                    minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
-                );
-
-                $this->monitors[$addr] = $monitor;
-                $monitor->start();
+            if (isset($this->monitors[$addr])) {
+                continue;
             }
+
+            $this->fireSdamEvent('serverOpening', new ServerOpeningEvent(
+                $knownSd->host,
+                $knownSd->port,
+                $this->topologyId,
+            ));
+
+            $monitor = new ServerMonitor(
+                host:                   $knownSd->host,
+                port:                   $knownSd->port,
+                onUpdate:               fn (InternalServerDescription $s) => $this->onServerUpdate($s),
+                heartbeatFrequencyMs:   $this->options->heartbeatFrequencyMS,
+                minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
+            );
+
+            $this->monitors[$addr] = $monitor;
+            $monitor->start();
         }
 
         // Stop monitors for servers that the topology has dropped.
         foreach (array_keys($this->monitors) as $addr) {
-            if (!isset($this->servers[$addr])) {
-                $this->monitors[$addr]->stop();
-                unset($this->monitors[$addr]);
+            if (isset($this->servers[$addr])) {
+                continue;
             }
+
+            $this->monitors[$addr]->stop();
+            unset($this->monitors[$addr]);
         }
     }
 
@@ -302,7 +316,7 @@ final class TopologyManager
                 $timeoutMs,
                 $this->topologyType->value,
                 implode(', ', array_keys($this->servers)),
-            )
+            ),
         );
     }
 
@@ -358,12 +372,14 @@ final class TopologyManager
     private function fireSdamEvent(string $method, object $event): void
     {
         foreach ($this->subscribers as $subscriber) {
-            if ($subscriber instanceof SDAMSubscriber && method_exists($subscriber, $method)) {
-                try {
-                    $subscriber->{$method}($event);
-                } catch (\Throwable) {
-                    // Subscribers must not interfere with topology management.
-                }
+            if (! ($subscriber instanceof SDAMSubscriber) || ! method_exists($subscriber, $method)) {
+                continue;
+            }
+
+            try {
+                $subscriber->{$method}($event);
+            } catch (Throwable) {
+                // Subscribers must not interfere with topology management.
             }
         }
     }

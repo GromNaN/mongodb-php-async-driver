@@ -1,6 +1,9 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver\Monitoring;
+
+use MongoDB\BSON\ObjectId;
 
 final class CommandSucceededEvent
 {
@@ -11,8 +14,9 @@ final class CommandSucceededEvent
         private readonly int $requestId,
         private readonly int $operationId,
         private readonly int $durationMicros,
-        private readonly ?\MongoDB\BSON\ObjectId $serviceId = null,
-    ) {}
+        private readonly ?ObjectId $serviceId = null,
+    ) {
+    }
 
     public function getCommandName(): string
     {
@@ -44,7 +48,7 @@ final class CommandSucceededEvent
         return $this->durationMicros;
     }
 
-    public function getServiceId(): ?\MongoDB\BSON\ObjectId
+    public function getServiceId(): ?ObjectId
     {
         return $this->serviceId;
     }

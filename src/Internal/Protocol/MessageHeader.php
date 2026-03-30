@@ -6,6 +6,12 @@ namespace MongoDB\Internal\Protocol;
 
 use InvalidArgumentException;
 
+use function pack;
+use function sprintf;
+use function strlen;
+use function substr;
+use function unpack;
+
 /**
  * Represents the 16-byte MongoDB Wire Protocol message header.
  *
@@ -24,7 +30,8 @@ final class MessageHeader
         public readonly int $requestId,
         public readonly int $responseTo,
         public readonly int $opCode,
-    ) {}
+    ) {
+    }
 
     /**
      * Parse a 16-byte header from raw bytes.
@@ -38,8 +45,8 @@ final class MessageHeader
                 sprintf(
                     'MessageHeader requires %d bytes, got %d',
                     self::HEADER_SIZE,
-                    strlen($bytes)
-                )
+                    strlen($bytes),
+                ),
             );
         }
 

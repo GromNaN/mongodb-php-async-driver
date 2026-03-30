@@ -8,6 +8,14 @@ use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Internal\BSON\BsonDecoder;
 use RuntimeException;
 
+use function is_array;
+use function ord;
+use function sprintf;
+use function strlen;
+use function strpos;
+use function substr;
+use function unpack;
+
 /**
  * Parses OP_MSG response frames received from a MongoDB server.
  *
@@ -32,7 +40,7 @@ final class OpMsgDecoder
         if ($totalLen < MessageHeader::HEADER_SIZE + 5) {
             // 5 = 4 (flagBits) + 1 (minimum section kind byte)
             throw new RuntimeException(
-                sprintf('OP_MSG response too short: %d bytes', $totalLen)
+                sprintf('OP_MSG response too short: %d bytes', $totalLen),
             );
         }
 
@@ -44,8 +52,8 @@ final class OpMsgDecoder
                 sprintf(
                     'Expected OP_MSG (opCode %d), got opCode %d',
                     MessageHeader::OP_MSG,
-                    $header->opCode
-                )
+                    $header->opCode,
+                ),
             );
         }
 
@@ -86,6 +94,7 @@ final class OpMsgDecoder
                 if ($nullPos === false) {
                     throw new RuntimeException('Unterminated identifier cstring in OP_MSG kind-1 section');
                 }
+
                 $identifier = substr($bytes, $offset, $nullPos - $offset);
                 $offset     = $nullPos + 1;
 
@@ -100,7 +109,7 @@ final class OpMsgDecoder
                 $sequences[$identifier] = $seqDocs;
             } else {
                 throw new RuntimeException(
-                    sprintf('Unknown OP_MSG section kind: %d at offset %d', $kind, $offset - 1)
+                    sprintf('Unknown OP_MSG section kind: %d at offset %d', $kind, $offset - 1),
                 );
             }
         }
@@ -119,8 +128,6 @@ final class OpMsgDecoder
     /**
      * Decode an OP_MSG response and check for a server-side command error.
      *
-     * @param string $bytes
-     * @param array  $typeMap
      * @return array|object The decoded body document.
      *
      * @throws CommandException if the response has ok != 1.
@@ -133,7 +140,7 @@ final class OpMsgDecoder
         // Normalise: support both array and object bodies.
         $ok = is_array($body) ? ($body['ok'] ?? null) : ($body->ok ?? null);
 
-        if ($ok != 1) {
+        if ($ok !== 1) {
             $errmsg = is_array($body)
                 ? ($body['errmsg'] ?? 'Unknown error')
                 : ($body->errmsg ?? 'Unknown error');
@@ -158,6 +165,7 @@ final class OpMsgDecoder
     {
         /** @var array{1: int} $u */
         $u = unpack('V', substr($bytes, $offset, 4));
+
         return $u[1];
     }
 }

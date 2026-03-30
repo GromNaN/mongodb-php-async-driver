@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-final class MaxKey implements MaxKeyInterface, \JsonSerializable, Type
+use JsonSerializable;
+
+final class MaxKey implements MaxKeyInterface, JsonSerializable, Type
 {
     // ------------------------------------------------------------------
     // JsonSerializable

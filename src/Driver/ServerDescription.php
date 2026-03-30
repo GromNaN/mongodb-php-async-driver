@@ -1,4 +1,5 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
@@ -27,11 +28,11 @@ final class ServerDescription
      *
      * @see \MongoDB\Internal\Server\ServerDescriptionFactory
      */
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 
-    /**
-     * @internal Creates a new ServerDescription instance.
-     */
+    /** @internal Creates a new ServerDescription instance. */
     public static function _createFromInternal(
         string $host,
         int $port,

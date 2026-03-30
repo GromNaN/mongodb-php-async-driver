@@ -1,4 +1,5 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 /**
  * Bootstrap for the MongoDB userland driver.
@@ -8,15 +9,18 @@
  */
 
 namespace MongoDB\Driver\Monitoring {
-    if (!function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
-        function addSubscriber(\MongoDB\Driver\Monitoring\Subscriber $subscriber): void
+
+    use function function_exists;
+
+    if (! function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
+        function addSubscriber(Subscriber $subscriber): void
         {
             // Global subscriber registry is managed via Manager instances.
             // This function is a no-op at the global level in this driver;
             // use Manager::addSubscriber() to register per-manager.
         }
 
-        function removeSubscriber(\MongoDB\Driver\Monitoring\Subscriber $subscriber): void
+        function removeSubscriber(Subscriber $subscriber): void
         {
             // No-op at global level. Use Manager::removeSubscriber().
         }

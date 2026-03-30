@@ -7,9 +7,10 @@ namespace MongoDB\Tests\BSON;
 use BadMethodCallException;
 use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
-use MongoDB\BSON\ObjectId;
 use MongoDB\Internal\BSON\BsonEncoder;
 use PHPUnit\Framework\TestCase;
+
+use function json_decode;
 
 class DocumentTest extends TestCase
 {

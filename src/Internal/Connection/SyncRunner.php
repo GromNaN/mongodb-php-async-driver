@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Connection;
 
+use Fiber;
 use Revolt\EventLoop;
 use Throwable;
 
@@ -34,11 +35,13 @@ final class SyncRunner
      *   Revolt suspension is used: the operation is queued as a fiber, and
      *   `suspension->suspend()` drives the event loop until the fiber completes.
      *
-     * @template T
      * @param callable(): T $operation
+     *
      * @return T
      *
      * @throws Throwable Re-throws any exception thrown by $operation.
+     *
+     * @template T
      */
     public static function run(callable $operation): mixed
     {
@@ -58,7 +61,7 @@ final class SyncRunner
             // This runs as a regular callback (main context) inside the event loop.
             // We start our own fiber here so that async()->await() inside
             // $operation works correctly.
-            $fiber = new \Fiber(static function () use ($operation, $suspension): void {
+            $fiber = new Fiber(static function () use ($operation, $suspension): void {
                 try {
                     $suspension->resume($operation());
                 } catch (Throwable $e) {

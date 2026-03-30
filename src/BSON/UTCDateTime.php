@@ -4,22 +4,32 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-final class UTCDateTime implements UTCDateTimeInterface, \JsonSerializable, Type, \Stringable
+use DateTimeImmutable;
+use DateTimeInterface;
+use JsonSerializable;
+use RuntimeException;
+use Stringable;
+
+use function intdiv;
+use function microtime;
+use function sprintf;
+
+final class UTCDateTime implements UTCDateTimeInterface, JsonSerializable, Type, Stringable
 {
     /** Milliseconds since Unix epoch. */
     private int $milliseconds;
 
     /**
-     * @param int|\DateTimeInterface|null $milliseconds
+     * @param int|DateTimeInterface|null $milliseconds
      *   - null  : current time in milliseconds
      *   - int   : milliseconds since epoch
      *   - DateTimeInterface : converted to milliseconds
      */
-    public function __construct(int|\DateTimeInterface|null $milliseconds = null)
+    public function __construct(int|DateTimeInterface|null $milliseconds = null)
     {
         if ($milliseconds === null) {
             $this->milliseconds = (int) (microtime(true) * 1000);
-        } elseif ($milliseconds instanceof \DateTimeInterface) {
+        } elseif ($milliseconds instanceof DateTimeInterface) {
             // DateTimeInterface stores microseconds; convert to ms.
             $this->milliseconds = (int) ($milliseconds->format('Uv'));
         } else {
@@ -31,18 +41,18 @@ final class UTCDateTime implements UTCDateTimeInterface, \JsonSerializable, Type
     // UTCDateTimeInterface
     // ------------------------------------------------------------------
 
-    public function toDateTime(): \DateTimeImmutable
+    public function toDateTime(): DateTimeImmutable
     {
         $seconds      = intdiv($this->milliseconds, 1000);
         $microseconds = ($this->milliseconds % 1000) * 1000;
 
-        $dt = \DateTimeImmutable::createFromFormat(
+        $dt = DateTimeImmutable::createFromFormat(
             'U u',
             sprintf('%d %06d', $seconds, $microseconds),
         );
 
         if ($dt === false) {
-            throw new \RuntimeException('Failed to create DateTimeImmutable from UTCDateTime.');
+            throw new RuntimeException('Failed to create DateTimeImmutable from UTCDateTime.');
         }
 
         return $dt;

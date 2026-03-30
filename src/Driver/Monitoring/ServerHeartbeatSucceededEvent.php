@@ -1,4 +1,5 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver\Monitoring;
 
@@ -10,7 +11,8 @@ final class ServerHeartbeatSucceededEvent
         private readonly int $durationMicros,
         private readonly object $reply,
         private readonly bool $awaited,
-    ) {}
+    ) {
+    }
 
     public function getHost(): string
     {

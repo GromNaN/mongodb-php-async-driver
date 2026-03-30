@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MongoDB\Tests\Integration;
 
-use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\BulkWrite;
 use MongoDB\Driver\Command;
 use MongoDB\Driver\Manager;
@@ -12,9 +11,11 @@ use MongoDB\Driver\Query;
 use MongoDB\Driver\ReadPreference;
 use PHPUnit\Framework\TestCase;
 
-/**
- * @group integration
- */
+use function bin2hex;
+use function iterator_to_array;
+use function random_bytes;
+
+/** @group integration */
 class BasicOperationsTest extends TestCase
 {
     private Manager $manager;

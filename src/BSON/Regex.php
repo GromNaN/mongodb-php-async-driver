@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-final class Regex implements RegexInterface, \JsonSerializable, Type, \Stringable
-{
-    private string $pattern;
-    private string $flags;
+use JsonSerializable;
+use Stringable;
 
-    public function __construct(string $pattern, string $flags = '')
+use function sprintf;
+
+final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
+{
+    public function __construct(private string $pattern, private string $flags = '')
     {
-        $this->pattern = $pattern;
-        $this->flags   = $flags;
     }
 
     // ------------------------------------------------------------------

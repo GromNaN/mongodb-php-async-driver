@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-final class Timestamp implements TimestampInterface, \JsonSerializable, Type, \Stringable
-{
-    private int $increment;
-    private int $timestamp;
+use JsonSerializable;
+use Stringable;
 
-    public function __construct(int $increment, int $timestamp)
+use function sprintf;
+
+final class Timestamp implements TimestampInterface, JsonSerializable, Type, Stringable
+{
+    public function __construct(private int $increment, private int $timestamp)
     {
-        $this->increment = $increment;
-        $this->timestamp = $timestamp;
     }
 
     // ------------------------------------------------------------------

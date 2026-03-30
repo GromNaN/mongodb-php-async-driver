@@ -8,6 +8,12 @@ use MongoDB\Internal\Auth\ScramSha256;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 
+use function assert;
+use function base64_decode;
+use function hash_hmac;
+use function hash_pbkdf2;
+use function is_string;
+
 /**
  * Tests SCRAM-SHA-256 building blocks using RFC 7677 test vectors where
  * applicable.  Because the cryptographic helpers are private, each test
@@ -55,8 +61,8 @@ class ScramSha256Test extends TestCase
         // Hi() is PBKDF2-SHA-256
         $expected = hash_pbkdf2('sha256', $password, $salt, $iterations, 0, true);
 
-        /** @var string $actual */
         $actual = $this->callPrivate('hi', $password, $salt, $iterations);
+        assert(is_string($actual));
 
         $this->assertSame($expected, $actual);
     }
@@ -72,8 +78,8 @@ class ScramSha256Test extends TestCase
         $username = 'user';
         $nonce    = 'rOprNGfwEbeRWgbNEkqO';
 
-        /** @var string $bare */
         $bare = $this->callPrivate('clientFirstMessageBare', $username, $nonce);
+        assert(is_string($bare));
 
         $clientFirst = 'n,,' . $bare;
 
@@ -92,8 +98,8 @@ class ScramSha256Test extends TestCase
         $data     = 'test-data';
         $expected = hash_hmac('sha256', $data, $key, true);
 
-        /** @var string $actual */
         $actual = $this->callPrivate('hmac', $key, $data);
+        assert(is_string($actual));
 
         $this->assertSame($expected, $actual);
     }
@@ -104,8 +110,8 @@ class ScramSha256Test extends TestCase
 
     public function testNonceIsBase64(): void
     {
-        /** @var string $nonce */
         $nonce = $this->callPrivate('generateNonce', 24);
+        assert(is_string($nonce));
 
         // A valid base64 string must decode without error and must not be empty.
         $decoded = base64_decode($nonce, strict: true);

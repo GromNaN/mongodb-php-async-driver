@@ -4,4 +4,6 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-interface MaxKeyInterface extends Type {}
+interface MaxKeyInterface extends Type
+{
+}

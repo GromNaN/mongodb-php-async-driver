@@ -6,6 +6,25 @@ namespace MongoDB\Internal\Uri;
 
 use InvalidArgumentException;
 
+use function array_filter;
+use function array_map;
+use function array_merge;
+use function array_values;
+use function count;
+use function ctype_digit;
+use function explode;
+use function implode;
+use function in_array;
+use function sprintf;
+use function str_starts_with;
+use function strlen;
+use function strpos;
+use function strrpos;
+use function strtolower;
+use function substr;
+use function trim;
+use function urldecode;
+
 /**
  * Parses a MongoDB connection string URI.
  *
@@ -35,7 +54,6 @@ final class ConnectionString
     // Option defaults
     // ---------------------------------------------------------------------------
 
-    /** @var array<string, mixed> */
     private const OPTION_DEFAULTS = [
         'serverSelectionTimeoutMS' => 30000,
         'localThresholdMS'         => 15,
@@ -132,9 +150,7 @@ final class ConnectionString
         return $this->isSrv() ? self::SCHEME_SRV : self::SCHEME_STANDARD;
     }
 
-    /**
-     * @return list<array{host: string, port: int}>
-     */
+    /** @return list<array{host: string, port: int}> */
     public function getHosts(): array
     {
         return $this->hosts;
@@ -155,9 +171,7 @@ final class ConnectionString
         return $this->database;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
+    /** @return array<string, mixed> */
     public function getOptions(): array
     {
         return $this->options;
@@ -205,8 +219,8 @@ final class ConnectionString
             throw new InvalidArgumentException(
                 sprintf(
                     'Invalid MongoDB URI scheme. Expected "mongodb://" or "mongodb+srv://", got: %s',
-                    $uri
-                )
+                    $uri,
+                ),
             );
         }
 
@@ -218,8 +232,8 @@ final class ConnectionString
         // The host portion may not contain '@', so we look for the last '@'
         // before the first '/' (path separator).
         $slashPos = strpos($rest, '/');
-        $hostPart = ($slashPos !== false) ? substr($rest, 0, $slashPos) : $rest;
-        $afterHost = ($slashPos !== false) ? substr($rest, $slashPos + 1) : '';
+        $hostPart = $slashPos !== false ? substr($rest, 0, $slashPos) : $rest;
+        $afterHost = $slashPos !== false ? substr($rest, $slashPos + 1) : '';
 
         $atPos = strrpos($hostPart, '@');
         if ($atPos !== false) {
@@ -242,9 +256,10 @@ final class ConnectionString
         if ($srv) {
             if (count($this->hosts) !== 1) {
                 throw new InvalidArgumentException(
-                    'An SRV URI must contain exactly one host.'
+                    'An SRV URI must contain exactly one host.',
                 );
             }
+
             // We recorded the port as default — that is acceptable; but an
             // explicit port in the URI would have triggered an error inside
             // parseHosts() already.
@@ -292,7 +307,7 @@ final class ConnectionString
             $part = trim($part);
             if ($part === '') {
                 throw new InvalidArgumentException(
-                    'Empty host entry in MongoDB URI host list.'
+                    'Empty host entry in MongoDB URI host list.',
                 );
             }
 
@@ -301,15 +316,16 @@ final class ConnectionString
                 $closeBracket = strpos($part, ']');
                 if ($closeBracket === false) {
                     throw new InvalidArgumentException(
-                        sprintf('Malformed IPv6 address in URI host list: "%s"', $part)
+                        sprintf('Malformed IPv6 address in URI host list: "%s"', $part),
                     );
                 }
+
                 $host = substr($part, 1, $closeBracket - 1);
                 $portStr = substr($part, $closeBracket + 1);
 
-                if ($portStr !== '' && !str_starts_with($portStr, ':')) {
+                if ($portStr !== '' && ! str_starts_with($portStr, ':')) {
                     throw new InvalidArgumentException(
-                        sprintf('Malformed IPv6 host entry in URI: "%s"', $part)
+                        sprintf('Malformed IPv6 host entry in URI: "%s"', $part),
                     );
                 }
 
@@ -329,7 +345,7 @@ final class ConnectionString
 
             if ($host === '') {
                 throw new InvalidArgumentException(
-                    sprintf('Empty hostname in MongoDB URI host list entry: "%s"', $part)
+                    sprintf('Empty hostname in MongoDB URI host list entry: "%s"', $part),
                 );
             }
 
@@ -346,13 +362,13 @@ final class ConnectionString
     {
         if ($srv) {
             throw new InvalidArgumentException(
-                sprintf('SRV URIs must not specify a port. Got "%s".', $context)
+                sprintf('SRV URIs must not specify a port. Got "%s".', $context),
             );
         }
 
-        if (!ctype_digit($portStr) || $portStr === '') {
+        if (! ctype_digit($portStr) || $portStr === '') {
             throw new InvalidArgumentException(
-                sprintf('Invalid port "%s" in URI host "%s".', $portStr, $context)
+                sprintf('Invalid port "%s" in URI host "%s".', $portStr, $context),
             );
         }
 
@@ -360,7 +376,7 @@ final class ConnectionString
 
         if ($port < 1 || $port > 65535) {
             throw new InvalidArgumentException(
-                sprintf('Port %d is out of the valid range 1–65535 in URI.', $port)
+                sprintf('Port %d is out of the valid range 1–65535 in URI.', $port),
             );
         }
 
@@ -388,7 +404,7 @@ final class ConnectionString
             $eqPos = strpos($pair, '=');
             if ($eqPos === false) {
                 throw new InvalidArgumentException(
-                    sprintf('Malformed option in URI query string: "%s"', $pair)
+                    sprintf('Malformed option in URI query string: "%s"', $pair),
                 );
             }
 
@@ -419,11 +435,12 @@ final class ConnectionString
     private function coerceOptionValue(string $key, string $value): mixed
     {
         if (in_array($key, self::INT_OPTIONS, true)) {
-            if (!ctype_digit($value) && !(str_starts_with($value, '-') && ctype_digit(substr($value, 1)))) {
+            if (! ctype_digit($value) && ! (str_starts_with($value, '-') && ctype_digit(substr($value, 1)))) {
                 throw new InvalidArgumentException(
-                    sprintf('Option "%s" must be an integer, got "%s".', $key, $value)
+                    sprintf('Option "%s" must be an integer, got "%s".', $key, $value),
                 );
             }
+
             return (int) $value;
         }
 
@@ -432,7 +449,7 @@ final class ConnectionString
                 'true', '1'  => true,
                 'false', '0' => false,
                 default      => throw new InvalidArgumentException(
-                    sprintf('Option "%s" must be a boolean (true/false), got "%s".', $key, $value)
+                    sprintf('Option "%s" must be a boolean (true/false), got "%s".', $key, $value),
                 ),
             };
         }
@@ -442,12 +459,13 @@ final class ConnectionString
             $allowed = ['zlib', 'snappy', 'zstd'];
             $compressors = array_filter(array_map('trim', explode(',', $value)));
             foreach ($compressors as $c) {
-                if (!in_array($c, $allowed, true)) {
+                if (! in_array($c, $allowed, true)) {
                     throw new InvalidArgumentException(
-                        sprintf('Unknown compressor "%s". Allowed: %s.', $c, implode(', ', $allowed))
+                        sprintf('Unknown compressor "%s". Allowed: %s.', $c, implode(', ', $allowed)),
                     );
                 }
             }
+
             return array_values($compressors);
         }
 
@@ -477,14 +495,17 @@ final class ConnectionString
             if ($prop === '') {
                 continue;
             }
+
             $colonPos = strpos($prop, ':');
             if ($colonPos === false) {
                 throw new InvalidArgumentException(
-                    sprintf('Malformed authMechanismProperties entry: "%s"', $prop)
+                    sprintf('Malformed authMechanismProperties entry: "%s"', $prop),
                 );
             }
+
             $props[trim(substr($prop, 0, $colonPos))] = trim(substr($prop, $colonPos + 1));
         }
+
         return $props;
     }
 }

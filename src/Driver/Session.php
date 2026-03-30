@@ -1,6 +1,13 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
+
+use MongoDB\BSON\Timestamp;
+use MongoDB\BSON\TimestampInterface;
+
+use function in_array;
+use function is_array;
 
 final class Session
 {
@@ -12,7 +19,7 @@ final class Session
 
     private object $logicalSessionId;
     private ?object $clusterTime;
-    private ?\MongoDB\BSON\Timestamp $operationTime;
+    private ?Timestamp $operationTime;
     private string $transactionState;
     private bool $dirty;
     private ?Server $server;
@@ -23,15 +30,15 @@ final class Session
      *
      * @see \MongoDB\Internal\Session\SessionFactory
      */
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 
-    /**
-     * @internal Creates a new Session instance.
-     */
+    /** @internal Creates a new Session instance. */
     public static function _createFromInternal(
         object $logicalSessionId,
         ?object $clusterTime = null,
-        ?\MongoDB\BSON\Timestamp $operationTime = null,
+        ?Timestamp $operationTime = null,
         string $transactionState = self::TRANSACTION_NONE,
         bool $dirty = false,
         ?Server $server = null,
@@ -59,7 +66,7 @@ final class Session
         return $this->clusterTime;
     }
 
-    public function getOperationTime(): ?\MongoDB\BSON\Timestamp
+    public function getOperationTime(): ?Timestamp
     {
         return $this->operationTime;
     }
@@ -104,7 +111,7 @@ final class Session
 
     public function abortTransaction(): void
     {
-        if (!$this->isInTransaction()) {
+        if (! $this->isInTransaction()) {
             throw new Exception\RuntimeException('No transaction is in progress');
         }
 
@@ -113,7 +120,7 @@ final class Session
 
     public function commitTransaction(): void
     {
-        if (!$this->isInTransaction()) {
+        if (! $this->isInTransaction()) {
             throw new Exception\RuntimeException('No transaction is in progress');
         }
 
@@ -134,20 +141,22 @@ final class Session
         $this->clusterTime = is_array($clusterTime) ? (object) $clusterTime : $clusterTime;
     }
 
-    public function advanceOperationTime(\MongoDB\BSON\TimestampInterface $operationTime): void
+    public function advanceOperationTime(TimestampInterface $operationTime): void
     {
         if (
-            $this->operationTime === null
-            || $operationTime->getTimestamp() > $this->operationTime->getTimestamp()
-            || (
-                $operationTime->getTimestamp() === $this->operationTime->getTimestamp()
-                && $operationTime->getIncrement() > $this->operationTime->getIncrement()
+            $this->operationTime !== null
+            && $operationTime->getTimestamp() <= $this->operationTime->getTimestamp()
+            && (
+                $operationTime->getTimestamp() !== $this->operationTime->getTimestamp()
+                || $operationTime->getIncrement() <= $this->operationTime->getIncrement()
             )
         ) {
-            $this->operationTime = new \MongoDB\BSON\Timestamp(
-                $operationTime->getIncrement(),
-                $operationTime->getTimestamp(),
-            );
+            return;
         }
+
+        $this->operationTime = new Timestamp(
+            $operationTime->getIncrement(),
+            $operationTime->getTimestamp(),
+        );
     }
 }

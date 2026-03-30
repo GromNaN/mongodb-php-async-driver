@@ -1,8 +1,12 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
-final class ReadConcern implements \MongoDB\BSON\Serializable
+use MongoDB\BSON\Serializable;
+use stdClass;
+
+final class ReadConcern implements Serializable
 {
     public const string LINEARIZABLE = 'linearizable';
     public const string LOCAL = 'local';
@@ -10,11 +14,8 @@ final class ReadConcern implements \MongoDB\BSON\Serializable
     public const string AVAILABLE = 'available';
     public const string SNAPSHOT = 'snapshot';
 
-    private ?string $level;
-
-    public function __construct(?string $level = null)
+    public function __construct(private ?string $level = null)
     {
-        $this->level = $level;
     }
 
     public function getLevel(): ?string
@@ -27,9 +28,9 @@ final class ReadConcern implements \MongoDB\BSON\Serializable
         return $this->level === null;
     }
 
-    public function bsonSerialize(): \stdClass
+    public function bsonSerialize(): stdClass
     {
-        $doc = new \stdClass();
+        $doc = new stdClass();
 
         if ($this->level !== null) {
             $doc->level = $this->level;

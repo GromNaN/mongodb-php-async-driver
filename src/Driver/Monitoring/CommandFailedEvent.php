@@ -1,18 +1,23 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver\Monitoring;
+
+use MongoDB\BSON\ObjectId;
+use Throwable;
 
 final class CommandFailedEvent
 {
     public function __construct(
         private readonly string $commandName,
         private readonly string $databaseName,
-        private readonly \Throwable $error,
+        private readonly Throwable $error,
         private readonly int $requestId,
         private readonly int $operationId,
         private readonly int $durationMicros,
-        private readonly ?\MongoDB\BSON\ObjectId $serviceId = null,
-    ) {}
+        private readonly ?ObjectId $serviceId = null,
+    ) {
+    }
 
     public function getCommandName(): string
     {
@@ -24,7 +29,7 @@ final class CommandFailedEvent
         return $this->databaseName;
     }
 
-    public function getError(): \Throwable
+    public function getError(): Throwable
     {
         return $this->error;
     }
@@ -44,7 +49,7 @@ final class CommandFailedEvent
         return $this->durationMicros;
     }
 
-    public function getServiceId(): ?\MongoDB\BSON\ObjectId
+    public function getServiceId(): ?ObjectId
     {
         return $this->serviceId;
     }

@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Topology;
 
+use Closure;
+use MongoDB\Driver\Exception\ConnectionException;
 use MongoDB\Internal\Connection\Connection;
-use MongoDB\Internal\Protocol\OpMsgEncoder;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
+use MongoDB\Internal\Protocol\OpMsgEncoder;
 use Revolt\EventLoop;
 use Throwable;
 
 use function Amp\async;
 use function Amp\delay;
+use function is_array;
+use function microtime;
 
 /**
  * Background monitor that periodically sends hello to a single MongoDB server
@@ -32,19 +36,20 @@ final class ServerMonitor
     private ?Connection $connection = null;
 
     /**
-     * @param string   $host                   Hostname or IP of the target server.
-     * @param int      $port                   TCP port.
-     * @param \Closure $onUpdate               Called with {@see InternalServerDescription} after each check.
-     * @param int      $heartbeatFrequencyMs   Interval between successive checks (default 10 s).
-     * @param int      $minHeartbeatFrequencyMs Minimum wait between checks after a failure (default 500 ms).
+     * @param string  $host                    Hostname or IP of the target server.
+     * @param int     $port                    TCP port.
+     * @param Closure $onUpdate                Called with {@see InternalServerDescription} after each check.
+     * @param int     $heartbeatFrequencyMs    Interval between successive checks (default 10 s).
+     * @param int     $minHeartbeatFrequencyMs Minimum wait between checks after a failure (default 500 ms).
      */
     public function __construct(
-        private string   $host,
-        private int      $port,
-        private \Closure $onUpdate,
-        private int      $heartbeatFrequencyMs    = 10_000,
-        private int      $minHeartbeatFrequencyMs = 500,
-    ) {}
+        private string $host,
+        private int $port,
+        private Closure $onUpdate,
+        private int $heartbeatFrequencyMs = 10_000,
+        private int $minHeartbeatFrequencyMs = 500,
+    ) {
+    }
 
     // -------------------------------------------------------------------------
     // Lifecycle
@@ -86,8 +91,9 @@ final class ServerMonitor
      */
     public function requestImmediateCheck(): void
     {
-        if (!$this->running) {
+        if (! $this->running) {
             $this->start();
+
             return;
         }
 
@@ -118,7 +124,7 @@ final class ServerMonitor
 
             ($this->onUpdate)($sd);
 
-            if (!$this->running) {
+            if (! $this->running) {
                 break;
             }
 
@@ -145,7 +151,7 @@ final class ServerMonitor
             $conn = $this->getConnection();
 
             $helloCmd = ['hello' => 1, '$db' => 'admin'];
-            [$bytes, ] = OpMsgEncoder::encodeWithRequestId($helloCmd);
+            [$bytes] = OpMsgEncoder::encodeWithRequestId($helloCmd);
 
             $responseBytes = $conn->sendMessage($bytes);
             $endUs         = (int) (microtime(true) * 1_000_000);
@@ -177,11 +183,11 @@ final class ServerMonitor
     /**
      * Return the existing monitoring connection, creating it if necessary.
      *
-     * @throws \MongoDB\Driver\Exception\ConnectionException on failure.
+     * @throws ConnectionException on failure.
      */
     private function getConnection(): Connection
     {
-        if ($this->connection !== null && !$this->connection->isClosed()) {
+        if ($this->connection !== null && ! $this->connection->isClosed()) {
             return $this->connection;
         }
 
@@ -198,9 +204,11 @@ final class ServerMonitor
      */
     private function closeConnection(): void
     {
-        if ($this->connection !== null) {
-            $this->connection->close();
-            $this->connection = null;
+        if ($this->connection === null) {
+            return;
         }
+
+        $this->connection->close();
+        $this->connection = null;
     }
 }

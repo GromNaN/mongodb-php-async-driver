@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Topology;
 
+use Throwable;
+
+use function is_array;
+use function microtime;
+
 /**
  * Internal mutable representation of a single server's discovered state.
  *
@@ -31,17 +36,18 @@ final class InternalServerDescription
     public const TYPE_LOAD_BALANCER    = 'LoadBalancer';
 
     public function __construct(
-        public readonly string      $host,
-        public readonly int         $port,
-        public readonly string      $type          = self::TYPE_UNKNOWN,
-        public readonly array       $helloResponse = [],
-        public readonly ?int        $roundTripTimeMs = null,
-        public readonly ?string     $setName       = null,
-        public readonly array       $tags          = [],
-        public readonly bool        $primary       = false,
-        public readonly int         $lastUpdateTime = 0,
-        public readonly ?\Throwable $error         = null,
-    ) {}
+        public readonly string $host,
+        public readonly int $port,
+        public readonly string $type = self::TYPE_UNKNOWN,
+        public readonly array $helloResponse = [],
+        public readonly ?int $roundTripTimeMs = null,
+        public readonly ?string $setName = null,
+        public readonly array $tags = [],
+        public readonly bool $primary = false,
+        public readonly int $lastUpdateTime = 0,
+        public readonly ?Throwable $error = null,
+    ) {
+    }
 
     // -----------------------------------------------------------------
     // Wither methods (return clones with a single field replaced)
@@ -79,7 +85,7 @@ final class InternalServerDescription
         );
     }
 
-    public function withError(\Throwable $error): self
+    public function withError(Throwable $error): self
     {
         return new self(
             host:            $this->host,
@@ -134,9 +140,9 @@ final class InternalServerDescription
      */
     public static function fromHello(
         string $host,
-        int    $port,
-        array  $response,
-        int    $rttMs,
+        int $port,
+        array $response,
+        int $rttMs,
     ): self {
         $type    = self::TYPE_UNKNOWN;
         $setName = null;

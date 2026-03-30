@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Protocol;
 
+use const PHP_INT_MAX;
+
 /**
  * Thread-safe (single-process) monotonically increasing request-ID generator.
  *

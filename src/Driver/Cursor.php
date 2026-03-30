@@ -1,9 +1,15 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
+use Closure;
 use MongoDB\BSON\Int64;
 use MongoDB\Driver\Exception\RuntimeException;
+use Throwable;
+
+use function count;
+use function is_int;
 
 final class Cursor implements CursorInterface
 {
@@ -13,11 +19,13 @@ final class Cursor implements CursorInterface
     private ?int $cursorId = null;
     private ?Server $server = null;
     private string $namespace = '';
-    /** @var \Closure|null Callable that fetches more items: fn(int $cursorId): array */
-    private ?\Closure $getMoreFn = null;
+    /** @var Closure|null Callable that fetches more items: fn(int $cursorId): array */
+    private ?Closure $getMoreFn = null;
     private bool $exhausted = false;
 
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 
     /** @internal */
     public static function _createFromCommandResult(
@@ -26,16 +34,17 @@ final class Cursor implements CursorInterface
         string $namespace,
         Server $server,
         array $typeMap,
-        ?\Closure $getMoreFn = null,
+        ?Closure $getMoreFn = null,
     ): self {
         $instance = new self();
         $instance->items = $items;
-        $instance->cursorId = is_int($cursorId) ? $cursorId : (int)(string)$cursorId;
+        $instance->cursorId = is_int($cursorId) ? $cursorId : (int) (string) $cursorId;
         $instance->namespace = $namespace;
         $instance->server = $server;
         $instance->typeMap = $typeMap;
         $instance->getMoreFn = $getMoreFn;
         $instance->exhausted = ($instance->cursorId === 0);
+
         return $instance;
     }
 
@@ -47,6 +56,7 @@ final class Cursor implements CursorInterface
         $instance->cursorId = 0;
         $instance->server = $server;
         $instance->exhausted = true;
+
         return $instance;
     }
 
@@ -65,6 +75,7 @@ final class Cursor implements CursorInterface
         if ($this->server === null) {
             throw new RuntimeException('Cursor has no associated server');
         }
+
         return $this->server;
     }
 
@@ -82,9 +93,11 @@ final class Cursor implements CursorInterface
     {
         $this->position++;
         // Fetch more if we've consumed all current items and cursor is still open
-        if ($this->position >= count($this->items) && !$this->exhausted && $this->getMoreFn !== null) {
-            $this->fetchMore();
+        if ($this->position < count($this->items) || $this->exhausted || $this->getMoreFn === null) {
+            return;
         }
+
+        $this->fetchMore();
     }
 
     public function rewind(): void
@@ -105,13 +118,15 @@ final class Cursor implements CursorInterface
             $result[] = $this->current();
             $this->next();
         }
+
         // Also fetch remaining batches
-        while (!$this->exhausted && $this->getMoreFn !== null) {
+        while (! $this->exhausted && $this->getMoreFn !== null) {
             $this->fetchMore();
             while ($this->position < count($this->items)) {
                 $result[] = $this->items[$this->position++];
             }
         }
+
         return $result;
     }
 
@@ -124,6 +139,7 @@ final class Cursor implements CursorInterface
     {
         if ($this->getMoreFn === null || $this->cursorId === 0) {
             $this->exhausted = true;
+
             return;
         }
 
@@ -133,8 +149,9 @@ final class Cursor implements CursorInterface
             $this->position = 0;
             $this->cursorId = $newCursorId;
             $this->exhausted = ($newCursorId === 0);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $this->exhausted = true;
+
             throw $e;
         }
     }

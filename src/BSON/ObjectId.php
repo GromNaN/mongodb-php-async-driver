@@ -4,7 +4,22 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-final class ObjectId implements ObjectIdInterface, \JsonSerializable, Type, \Stringable
+use InvalidArgumentException;
+use JsonSerializable;
+use Stringable;
+
+use function bin2hex;
+use function hex2bin;
+use function pack;
+use function preg_match;
+use function random_bytes;
+use function random_int;
+use function sprintf;
+use function substr;
+use function time;
+use function unpack;
+
+final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Stringable
 {
     /** @var int Static counter, initialized to a random value on first use. */
     private static int $counter = -1;
@@ -12,19 +27,18 @@ final class ObjectId implements ObjectIdInterface, \JsonSerializable, Type, \Str
     /** @var string 12 raw bytes representing the ObjectId. */
     private string $bytes;
 
-    /**
-     * @throws \InvalidArgumentException if $id is not a valid 24-character hex string.
-     */
+    /** @throws InvalidArgumentException if $id is not a valid 24-character hex string. */
     public function __construct(?string $id = null)
     {
         if ($id === null) {
             $this->bytes = self::generate();
         } else {
-            if (!preg_match('/^[0-9a-fA-F]{24}$/', $id)) {
-                throw new \InvalidArgumentException(
+            if (! preg_match('/^[0-9a-fA-F]{24}$/', $id)) {
+                throw new InvalidArgumentException(
                     sprintf('"%s" is not a valid 24-character hexadecimal ObjectId string.', $id),
                 );
             }
+
             $this->bytes = hex2bin($id);
         }
     }
@@ -91,7 +105,7 @@ final class ObjectId implements ObjectIdInterface, \JsonSerializable, Type, \Str
 
         $timestamp = pack('N', time());
         $random    = random_bytes(5);
-        $counter   = self::$counter = (self::$counter + 1) & 0xFFFFFF;
+        $counter   = self::$counter = self::$counter + 1 & 0xFFFFFF;
         $counterBytes = pack('N', $counter);
         // We only need the last 3 bytes of the 4-byte packed int.
         $counterBytes = substr($counterBytes, 1, 3);

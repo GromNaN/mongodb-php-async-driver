@@ -1,5 +1,8 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver\Exception;
 
-class ConnectionException extends RuntimeException {}
+class ConnectionException extends RuntimeException
+{
+}

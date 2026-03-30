@@ -10,7 +10,14 @@ use MongoDB\Internal\Uri\UriOptions;
 use SplQueue;
 use Throwable;
 
+use function Amp\async;
 use function Amp\delay;
+use function array_search;
+use function array_shift;
+use function array_splice;
+use function assert;
+use function max;
+use function sprintf;
 
 /**
  * Manages a pool of {@see Connection} objects to a single MongoDB server.
@@ -34,18 +41,15 @@ final class ConnectionPool
     /** Whether the pool has been permanently closed. */
     private bool $closed = false;
 
-    private ?UriOptions $options;
-
     public function __construct(
         private readonly string $host,
-        private readonly int    $port,
-        private readonly int    $maxPoolSize        = 100,
-        private readonly int    $minPoolSize        = 0,
-        private readonly int    $waitQueueTimeoutMS = 0,
-        ?UriOptions             $options            = null,
+        private readonly int $port,
+        private readonly int $maxPoolSize = 100,
+        private readonly int $minPoolSize = 0,
+        private readonly int $waitQueueTimeoutMS = 0,
+        private ?UriOptions $options = null,
     ) {
         $this->idle    = new SplQueue();
-        $this->options = $options;
     }
 
     // -------------------------------------------------------------------------
@@ -68,14 +72,16 @@ final class ConnectionPool
         }
 
         // 1. Pop a healthy idle connection if one is available.
-        while (!$this->idle->isEmpty()) {
-            /** @var Connection $conn */
+        while (! $this->idle->isEmpty()) {
             $conn = $this->idle->dequeue();
+            assert($conn instanceof Connection);
             if ($conn->isClosed()) {
                 // Discard stale connection; do not count it as inUse.
                 continue;
             }
+
             $this->inUse++;
+
             return $conn;
         }
 
@@ -91,29 +97,32 @@ final class ConnectionPool
         if ($this->waitQueueTimeoutMS > 0) {
             // Schedule a timeout that rejects the waiter if it is still pending.
             $timeoutMs = $this->waitQueueTimeoutMS;
-            \Amp\async(function () use ($deferred, $timeoutMs): void {
+            async(function () use ($deferred, $timeoutMs): void {
                 delay($timeoutMs / 1000.0);
                 // If this deferred is still in the waiters list it has not been
                 // resolved yet; remove it and throw a timeout.
                 $key = array_search($deferred, $this->waiters, true);
-                if ($key !== false) {
-                    array_splice($this->waiters, (int) $key, 1);
-                    $deferred->error(
-                        new ConnectionException(
-                            sprintf(
-                                'Timed out waiting for a connection after %d ms',
-                                $timeoutMs
-                            )
-                        )
-                    );
+                if ($key === false) {
+                    return;
                 }
+
+                array_splice($this->waiters, (int) $key, 1);
+                $deferred->error(
+                    new ConnectionException(
+                        sprintf(
+                            'Timed out waiting for a connection after %d ms',
+                            $timeoutMs,
+                        ),
+                    ),
+                );
             });
         }
 
-        /** @var Connection $conn */
         $conn = $deferred->getFuture()->await();
+        assert($conn instanceof Connection);
 
         $this->inUse++;
+
         return $conn;
     }
 
@@ -130,6 +139,7 @@ final class ConnectionPool
         // If the connection has gone bad, just account for its removal.
         if ($conn->isClosed()) {
             $this->inUse = max(0, $this->inUse - 1);
+
             return;
         }
 
@@ -141,6 +151,7 @@ final class ConnectionPool
             $deferred      = array_shift($this->waiters);
             $this->inUse++;
             $deferred->complete($conn);
+
             return;
         }
 
@@ -157,9 +168,9 @@ final class ConnectionPool
         $this->closed = true;
 
         // Drain idle connections.
-        while (!$this->idle->isEmpty()) {
-            /** @var Connection $conn */
+        while (! $this->idle->isEmpty()) {
             $conn = $this->idle->dequeue();
+            assert($conn instanceof Connection);
             $conn->close();
         }
 
@@ -216,14 +227,15 @@ final class ConnectionPool
                     'Failed to connect to %s:%d: %s',
                     $this->host,
                     $this->port,
-                    $e->getMessage()
+                    $e->getMessage(),
                 ),
                 (int) $e->getCode(),
-                $e
+                $e,
             );
         }
 
         $this->inUse++;
+
         return $conn;
     }
 }

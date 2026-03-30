@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-final class Int64 implements \JsonSerializable, Type, \Stringable
+use JsonSerializable;
+use Stringable;
+
+final class Int64 implements JsonSerializable, Type, Stringable
 {
     private int $value;
 

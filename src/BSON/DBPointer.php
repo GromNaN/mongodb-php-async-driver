@@ -4,20 +4,19 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
+use Stringable;
+
+use function sprintf;
+
 /**
  * Represents a BSON DBPointer type (deprecated in the BSON spec).
  *
  * @deprecated The BSON DBPointer type is deprecated. Use DBRef documents instead.
  */
-final class DBPointer implements Type, \Stringable
+final class DBPointer implements Type, Stringable
 {
-    private string $ref;
-    private string $id;
-
-    private function __construct(string $ref, string $id)
+    private function __construct(private string $ref, private string $id)
     {
-        $this->ref = $ref;
-        $this->id  = $id;
     }
 
     /**

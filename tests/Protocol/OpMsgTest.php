@@ -9,6 +9,11 @@ use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
 use PHPUnit\Framework\TestCase;
 
+use function ord;
+use function strlen;
+use function substr;
+use function unpack;
+
 class OpMsgTest extends TestCase
 {
     public function testEncodeDecodeRoundTrip(): void

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\BSON;
 
+use InvalidArgumentException;
 use MongoDB\BSON\Binary;
 use MongoDB\BSON\Decimal128;
 use MongoDB\BSON\Document;
@@ -18,7 +19,24 @@ use MongoDB\BSON\Regex;
 use MongoDB\BSON\Serializable;
 use MongoDB\BSON\Timestamp;
 use MongoDB\BSON\UTCDateTime;
-use InvalidArgumentException;
+
+use function array_is_list;
+use function chr;
+use function get_debug_type;
+use function hex2bin;
+use function is_array;
+use function is_bool;
+use function is_float;
+use function is_int;
+use function is_object;
+use function is_string;
+use function json_encode;
+use function pack;
+use function sprintf;
+use function str_contains;
+use function str_pad;
+use function strlen;
+use function substr;
 
 /**
  * Pure-userland BSON encoder.
@@ -50,7 +68,6 @@ final class BsonEncoder
     /**
      * Encode a PHP array or object as a BSON document.
      *
-     * @param array|object $document
      * @return string Raw BSON bytes
      */
     public static function encode(array|object $document): string
@@ -81,12 +98,14 @@ final class BsonEncoder
             $serialized = $doc->bsonSerialize();
             // Inject __pclass
             $data = is_array($serialized) ? $serialized : (array) $serialized;
-            $data['__pclass'] = new Binary(get_class($doc), Binary::TYPE_USER_DEFINED);
+            $data['__pclass'] = new Binary($doc::class, Binary::TYPE_USER_DEFINED);
+
             return self::encodeDocument($data);
         }
 
         if ($doc instanceof Serializable) {
             $serialized = $doc->bsonSerialize();
+
             return self::encodeDocument($serialized);
         }
 
@@ -101,6 +120,7 @@ final class BsonEncoder
         }
 
         $totalLen = 4 + strlen($body) + 1; // int32 + elements + terminating null
+
         return pack('V', $totalLen) . $body . "\x00";
     }
 
@@ -116,6 +136,7 @@ final class BsonEncoder
         }
 
         $totalLen = 4 + strlen($body) + 1;
+
         return pack('V', $totalLen) . $body . "\x00";
     }
 
@@ -129,7 +150,7 @@ final class BsonEncoder
 
         if (str_contains($key, "\x00")) {
             throw new InvalidArgumentException(
-                sprintf('BSON key must not contain null bytes, got: %s', json_encode($key))
+                sprintf('BSON key must not contain null bytes, got: %s', json_encode($key)),
             );
         }
 
@@ -162,6 +183,7 @@ final class BsonEncoder
             if ($value >= -2147483648 && $value <= 2147483647) {
                 return [self::TYPE_INT32, pack('V', $value & 0xFFFFFFFF)];
             }
+
             return [self::TYPE_INT64, pack('P', $value)];
         }
 
@@ -173,6 +195,7 @@ final class BsonEncoder
         // --- string ---
         if (is_string($value)) {
             $len = strlen($value);
+
             return [self::TYPE_STRING, pack('V', $len + 1) . $value . "\x00"];
         }
 
@@ -181,6 +204,7 @@ final class BsonEncoder
             if (array_is_list($value)) {
                 return [self::TYPE_ARRAY, self::encodeArray($value)];
             }
+
             return [self::TYPE_DOCUMENT, self::encodeDocument($value)];
         }
 
@@ -189,6 +213,7 @@ final class BsonEncoder
         if ($value instanceof Binary) {
             $data    = $value->getData();
             $subtype = $value->getType();
+
             return [
                 self::TYPE_BINARY,
                 pack('V', strlen($data)) . chr($subtype) . $data,
@@ -205,6 +230,7 @@ final class BsonEncoder
             if ($ms instanceof Int64) {
                 $ms = (int) (string) $ms;
             }
+
             return [self::TYPE_UTCDATETIME, pack('P', $ms)];
         }
 
@@ -225,6 +251,7 @@ final class BsonEncoder
                 $scopeBytes = self::encodeDocument($scope);
                 $inner      = $codeBytes . $scopeBytes;
                 $totalLen   = 4 + strlen($inner); // includes the leading int32 itself
+
                 return [
                     self::TYPE_JAVASCRIPT_WITH_SCOPE,
                     pack('V', $totalLen) . $inner,
@@ -247,6 +274,7 @@ final class BsonEncoder
 
         if ($value instanceof Int64) {
             $v = (int) (string) $value;
+
             return [self::TYPE_INT64, pack('P', $v)];
         }
 
@@ -258,6 +286,7 @@ final class BsonEncoder
             $raw = $value->__toString();
             // If the string happens to be exactly 16 bytes it came from our decoder.
             $bytes = strlen($raw) === 16 ? $raw : str_pad(substr($raw, 0, 16), 16, "\x00");
+
             return [self::TYPE_DECIMAL128, $bytes];
         }
 
@@ -281,12 +310,14 @@ final class BsonEncoder
         if ($value instanceof Persistable) {
             $serialized            = $value->bsonSerialize();
             $data                  = is_array($serialized) ? $serialized : (array) $serialized;
-            $data['__pclass']      = new Binary(get_class($value), Binary::TYPE_USER_DEFINED);
+            $data['__pclass']      = new Binary($value::class, Binary::TYPE_USER_DEFINED);
+
             return [self::TYPE_DOCUMENT, self::encodeDocument($data)];
         }
 
         if ($value instanceof Serializable) {
             $serialized = $value->bsonSerialize();
+
             return [self::TYPE_DOCUMENT, self::encodeDocument($serialized)];
         }
 
@@ -296,7 +327,7 @@ final class BsonEncoder
         }
 
         throw new InvalidArgumentException(
-            sprintf('Unsupported value type for BSON encoding: %s', get_debug_type($value))
+            sprintf('Unsupported value type for BSON encoding: %s', get_debug_type($value)),
         );
     }
 }

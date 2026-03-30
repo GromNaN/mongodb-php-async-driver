@@ -1,28 +1,27 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
-final class ServerApi implements \MongoDB\BSON\Serializable
+use MongoDB\BSON\Serializable;
+use stdClass;
+
+use function in_array;
+use function sprintf;
+
+final class ServerApi implements Serializable
 {
     public const string V1 = '1';
 
-    private string $version;
-    private ?bool $strict;
-    private ?bool $deprecationErrors;
-
-    public function __construct(string $version, ?bool $strict = null, ?bool $deprecationErrors = null)
+    public function __construct(private string $version, private ?bool $strict = null, private ?bool $deprecationErrors = null)
     {
         $validVersions = [self::V1];
 
-        if (!in_array($version, $validVersions, true)) {
+        if (! in_array($version, $validVersions, true)) {
             throw new Exception\InvalidArgumentException(
-                sprintf('Invalid version "%s" given for ServerApi', $version)
+                sprintf('Invalid version "%s" given for ServerApi', $version),
             );
         }
-
-        $this->version = $version;
-        $this->strict = $strict;
-        $this->deprecationErrors = $deprecationErrors;
     }
 
     public function getVersion(): string
@@ -40,9 +39,9 @@ final class ServerApi implements \MongoDB\BSON\Serializable
         return $this->deprecationErrors;
     }
 
-    public function bsonSerialize(): \stdClass
+    public function bsonSerialize(): stdClass
     {
-        $doc = new \stdClass();
+        $doc = new stdClass();
         $doc->version = $this->version;
 
         if ($this->strict !== null) {

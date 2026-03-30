@@ -16,8 +16,26 @@ use MongoDB\BSON\PackedArray;
 use MongoDB\BSON\Regex;
 use MongoDB\BSON\Timestamp;
 use MongoDB\BSON\UTCDateTime;
-use InvalidArgumentException;
 use stdClass;
+
+use function array_is_list;
+use function array_map;
+use function base64_encode;
+use function is_array;
+use function is_bool;
+use function is_float;
+use function is_infinite;
+use function is_int;
+use function is_nan;
+use function is_object;
+use function is_string;
+use function json_encode;
+use function sprintf;
+use function str_contains;
+
+use const JSON_THROW_ON_ERROR;
+use const JSON_UNESCAPED_SLASHES;
+use const JSON_UNESCAPED_UNICODE;
 
 /**
  * Converts PHP values (including BSON extension types) to Extended JSON v2.
@@ -31,9 +49,9 @@ use stdClass;
  *                in a JavaScript 53-bit safe integer, finite doubles), while
  *                other values still use wrappers.
  *
- * @see https://www.mongodb.com/docs/manual/reference/mongodb-extended-json/
- *
  * @internal
+ *
+ * @see https://www.mongodb.com/docs/manual/reference/mongodb-extended-json/
  */
 final class ExtendedJson
 {
@@ -43,8 +61,6 @@ final class ExtendedJson
 
     /**
      * Serialize $value to Canonical Extended JSON.
-     *
-     * @param array|object $value
      */
     public static function toCanonical(array|object $value): string
     {
@@ -55,8 +71,6 @@ final class ExtendedJson
 
     /**
      * Serialize $value to Relaxed Extended JSON.
-     *
-     * @param array|object $value
      */
     public static function toRelaxed(array|object $value): string
     {
@@ -97,6 +111,7 @@ final class ExtendedJson
             } else {
                 $ms = (string) $ms;
             }
+
             return ['$date' => ['$numberLong' => $ms]];
         }
 
@@ -126,6 +141,7 @@ final class ExtendedJson
                     '$scope' => self::canonicalizeValue((array) $scope),
                 ];
             }
+
             return ['$code' => $v->getCode()];
         }
 
@@ -160,6 +176,7 @@ final class ExtendedJson
             if ($v >= -2147483648 && $v <= 2147483647) {
                 return ['$numberInt' => (string) $v];
             }
+
             return ['$numberLong' => (string) $v];
         }
 
@@ -167,9 +184,11 @@ final class ExtendedJson
             if (is_nan($v)) {
                 return ['$numberDouble' => 'NaN'];
             }
+
             if (is_infinite($v)) {
                 return ['$numberDouble' => $v > 0 ? 'Infinity' : '-Infinity'];
             }
+
             // Canonical: always wrap doubles
             return ['$numberDouble' => self::doubleToString($v)];
         }
@@ -184,12 +203,14 @@ final class ExtendedJson
             if (array_is_list($v)) {
                 return array_map(self::canonicalizeValue(...), $v);
             }
+
             // Non-list (string-keyed) array represents a BSON document.
             // Return stdClass so json_encode produces {} for empty documents.
             $result = new stdClass();
             foreach ($v as $key => $item) {
                 $result->$key = self::canonicalizeValue($item);
             }
+
             return $result;
         }
 
@@ -198,6 +219,7 @@ final class ExtendedJson
             foreach ((array) $v as $key => $item) {
                 $result->$key = self::canonicalizeValue($item);
             }
+
             return $result;
         }
 
@@ -206,6 +228,7 @@ final class ExtendedJson
             foreach ((array) $v as $key => $item) {
                 $result->$key = self::canonicalizeValue($item);
             }
+
             return $result;
         }
 
@@ -242,8 +265,10 @@ final class ExtendedJson
             if ($ms instanceof Int64) {
                 $ms = (int) (string) $ms;
             }
+
             // Relaxed: use ISO-8601 date string
             $dt = $v->toDateTime();
+
             return ['$date' => $dt->format('Y-m-d\TH:i:s.v\Z')];
         }
 
@@ -273,6 +298,7 @@ final class ExtendedJson
                     '$scope' => self::relaxValue((array) $scope),
                 ];
             }
+
             return ['$code' => $v->getCode()];
         }
 
@@ -282,6 +308,7 @@ final class ExtendedJson
             if (self::isJsSafeInteger($intVal)) {
                 return $intVal;
             }
+
             return ['$numberLong' => (string) $v];
         }
 
@@ -316,9 +343,11 @@ final class ExtendedJson
             if (is_nan($v)) {
                 return ['$numberDouble' => 'NaN'];
             }
+
             if (is_infinite($v)) {
                 return ['$numberDouble' => $v > 0 ? 'Infinity' : '-Infinity'];
             }
+
             // Relaxed: native float for finite doubles
             return $v;
         }
@@ -333,11 +362,13 @@ final class ExtendedJson
             if (array_is_list($v)) {
                 return array_map(self::relaxValue(...), $v);
             }
+
             // Non-list (string-keyed) array represents a BSON document.
             $result = new stdClass();
             foreach ($v as $key => $item) {
                 $result->$key = self::relaxValue($item);
             }
+
             return $result;
         }
 
@@ -346,6 +377,7 @@ final class ExtendedJson
             foreach ((array) $v as $key => $item) {
                 $result->$key = self::relaxValue($item);
             }
+
             return $result;
         }
 
@@ -354,6 +386,7 @@ final class ExtendedJson
             foreach ((array) $v as $key => $item) {
                 $result->$key = self::relaxValue($item);
             }
+
             return $result;
         }
 
@@ -374,7 +407,7 @@ final class ExtendedJson
         $s = sprintf('%.20g', $v);
 
         // Ensure a decimal point or exponent is present so consumers know it's a float
-        if (!str_contains($s, '.') && !str_contains($s, 'e') && !str_contains($s, 'E')) {
+        if (! str_contains($s, '.') && ! str_contains($s, 'e') && ! str_contains($s, 'E')) {
             $s .= '.0';
         }
 

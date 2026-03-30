@@ -1,8 +1,16 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
-final class ReadPreference implements \MongoDB\BSON\Serializable
+use MongoDB\BSON\Serializable;
+use stdClass;
+
+use function array_filter;
+use function in_array;
+use function sprintf;
+
+final class ReadPreference implements Serializable
 {
     public const string PRIMARY = 'primary';
     public const string PRIMARY_PREFERRED = 'primaryPreferred';
@@ -13,12 +21,11 @@ final class ReadPreference implements \MongoDB\BSON\Serializable
     public const int NO_MAX_STALENESS = -1;
     public const int SMALLEST_MAX_STALENESS_SECONDS = 90;
 
-    private string $mode;
     private array $tagSets;
     private int $maxStalenessSeconds;
     private ?object $hedge;
 
-    public function __construct(string $mode, ?array $tagSets = null, ?array $options = null)
+    public function __construct(private string $mode, ?array $tagSets = null, ?array $options = null)
     {
         $validModes = [
             self::PRIMARY,
@@ -28,13 +35,12 @@ final class ReadPreference implements \MongoDB\BSON\Serializable
             self::NEAREST,
         ];
 
-        if (!in_array($mode, $validModes, true)) {
+        if (! in_array($mode, $validModes, true)) {
             throw new Exception\InvalidArgumentException(
-                sprintf('Invalid mode "%s" given for ReadPreference', $mode)
+                sprintf('Invalid mode "%s" given for ReadPreference', $mode),
             );
         }
 
-        $this->mode = $mode;
         $this->tagSets = $tagSets ?? [];
         $this->maxStalenessSeconds = $options['maxStalenessSeconds'] ?? self::NO_MAX_STALENESS;
         $this->hedge = isset($options['hedge']) ? (object) $options['hedge'] : null;
@@ -60,9 +66,9 @@ final class ReadPreference implements \MongoDB\BSON\Serializable
         return $this->hedge;
     }
 
-    public function bsonSerialize(): \stdClass
+    public function bsonSerialize(): stdClass
     {
-        $doc = new \stdClass();
+        $doc = new stdClass();
         $doc->mode = $this->mode;
 
         if ($this->tagSets !== []) {

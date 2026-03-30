@@ -8,6 +8,10 @@ use InvalidArgumentException;
 use MongoDB\BSON\ObjectId;
 use PHPUnit\Framework\TestCase;
 
+use function array_unique;
+use function serialize;
+use function unserialize;
+
 class ObjectIdTest extends TestCase
 {
     public function testConstructorGeneratesUniqueIds(): void

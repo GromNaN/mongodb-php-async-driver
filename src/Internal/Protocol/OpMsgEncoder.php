@@ -6,6 +6,9 @@ namespace MongoDB\Internal\Protocol;
 
 use MongoDB\Internal\BSON\BsonEncoder;
 
+use function pack;
+use function strlen;
+
 /**
  * Builds OP_MSG wire-protocol frames from PHP command documents.
  *
@@ -38,6 +41,7 @@ final class OpMsgEncoder
      * @param array        $docSequences Optional kind-1 sections.
      *                                   Each entry: ['id' => 'documents', 'docs' => [...]]
      * @param int          $flags        OP_MSG flagBits (0 = default, 2 = exhaustAllowed).
+     *
      * @return string Fully-framed message bytes including header.
      */
     public static function encode(
@@ -53,9 +57,6 @@ final class OpMsgEncoder
     /**
      * Encode a command and return both the wire bytes and the request ID used.
      *
-     * @param array|object $body
-     * @param array        $docSequences
-     * @param int          $flags
      * @return array{string, int} [$bytes, $requestId]
      */
     public static function encodeWithRequestId(
@@ -89,7 +90,7 @@ final class OpMsgEncoder
         $kind1Parts = '';
         foreach ($docSequences as $seq) {
             $identifier = (string) $seq['id'];
-            $docs       = (array)  $seq['docs'];
+            $docs       = (array) $seq['docs'];
 
             // Encode all documents in this sequence
             $docsBytes = '';

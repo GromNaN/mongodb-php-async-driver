@@ -1,6 +1,9 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace MongoDB\Driver;
+
+use MongoDB\Internal\Operation\OperationExecutor;
 
 final class Server
 {
@@ -28,11 +31,11 @@ final class Server
      *
      * @see \MongoDB\Internal\Server\ServerFactory
      */
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 
-    /**
-     * @internal Creates a new Server instance.
-     */
+    /** @internal Creates a new Server instance. */
     public static function _createFromInternal(
         string $host,
         int $port,
@@ -116,31 +119,31 @@ final class Server
 
     public function executeCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        return \MongoDB\Internal\Operation\OperationExecutor::executeCommand($this, $db, $command, $options);
+        return OperationExecutor::executeCommand($this, $db, $command, $options);
     }
 
     public function executeReadCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        return \MongoDB\Internal\Operation\OperationExecutor::executeReadCommand($this, $db, $command, $options);
+        return OperationExecutor::executeReadCommand($this, $db, $command, $options);
     }
 
     public function executeWriteCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        return \MongoDB\Internal\Operation\OperationExecutor::executeWriteCommand($this, $db, $command, $options);
+        return OperationExecutor::executeWriteCommand($this, $db, $command, $options);
     }
 
     public function executeReadWriteCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        return \MongoDB\Internal\Operation\OperationExecutor::executeReadWriteCommand($this, $db, $command, $options);
+        return OperationExecutor::executeReadWriteCommand($this, $db, $command, $options);
     }
 
     public function executeQuery(string $namespace, Query $query, ?array $options = null): CursorInterface
     {
-        return \MongoDB\Internal\Operation\OperationExecutor::executeQuery($this, $namespace, $query, $options);
+        return OperationExecutor::executeQuery($this, $namespace, $query, $options);
     }
 
     public function executeBulkWrite(string $namespace, BulkWrite $bulk, ?array $options = null): WriteResult
     {
-        return \MongoDB\Internal\Operation\OperationExecutor::executeBulkWrite($this, $namespace, $bulk, $options);
+        return OperationExecutor::executeBulkWrite($this, $namespace, $bulk, $options);
     }
 }
