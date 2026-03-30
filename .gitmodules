@@ -10,3 +10,7 @@
 	path = tests/references/specifications
 	url = https://github.com/mongodb/specifications
 	shallow = true
+[submodule "tests/drivers-evergreen-tools"]
+	path = tests/drivers-evergreen-tools
+	url = https://github.com/mongodb-labs/drivers-evergreen-tools
+	shallow = true
