@@ -77,7 +77,7 @@ jobs:
         run: composer install --no-interaction --prefer-dist
 
       - name: Run phpt tests
-        run: vendor/bin/phpunit --testsuite phpt
+        run: bash tests/run-phpt.sh
         env:
           MONGODB_URI: ${{ steps.setup-mongodb.outputs.cluster-uri }}
 

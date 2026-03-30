@@ -15,8 +15,8 @@ PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox --testsuite unit
 # Integration tests (MongoDB on localhost:27017)
 PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox --testsuite integration
 
-# ext-mongodb phpt compatibility tests (delegates to run-tests.php internally)
-PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testsuite phpt
+# ext-mongodb phpt compatibility tests
+PHP_INI_SCAN_DIR="" bash tests/run-phpt.sh
 ```
 
 Run tests after every non-trivial change. Commit only when all tests pass.
