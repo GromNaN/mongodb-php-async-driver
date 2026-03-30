@@ -365,7 +365,7 @@ final class OperationExecutor
         // Build the public Server object for WriteResult.
         $publicServer = $this->buildPublicServer($server);
 
-        return WriteResult::_createFromInternal(
+        return WriteResult::createFromInternal(
             insertedCount:   $totalInserted,
             matchedCount:    $totalMatched,
             modifiedCount:   $totalModified,
@@ -736,7 +736,7 @@ final class OperationExecutor
 
         $publicType = $typeMap[$sd->type] ?? Server::TYPE_UNKNOWN;
 
-        $serverDescription = ServerDescription::_createFromInternal(
+        $serverDescription = ServerDescription::createFromInternal(
             host:           $sd->host,
             port:           $sd->port,
             type:           $sd->type,
@@ -745,7 +745,7 @@ final class OperationExecutor
             lastUpdateTime: $sd->lastUpdateTime,
         );
 
-        return Server::_createFromInternal(
+        return Server::createFromInternal(
             host:              $sd->host,
             port:              $sd->port,
             type:              $publicType,

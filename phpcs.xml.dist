@@ -12,9 +12,6 @@
     <file>src</file>
     <file>tests</file>
 
-    <!-- Ignore auto-generated code -->
-    <exclude-pattern>src/Builder/(Accumulator|Expression|Query|Search|Stage|Update)/*\.php</exclude-pattern>
-
     <!-- Target minimum supported PHP version -->
     <config name="php_version" value="80400"/>
 
@@ -47,24 +44,6 @@
         <exclude name="SlevomatCodingStandard.TypeHints.LongTypeHints" />
 
 
-        <!-- ************************************************ -->
-        <!-- Exclude sniffs that may cause functional changes -->
-        <!-- ************************************************ -->
-        <!--<exclude name="Generic.PHP.ForbiddenFunctions.FoundWithAlternative" />
-        <exclude name="SlevomatCodingStandard.ControlStructures.DisallowYodaComparison" />
-        <exclude name="SlevomatCodingStandard.ControlStructures.EarlyExit" />
-        <exclude name="SlevomatCodingStandard.ControlStructures.UselessIfConditionWithReturn" />
-        <exclude name="SlevomatCodingStandard.Functions.StaticClosure" />
-        <exclude name="SlevomatCodingStandard.Functions.UnusedInheritedVariablePassedToClosure" />
-        <exclude name="SlevomatCodingStandard.Operators.DisallowEqualOperators" />-->
-
-
-        <!-- ********************************************************* -->
-        <!-- Exclude sniffs that cause a huge diff - enable separately -->
-        <!-- ********************************************************* -->
-        <!--<exclude name="SlevomatCodingStandard.Commenting.DocCommentSpacing.IncorrectAnnotationsGroup" />-->
-
-
         <!-- ********************* -->
         <!-- Exclude broken sniffs -->
         <!-- ********************* -->
@@ -74,6 +53,8 @@
 
         <!-- Disable forbidden annotation sniff as excluding @api from the list doesn't work -->
         <exclude name="SlevomatCodingStandard.Commenting.ForbiddenAnnotations.AnnotationForbidden" />
+
+        <exclude name="Squiz.Commenting.FunctionComment.WrongStyle"/>
     </rule>
 
 

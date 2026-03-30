@@ -28,8 +28,7 @@ final class Cursor implements CursorInterface
     }
 
     /** @internal */
-    // phpcs:ignore PSR2.Methods.MethodDeclaration.Underscore
-    public static function _createFromCommandResult(
+    public static function createFromCommandResult(
         array $items,
         int|Int64 $cursorId,
         string $namespace,
@@ -50,8 +49,7 @@ final class Cursor implements CursorInterface
     }
 
     /** @internal */
-    // phpcs:ignore PSR2.Methods.MethodDeclaration.Underscore
-    public static function _createFromArray(array $items, Server $server): self
+    public static function createFromArray(array $items, Server $server): self
     {
         $instance = new self();
         $instance->items = $items;

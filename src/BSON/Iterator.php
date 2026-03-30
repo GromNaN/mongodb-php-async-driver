@@ -12,7 +12,7 @@ use function array_keys;
  * A forward-only iterator over a decoded BSON document or array.
  *
  * Instances are created exclusively by internal decoder code via
- * {@see self::_createFromDecodedData()}.  The constructor is private to
+ * {@see self::createFromDecodedData()}.  The constructor is private to
  * prevent userland instantiation.
  */
 final class Iterator implements IteratorInterface
@@ -23,7 +23,7 @@ final class Iterator implements IteratorInterface
     private int $position;
 
     /**
-     * Private constructor – use {@see self::_createFromDecodedData()} instead.
+     * Private constructor – use {@see self::createFromDecodedData()} instead.
      *
      * @param array<string|int, mixed> $data
      */
@@ -44,8 +44,7 @@ final class Iterator implements IteratorInterface
      *
      * @param array<string|int, mixed> $data
      */
-    // phpcs:ignore PSR2.Methods.MethodDeclaration.Underscore
-    public static function _createFromDecodedData(array $data): static
+    public static function createFromDecodedData(array $data): static
     {
         return new static($data);
     }

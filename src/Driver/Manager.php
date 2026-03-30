@@ -185,7 +185,7 @@ final class Manager
         return SyncRunner::run(function () {
             $servers = [];
             foreach ($this->topologyManager->getServers() as $sd) {
-                $servers[] = Server::_createFromDescription($sd, $this->executor);
+                $servers[] = Server::createFromDescription($sd, $this->executor);
             }
 
             return $servers;
@@ -199,13 +199,13 @@ final class Manager
         return SyncRunner::run(function () use ($rp) {
             $sd = $this->topologyManager->selectServer($rp);
 
-            return Server::_createFromDescription($sd, $this->executor);
+            return Server::createFromDescription($sd, $this->executor);
         });
     }
 
     public function startSession(?array $options = null): Session
     {
-        return Session::_createFromManager($this, $options ?? []);
+        return Session::createFromManager($this, $options ?? []);
     }
 
     public function getEncryptedFieldsMap(): array|object|null

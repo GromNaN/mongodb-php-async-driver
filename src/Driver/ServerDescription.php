@@ -33,8 +33,7 @@ final class ServerDescription
     }
 
     /** @internal Creates a new ServerDescription instance. */
-    // phpcs:ignore PSR2.Methods.MethodDeclaration.Underscore
-    public static function _createFromInternal(
+    public static function createFromInternal(
         string $host,
         int $port,
         string $type,

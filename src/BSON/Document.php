@@ -154,7 +154,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
 
     public function getIterator(): Iterator
     {
-        return Iterator::_createFromDecodedData($this->decode());
+        return Iterator::createFromDecodedData($this->decode());
     }
 
     // ------------------------------------------------------------------

@@ -147,7 +147,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
 
     public function getIterator(): Iterator
     {
-        return Iterator::_createFromDecodedData($this->decode());
+        return Iterator::createFromDecodedData($this->decode());
     }
 
     // ------------------------------------------------------------------

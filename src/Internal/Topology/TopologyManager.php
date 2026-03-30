@@ -352,7 +352,7 @@ final class TopologyManager
      */
     private function buildPublicServerDescription(InternalServerDescription $sd): ServerDescription
     {
-        return ServerDescription::_createFromInternal(
+        return ServerDescription::createFromInternal(
             host:           $sd->host,
             port:           $sd->port,
             type:           $sd->type,
