@@ -49,35 +49,13 @@ src/bootstrap.php            Global Monitoring functions (not autoloadable)
 - **`SyncRunner::run()`**: wraps async operations so they block when called from non-fiber context (plain PHP scripts) and suspend-only when called from inside a Revolt fiber.
 - **No class_exists guards**: classes are plain PSR-4 files. The Composer autoloader won't load a file for an already-defined class, so no guards are needed.
 
-## Reference stubs
+## References
 
-The canonical API surface lives in `.refs/mongo-php-driver/src/`. When implementing or verifying a method signature, consult:
-
-- `.refs/mongo-php-driver/src/MongoDB/Manager.stub.php`
-- `.refs/mongo-php-driver/src/MongoDB/Cursor.stub.php`
-- `.refs/mongo-php-driver/src/BSON/*.stub.php`
-- etc.
-
-## BSON codec quick reference
-
-| BSON type byte | PHP decode result |
+| What | Where |
 |---|---|
-| `0x01` double | `float` |
-| `0x02` string | `string` |
-| `0x03` document | `stdClass` or `array` per typeMap |
-| `0x04` array | `array` per typeMap |
-| `0x05` binary | `MongoDB\BSON\Binary` |
-| `0x07` objectid | `MongoDB\BSON\ObjectId` |
-| `0x08` boolean | `bool` |
-| `0x09` UTC datetime | `MongoDB\BSON\UTCDateTime` |
-| `0x0A` null | `null` |
-| `0x0B` regex | `MongoDB\BSON\Regex` |
-| `0x10` int32 | `int` |
-| `0x11` timestamp | `MongoDB\BSON\Timestamp` |
-| `0x12` int64 | `MongoDB\BSON\Int64` |
-| `0x13` decimal128 | `MongoDB\BSON\Decimal128` |
-| `0x7F` maxkey | `MongoDB\BSON\MaxKey` |
-| `0xFF` minkey | `MongoDB\BSON\MinKey` |
+| Driver API stubs | `.refs/mongo-php-driver/src/MongoDB/*.stub.php` and `.refs/mongo-php-driver/src/BSON/*.stub.php` |
+| High-level library | `.refs/mongo-php-library/src/` |
+| Client specifications | `.refs/specifications/source/` (BSON, OP_MSG, SDAM, Server Selection, Auth, Sessions, …) |
 
 ## Common pitfalls
 
