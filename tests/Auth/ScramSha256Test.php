@@ -36,7 +36,7 @@ class ScramSha256Test extends TestCase
     private function callPrivate(string $method, mixed ...$args): mixed
     {
         $rm = new ReflectionMethod(ScramSha256::class, $method);
-        $rm->setAccessible(true);
+
         return $rm->invoke($this->scram, ...$args);
     }
 
