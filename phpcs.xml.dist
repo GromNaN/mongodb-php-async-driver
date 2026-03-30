@@ -11,6 +11,7 @@
 
     <file>src</file>
     <file>tests</file>
+    <exclude-pattern>tests/references/</exclude-pattern>
 
     <!-- Target minimum supported PHP version -->
     <config name="php_version" value="80400"/>

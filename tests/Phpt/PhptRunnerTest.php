@@ -9,25 +9,24 @@ use PHPUnit\Framework\TestCase;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 
-use function array_keys;
 use function dirname;
 use function escapeshellarg;
 use function explode;
 use function fclose;
 use function file_get_contents;
 use function fwrite;
-use function implode;
-use function proc_close;
-use function proc_open;
 use function preg_match;
 use function preg_quote;
 use function preg_split;
+use function proc_close;
+use function proc_open;
 use function rtrim;
 use function str_contains;
 use function str_replace;
 use function str_starts_with;
-use function strrpos;
 use function stream_get_contents;
+use function strlen;
+use function strrpos;
 use function strtolower;
 use function substr;
 use function trim;
@@ -70,6 +69,7 @@ class PhptRunnerTest extends TestCase
             }
 
             $relative = substr($file->getPathname(), strlen($root) + 1);
+
             yield $relative => [$file->getPathname()];
         }
     }
@@ -100,9 +100,11 @@ class PhptRunnerTest extends TestCase
         if (isset($sections['INI'])) {
             foreach (explode("\n", trim($sections['INI'])) as $line) {
                 $line = trim($line);
-                if ($line !== '') {
-                    $extraIni[] = $line;
+                if ($line === '') {
+                    continue;
                 }
+
+                $extraIni[] = $line;
             }
         }
 
@@ -161,7 +163,7 @@ class PhptRunnerTest extends TestCase
      * replaced with the literal original directory so that relative
      * require_once calls inside the test code still resolve correctly.
      *
-     * @param list<string> $extraIni  Additional ini=value settings.
+     * @param list<string> $extraIni Additional ini=value settings.
      */
     private function runPhpCode(string $code, string $dir, array $extraIni = []): string
     {
