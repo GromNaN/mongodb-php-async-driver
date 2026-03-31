@@ -102,6 +102,6 @@ final class UTCDateTime implements UTCDateTimeInterface, JsonSerializable, Type,
 
     public function __debugInfo(): array
     {
-        return ['milliseconds' => $this->milliseconds];
+        return ['milliseconds' => (string) $this->milliseconds];
     }
 }
