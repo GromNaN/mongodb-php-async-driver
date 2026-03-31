@@ -107,4 +107,20 @@ final class WriteResult
     {
         return $this->acknowledged;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'nInserted'         => $this->getInsertedCount(),
+            'nMatched'          => $this->getMatchedCount(),
+            'nModified'         => $this->getModifiedCount(),
+            'nRemoved'          => $this->getDeletedCount(),
+            'nUpserted'         => $this->getUpsertedCount(),
+            'upsertedIds'       => $this->upsertedIds,
+            'writeErrors'       => $this->writeErrors,
+            'writeConcernError' => $this->writeConcernError,
+            'writeConcern'      => null,
+            'errorReplies'      => [],
+        ];
+    }
 }

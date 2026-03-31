@@ -32,4 +32,14 @@ final class WriteError
     {
         return $this->info;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'message' => $this->message,
+            'code'    => $this->code,
+            'index'   => $this->index,
+            'info'    => $this->info,
+        ];
+    }
 }

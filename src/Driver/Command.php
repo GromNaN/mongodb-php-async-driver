@@ -23,4 +23,9 @@ final class Command
     {
         return $this->options;
     }
+
+    public function __debugInfo(): array
+    {
+        return ['command' => $this->document];
+    }
 }

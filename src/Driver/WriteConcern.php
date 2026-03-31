@@ -97,4 +97,13 @@ final class WriteConcern implements Serializable
             $properties['journal'] ?? null,
         );
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'w'        => $this->w,
+            'j'        => $this->journal,
+            'wtimeout' => $this->wtimeout,
+        ];
+    }
 }

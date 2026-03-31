@@ -53,4 +53,9 @@ final class ReadConcern implements Serializable
     {
         return new static($properties['level'] ?? null);
     }
+
+    public function __debugInfo(): array
+    {
+        return ['level' => $this->level];
+    }
 }

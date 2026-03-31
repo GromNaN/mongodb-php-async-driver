@@ -35,4 +35,13 @@ final class WriteConcernError
     {
         return $this->details;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'message' => $this->message,
+            'code'    => $this->code,
+            'info'    => $this->info,
+        ];
+    }
 }

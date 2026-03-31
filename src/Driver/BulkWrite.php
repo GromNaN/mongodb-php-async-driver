@@ -67,4 +67,16 @@ final class BulkWrite implements Countable
     {
         return $this->options;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'database'                  => null,
+            'collection'                => null,
+            'ordered'                   => $this->options['ordered'],
+            'bypassDocumentValidation'  => $this->options['bypassDocumentValidation'] ?? null,
+            'session'                   => null,
+            'write_concern'             => null,
+        ];
+    }
 }

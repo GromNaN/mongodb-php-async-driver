@@ -117,4 +117,14 @@ final class ReadPreference implements Serializable
 
         return $instance;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'mode'                => $this->mode,
+            'tags'                => $this->tagSets !== [] ? $this->tagSets : null,
+            'maxStalenessSeconds' => $this->maxStalenessSeconds !== self::NO_MAX_STALENESS ? $this->maxStalenessSeconds : null,
+            'hedge'               => $this->hedge,
+        ];
+    }
 }

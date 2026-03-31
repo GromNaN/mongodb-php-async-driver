@@ -70,4 +70,13 @@ final class ServerApi implements Serializable
         $this->strict = $data['strict'] ?? null;
         $this->deprecationErrors = $data['deprecationErrors'] ?? null;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'version'           => $this->version,
+            'strict'            => $this->strict,
+            'deprecationErrors' => $this->deprecationErrors,
+        ];
+    }
 }

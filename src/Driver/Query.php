@@ -23,4 +23,13 @@ final class Query
     {
         return $this->options;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'filter'      => $this->filter,
+            'options'     => $this->options ?: null,
+            'readConcern' => null,
+        ];
+    }
 }
