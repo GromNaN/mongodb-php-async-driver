@@ -31,12 +31,16 @@ use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\UriOptions;
 use Throwable;
 
+use MongoDB\BSON\Int64;
+use stdClass;
+
 use function array_map;
 use function array_slice;
 use function array_values;
 use function count;
 use function explode;
 use function is_array;
+use function is_object;
 use function iterator_to_array;
 use function microtime;
 use function strpos;
@@ -452,11 +456,13 @@ final class OperationExecutor
         InternalServerDescription $server,
     ): CursorInterface {
         // Commands that return a cursor sub-document.
-        if (isset($body['cursor']) && is_array($body['cursor'])) {
-            $cursorDoc = $body['cursor'];
-            $cursorId  = $cursorDoc['id'] ?? 0;
-            $ns        = $cursorDoc['ns'] ?? $db;
-            $firstBatch = $cursorDoc['firstBatch'] ?? [];
+        $rawCursor = $body['cursor'] ?? null;
+        if ($rawCursor !== null && (is_array($rawCursor) || is_object($rawCursor))) {
+            $cursorDoc  = (array) $rawCursor;
+            $cursorIdRaw = $cursorDoc['id'] ?? 0;
+            $cursorId   = $cursorIdRaw instanceof Int64 ? (int) (string) $cursorIdRaw : (int) $cursorIdRaw;
+            $ns         = (string) ($cursorDoc['ns'] ?? $db);
+            $firstBatch = (array) ($cursorDoc['firstBatch'] ?? []);
 
             return new class (
                 $firstBatch,
@@ -526,11 +532,12 @@ final class OperationExecutor
 
                         [$bytes] = OpMsgEncoder::encodeWithRequestId($getMoreCmd);
                         $responseBytes = $conn->sendMessage($bytes);
-                        $decoded = OpMsgDecoder::decodeAndCheck($responseBytes);
-                        $body    = is_array($decoded) ? $decoded : (array) $decoded;
-
-                        $this->cursorId = (int) ($body['cursor']['id'] ?? 0);
-                        $nextBatch      = $body['cursor']['nextBatch'] ?? [];
+                        $decoded   = OpMsgDecoder::decodeAndCheck($responseBytes);
+                        $body      = is_array($decoded) ? $decoded : (array) $decoded;
+                        $cursorDoc = (array) ($body['cursor'] ?? []);
+                        $cursorIdRaw     = $cursorDoc['id'] ?? 0;
+                        $this->cursorId  = $cursorIdRaw instanceof Int64 ? (int) (string) $cursorIdRaw : (int) $cursorIdRaw;
+                        $nextBatch       = (array) ($cursorDoc['nextBatch'] ?? []);
 
                         // Append new batch, drop already-iterated documents.
                         $this->buffer   = array_values(array_slice($this->buffer, $this->position));
