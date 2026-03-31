@@ -36,7 +36,7 @@ if [ $# -gt 0 ]; then
             fi
         done
         if [ $matched -eq 0 ]; then
-            for f in "$DRIVER_TESTS/$pattern"; do
+            for f in $DRIVER_TESTS/$pattern; do
                 [ -f "$f" ] || continue
                 if ! printf '%s\n' "$SKIP_PATHS" | grep -qxF "$f"; then
                     echo "$f"
