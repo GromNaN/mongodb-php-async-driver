@@ -212,6 +212,14 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
         return $this->bson;
     }
 
+    public function __debugInfo(): array
+    {
+        return [
+            'data'  => base64_encode($this->getBson()),
+            'value' => $this->toPHP(['document' => 'bson', 'array' => 'bson']),
+        ];
+    }
+
     /**
      * Return the decoded PHP array, decoding from raw BSON if necessary.
      *

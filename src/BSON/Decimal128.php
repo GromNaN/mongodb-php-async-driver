@@ -49,4 +49,9 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
     {
         return new static($properties['value']);
     }
+
+    public function __debugInfo(): array
+    {
+        return ['dec' => $this->value];
+    }
 }

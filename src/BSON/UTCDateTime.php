@@ -99,4 +99,9 @@ final class UTCDateTime implements UTCDateTimeInterface, JsonSerializable, Type,
     {
         return new static($properties['ms'] ?? $properties['milliseconds']);
     }
+
+    public function __debugInfo(): array
+    {
+        return ['milliseconds' => $this->milliseconds];
+    }
 }

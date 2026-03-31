@@ -70,4 +70,12 @@ final class Timestamp implements TimestampInterface, JsonSerializable, Type, Str
     {
         return new static($properties['increment'], $properties['timestamp']);
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'increment' => (string) $this->increment,
+            'timestamp' => (string) $this->timestamp,
+        ];
+    }
 }

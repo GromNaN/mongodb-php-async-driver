@@ -79,4 +79,12 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
     {
         return new static($properties['code'], $properties['scope'] ?? null);
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'code'  => $this->code,
+            'scope' => $this->scope,
+        ];
+    }
 }

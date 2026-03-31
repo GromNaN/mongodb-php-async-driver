@@ -66,4 +66,12 @@ final class DBPointer implements Type, Stringable
     {
         return new static($properties['ref'], $properties['id']);
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'ref' => $this->ref,
+            'id'  => $this->id,
+        ];
+    }
 }

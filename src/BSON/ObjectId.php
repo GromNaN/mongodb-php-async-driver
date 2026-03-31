@@ -88,6 +88,11 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
         return new static($properties['oid'] ?? bin2hex($properties['bytes'] ?? ''));
     }
 
+    public function __debugInfo(): array
+    {
+        return ['oid' => $this->__toString()];
+    }
+
     // ------------------------------------------------------------------
     // Internal generation
     // ------------------------------------------------------------------

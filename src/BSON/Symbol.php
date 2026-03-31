@@ -51,4 +51,9 @@ final class Symbol implements Type, Stringable
     {
         return new static($properties['symbol']);
     }
+
+    public function __debugInfo(): array
+    {
+        return ['symbol' => $this->symbol];
+    }
 }

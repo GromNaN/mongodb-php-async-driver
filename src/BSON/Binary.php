@@ -90,4 +90,12 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
     {
         return new static($properties['data'], $properties['type']);
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'data' => base64_encode($this->data),
+            'type' => $this->type,
+        ];
+    }
 }

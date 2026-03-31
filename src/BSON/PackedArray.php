@@ -205,6 +205,14 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
         return $this->bson;
     }
 
+    public function __debugInfo(): array
+    {
+        return [
+            'data'  => base64_encode($this->getBson()),
+            'value' => $this->toPHP(['root' => 'array', 'document' => 'bson', 'array' => 'bson']),
+        ];
+    }
+
     /**
      * Return the decoded PHP array, decoding from raw BSON if necessary.
      *

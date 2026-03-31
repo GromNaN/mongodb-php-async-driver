@@ -52,4 +52,9 @@ final class Int64 implements JsonSerializable, Type, Stringable
     {
         return new static($properties['value']);
     }
+
+    public function __debugInfo(): array
+    {
+        return ['integer' => (string) $this->value];
+    }
 }

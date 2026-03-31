@@ -70,4 +70,12 @@ final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
     {
         return new static($properties['pattern'], $properties['flags'] ?? '');
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'pattern' => $this->pattern,
+            'flags'   => $this->flags,
+        ];
+    }
 }
