@@ -17,7 +17,7 @@ use function sprintf;
 final class UTCDateTime implements UTCDateTimeInterface, JsonSerializable, Type, Stringable
 {
     /** Milliseconds since Unix epoch. */
-    private int $milliseconds;
+    public readonly string $milliseconds;
 
     /**
      * @param int|DateTimeInterface|null $milliseconds
@@ -28,12 +28,12 @@ final class UTCDateTime implements UTCDateTimeInterface, JsonSerializable, Type,
     public function __construct(int|DateTimeInterface|null $milliseconds = null)
     {
         if ($milliseconds === null) {
-            $this->milliseconds = (int) (microtime(true) * 1000);
+            $this->milliseconds = (string) (microtime(true) * 1000);
         } elseif ($milliseconds instanceof DateTimeInterface) {
             // DateTimeInterface stores microseconds; convert to ms.
-            $this->milliseconds = (int) ($milliseconds->format('Uv'));
+            $this->milliseconds = (string) ($milliseconds->format('Uv'));
         } else {
-            $this->milliseconds = $milliseconds;
+            $this->milliseconds = (string) $milliseconds;
         }
     }
 
@@ -43,7 +43,7 @@ final class UTCDateTime implements UTCDateTimeInterface, JsonSerializable, Type,
 
     public function toDateTime(): DateTimeImmutable
     {
-        $seconds      = intdiv($this->milliseconds, 1000);
+        $seconds      = intdiv((int) $this->milliseconds, 1000);
         $microseconds = ($this->milliseconds % 1000) * 1000;
 
         $dt = DateTimeImmutable::createFromFormat(
@@ -60,12 +60,12 @@ final class UTCDateTime implements UTCDateTimeInterface, JsonSerializable, Type,
 
     public function getMilliseconds(): int
     {
-        return $this->milliseconds;
+        return (int) $this->milliseconds;
     }
 
     public function __toString(): string
     {
-        return (string) $this->milliseconds;
+        return $this->milliseconds;
     }
 
     // ------------------------------------------------------------------
@@ -76,7 +76,7 @@ final class UTCDateTime implements UTCDateTimeInterface, JsonSerializable, Type,
     {
         return [
             '$date' => [
-                '$numberLong' => (string) $this->milliseconds,
+                '$numberLong' => $this->milliseconds,
             ],
         ];
     }
@@ -87,12 +87,12 @@ final class UTCDateTime implements UTCDateTimeInterface, JsonSerializable, Type,
 
     public function __serialize(): array
     {
-        return ['ms' => $this->milliseconds];
+        return ['ms' => (int) $this->milliseconds];
     }
 
     public function __unserialize(array $data): void
     {
-        $this->milliseconds = $data['ms'];
+        $this->milliseconds = (string) $data['ms'];
     }
 
     public static function __set_state(array $properties): static
