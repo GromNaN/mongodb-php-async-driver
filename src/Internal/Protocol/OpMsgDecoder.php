@@ -140,7 +140,7 @@ final class OpMsgDecoder
         // Normalise: support both array and object bodies.
         $ok = is_array($body) ? ($body['ok'] ?? null) : ($body->ok ?? null);
 
-        if ($ok !== 1) {
+        if ((int) $ok !== 1) {
             $errmsg = is_array($body)
                 ? ($body['errmsg'] ?? 'Unknown error')
                 : ($body->errmsg ?? 'Unknown error');

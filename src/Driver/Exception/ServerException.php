@@ -5,7 +5,7 @@ namespace MongoDB\Driver\Exception;
 
 class ServerException extends RuntimeException
 {
-    public function __construct(string $message, int $code, protected object $resultDocument)
+    public function __construct(string $message, int $code, protected object $resultDocument = new \stdClass())
     {
         parent::__construct($message, $code);
     }

@@ -272,7 +272,7 @@ final class Connection
         $remaining = $length;
 
         while ($remaining > 0) {
-            $chunk = $this->socket->read(min($remaining, 65536));
+            $chunk = $this->socket->read(limit: min($remaining, 65536));
             if ($chunk === null) {
                 throw new ConnectionException(
                     sprintf(

@@ -9,7 +9,6 @@ use MongoDB\Driver\Exception\ConnectionException;
 use MongoDB\Internal\Connection\Connection;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
-use Revolt\EventLoop;
 use Throwable;
 
 use function Amp\async;
@@ -67,9 +66,12 @@ final class ServerMonitor
 
         $this->running = true;
 
-        EventLoop::defer(function (): void {
-            async(fn () => $this->monitorLoop())->await();
-        });
+        // Schedule the monitor loop as a background fiber.  async() queues
+        // the fiber via EventLoop::queue() and is safe to call from any context
+        // (fiber or main).  We must NOT await here — the caller is not inside
+        // a suspendable fiber at this point, and we want the loop to run in the
+        // background while the caller proceeds.
+        async(fn () => $this->monitorLoop());
     }
 
     /**
@@ -97,13 +99,10 @@ final class ServerMonitor
             return;
         }
 
-        // Schedule a new iteration immediately without waiting for the current
-        // sleep interval to expire.
-        EventLoop::defer(function (): void {
-            async(function (): void {
-                $sd = $this->checkServer();
-                ($this->onUpdate)($sd);
-            })->await();
+        // Schedule an immediate extra check as a background fiber.
+        async(function (): void {
+            $sd = $this->checkServer();
+            ($this->onUpdate)($sd);
         });
     }
 

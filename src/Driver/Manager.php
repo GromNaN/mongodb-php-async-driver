@@ -199,7 +199,23 @@ final class Manager
         return SyncRunner::run(function () use ($rp) {
             $sd = $this->topologyManager->selectServer($rp);
 
-            return Server::createFromDescription($sd, $this->executor);
+            $serverDesc = ServerDescription::createFromInternal(
+                host:           $sd->host,
+                port:           $sd->port,
+                type:           $sd->type,
+                roundTripTime:  $sd->roundTripTimeMs,
+                helloResponse:  $sd->helloResponse,
+                lastUpdateTime: $sd->lastUpdateTime,
+            );
+
+            return Server::createFromInternal(
+                host:              $sd->host,
+                port:              $sd->port,
+                type:              self::mapInternalServerType($sd->type),
+                latency:           $sd->roundTripTimeMs,
+                serverDescription: $serverDesc,
+                tags:              $sd->tags,
+            );
         });
     }
 
@@ -292,5 +308,21 @@ final class Manager
     private function extractSession(?array $options): ?Session
     {
         return $options['session'] ?? null;
+    }
+
+    private static function mapInternalServerType(string $type): int
+    {
+        return match ($type) {
+            'Standalone'      => Server::TYPE_STANDALONE,
+            'Mongos'          => Server::TYPE_MONGOS,
+            'PossiblePrimary' => Server::TYPE_POSSIBLE_PRIMARY,
+            'RSPrimary'       => Server::TYPE_RS_PRIMARY,
+            'RSSecondary'     => Server::TYPE_RS_SECONDARY,
+            'RSArbiter'       => Server::TYPE_RS_ARBITER,
+            'RSOther'         => Server::TYPE_RS_OTHER,
+            'RSGhost'         => Server::TYPE_RS_GHOST,
+            'LoadBalancer'    => Server::TYPE_LOAD_BALANCER,
+            default           => Server::TYPE_UNKNOWN,
+        };
     }
 }
