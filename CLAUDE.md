@@ -15,8 +15,12 @@ PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox --testsuite unit
 # Integration tests (MongoDB on localhost:27017)
 PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox --testsuite integration
 
-# ext-mongodb phpt compatibility tests
+# ext-mongodb phpt compatibility tests (all)
 PHP_INI_SCAN_DIR="" bash tests/run-phpt.sh
+
+# phpt — subset via glob(s) relative to tests/references/mongo-php-driver/tests/
+PHP_INI_SCAN_DIR="" bash tests/run-phpt.sh 'bson/bson-objectid-*.phpt'
+PHP_INI_SCAN_DIR="" bash tests/run-phpt.sh 'bson/bson-utcdatetime-*.phpt' 'bson/bson-binary-*.phpt'
 ```
 
 Run tests after every non-trivial change. Commit only when all tests pass.

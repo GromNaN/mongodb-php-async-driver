@@ -20,11 +20,37 @@ foreach (array_keys(\$skip) as \$rel) {
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
 
-find "$DRIVER_TESTS" -name '*.phpt' -type f | sort | while IFS= read -r f; do
-    if ! printf '%s\n' "$SKIP_PATHS" | grep -qxF "$f"; then
-        echo "$f"
-    fi
-done > "$TMPFILE"
+if [ $# -gt 0 ]; then
+    # Glob(s) passed as arguments.
+    # Strategy: expand the pattern as-is first (handles shell-expanded paths
+    # and absolute globs). If nothing matches, retry relative to $DRIVER_TESTS
+    # (handles quoted globs like 'bson/bson-*.phpt').
+    for pattern in "$@"; do
+        matched=0
+        for f in $pattern; do
+            [ -f "$f" ] || continue
+            matched=1
+            abs_f="$(cd "$(dirname "$f")" && pwd)/$(basename "$f")"
+            if ! printf '%s\n' "$SKIP_PATHS" | grep -qxF "$abs_f"; then
+                echo "$abs_f"
+            fi
+        done
+        if [ $matched -eq 0 ]; then
+            for f in "$DRIVER_TESTS/$pattern"; do
+                [ -f "$f" ] || continue
+                if ! printf '%s\n' "$SKIP_PATHS" | grep -qxF "$f"; then
+                    echo "$f"
+                fi
+            done
+        fi
+    done | sort -u > "$TMPFILE"
+else
+    find "$DRIVER_TESTS" -name '*.phpt' -type f | sort | while IFS= read -r f; do
+        if ! printf '%s\n' "$SKIP_PATHS" | grep -qxF "$f"; then
+            echo "$f"
+        fi
+    done > "$TMPFILE"
+fi
 
 TOTAL=$(wc -l < "$TMPFILE" | tr -d ' ')
 SKIPPED=$(printf '%s\n' "$SKIP_PATHS" | grep -c . || true)
