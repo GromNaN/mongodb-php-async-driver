@@ -5,12 +5,21 @@ declare(strict_types=1);
 namespace MongoDB\BSON;
 
 use JsonSerializable;
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use Stringable;
+
+use function is_string;
+use function preg_match;
+use function sprintf;
+use function strtolower;
 
 final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, Stringable
 {
-    public function __construct(private string $value)
+    public readonly string $dec;
+
+    public function __construct(string $value)
     {
+        $this->dec = self::normalizeAndValidate($value);
     }
 
     // ------------------------------------------------------------------
@@ -19,7 +28,7 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
 
     public function __toString(): string
     {
-        return $this->value;
+        return $this->dec;
     }
 
     // ------------------------------------------------------------------
@@ -28,7 +37,7 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
 
     public function jsonSerialize(): mixed
     {
-        return ['$numberDecimal' => $this->value];
+        return ['$numberDecimal' => $this->dec];
     }
 
     // ------------------------------------------------------------------
@@ -37,21 +46,64 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
 
     public function __serialize(): array
     {
-        return ['value' => $this->value];
+        return ['dec' => $this->dec];
     }
 
     public function __unserialize(array $data): void
     {
-        $this->value = $data['value'];
+        if (! isset($data['dec']) || ! is_string($data['dec'])) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\Decimal128 initialization requires "dec" string field',
+            );
+        }
+
+        $this->dec = self::normalizeAndValidate($data['dec']);
     }
 
     public static function __set_state(array $properties): static
     {
-        return new static($properties['value']);
+        if (! isset($properties['dec']) || ! is_string($properties['dec'])) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\Decimal128 initialization requires "dec" string field',
+            );
+        }
+
+        return new static($properties['dec']);
     }
 
     public function __debugInfo(): array
     {
-        return ['dec' => $this->value];
+        return ['dec' => $this->dec];
+    }
+
+    // ------------------------------------------------------------------
+    // Private helpers
+    // ------------------------------------------------------------------
+
+    private static function normalizeAndValidate(string $value): string
+    {
+        // Normalize case-insensitive infinity/nan forms
+        $lower = strtolower($value);
+
+        if ($lower === 'inf' || $lower === 'infinity' || $lower === '+inf' || $lower === '+infinity') {
+            return 'Infinity';
+        }
+
+        if ($lower === '-inf' || $lower === '-infinity') {
+            return '-Infinity';
+        }
+
+        if ($lower === 'nan' || $lower === '+nan' || $lower === '-nan') {
+            return 'NaN';
+        }
+
+        // Validate as numeric decimal string
+        if (! preg_match('/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/', $value)) {
+            throw new InvalidArgumentException(
+                sprintf('Error parsing Decimal128 string: %s', $value),
+            );
+        }
+
+        return $value;
     }
 }

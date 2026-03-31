@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\BSON;
 
-use InvalidArgumentException;
 use MongoDB\BSON\Binary;
+use MongoDB\BSON\DBPointer;
 use MongoDB\BSON\Decimal128;
 use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
@@ -14,16 +14,20 @@ use MongoDB\BSON\MaxKey;
 use MongoDB\BSON\MinKey;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\PackedArray;
+use MongoDB\BSON\Persistable;
 use MongoDB\BSON\Regex;
+use MongoDB\BSON\Symbol;
 use MongoDB\BSON\Timestamp;
+use MongoDB\BSON\Undefined as BsonUndefined;
 use MongoDB\BSON\Unserializable;
 use MongoDB\BSON\UTCDateTime;
+use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
+use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueException;
 use ReflectionClass;
 use RuntimeException;
 use stdClass;
 
 use function array_merge;
-use function array_values;
 use function bin2hex;
 use function class_exists;
 use function ctype_print;
@@ -47,12 +51,15 @@ final class BsonDecoder
     private const TYPE_DOCUMENT              = 0x03;
     private const TYPE_ARRAY                 = 0x04;
     private const TYPE_BINARY                = 0x05;
+    private const TYPE_UNDEFINED            = 0x06;
     private const TYPE_OBJECTID              = 0x07;
     private const TYPE_BOOLEAN               = 0x08;
     private const TYPE_UTCDATETIME           = 0x09;
     private const TYPE_NULL                  = 0x0A;
     private const TYPE_REGEX                 = 0x0B;
+    private const TYPE_DBPOINTER            = 0x0C;
     private const TYPE_JAVASCRIPT            = 0x0D;
+    private const TYPE_SYMBOL               = 0x0E;
     private const TYPE_JAVASCRIPT_WITH_SCOPE = 0x0F;
     private const TYPE_INT32                 = 0x10;
     private const TYPE_TIMESTAMP             = 0x11;
@@ -77,16 +84,38 @@ final class BsonDecoder
 /**
  * Decode a raw BSON byte string into a PHP value.
  *
- * @param string $bson    Raw BSON bytes
- * @param array  $typeMap Keys: 'root', 'document', 'array', 'fieldPaths'
+ * @param string $bson              Raw BSON bytes
+ * @param array  $typeMap           Keys: 'root', 'document', 'array', 'fieldPaths'
+ * @param bool   $handlePersistable Whether to detect and instantiate Persistable classes
  */
-    public static function decode(string $bson, array $typeMap = []): array|object
-    {
+    public static function decode(
+        string $bson,
+        array $typeMap = [],
+        bool $handlePersistable = false,
+        bool $ignoreRootKeys = false,
+    ): array|object {
+        // Resolve null type map values to defaults
+        foreach ($typeMap as $k => $v) {
+            if ($v === null) {
+                unset($typeMap[$k]);
+            }
+        }
+
+        // Compute Persistable-suppression flags from the filtered typeMap BEFORE merging with
+        // defaults: if the user explicitly set root/document to 'object', they want stdClass and
+        // Persistable detection must not override that.
+        $noRootPersistable     = array_key_exists('root', $typeMap) && $typeMap['root'] === 'object';
+        $noDocumentPersistable = array_key_exists('document', $typeMap) && $typeMap['document'] === 'object';
+
         $typeMap = array_merge(self::DEFAULT_TYPE_MAP, $typeMap);
 
         $offset = 0;
 
-        return self::decodeDocument($bson, $offset, $typeMap, 'root');
+        try {
+            return self::decodeDocument($bson, $offset, $typeMap, 'root', $handlePersistable, $ignoreRootKeys, $noRootPersistable, $noDocumentPersistable);
+        } catch (RuntimeException $e) {
+            throw new DriverUnexpectedValueException($e->getMessage(), previous: $e);
+        }
     }
 
 // -------------------------------------------------------------------------
@@ -104,6 +133,11 @@ final class BsonDecoder
         int &$offset,
         array $typeMap,
         string $context = 'document',
+        bool $handlePersistable = false,
+        bool $ignoreRootKeys = false,
+        bool $noRootPersistable = false,
+        bool $noDocumentPersistable = false,
+        string $parentFieldPath = '',
     ): array|object {
         $startOffset = $offset;
 
@@ -118,6 +152,10 @@ final class BsonDecoder
 
         $endOffset = $startOffset + $totalLen;
 
+        // For BSON arrays, collect elements sequentially (handles degenerate/duplicate BSON keys)
+        // Also allow callers to force sequential collection at root via $ignoreRootKeys
+        $isArray = ($context === 'array') || ($context === 'root' && $ignoreRootKeys);
+
         // Collect elements into a plain PHP array first
         $fields = [];
 
@@ -131,13 +169,19 @@ final class BsonDecoder
                 break;
             }
 
-            // Read key (cstring)
+            // Read key (cstring) and build field path for error messages
             $key = self::readCString($bson, $offset);
+            $fieldPath = $parentFieldPath === '' ? $key : $parentFieldPath . '.' . $key;
 
             // Read value
-            $value = self::decodeElement($bson, $offset, $typeByte, $typeMap);
+            $value = self::decodeElement($bson, $offset, $typeByte, $typeMap, $handlePersistable, $fieldPath, $noRootPersistable, $noDocumentPersistable);
 
-            $fields[$key] = $value;
+            // For arrays, always append in insertion order (handles degenerate BSON)
+            if ($isArray) {
+                $fields[] = $value;
+            } else {
+                $fields[$key] = $value;
+            }
         }
 
         // Ensure offset is positioned right after the document
@@ -150,7 +194,52 @@ final class BsonDecoder
             default    => $typeMap['document'] ?? 'object',
         };
 
-        return self::applyTargetType($fields, $targetType, $bson, $startOffset, $totalLen);
+        // Resolve 'bson' shorthand based on context (root is handled in callers)
+        if ($targetType === 'bson' && $context !== 'root') {
+            $targetType = ($context === 'array') ? 'bsonArray' : 'bsonDocument';
+        }
+
+        // Short-circuit for array/BSON-typed targets: no Persistable detection
+        if ($targetType === 'array' || $targetType === 'bsonDocument' || $targetType === 'bsonArray') {
+            return self::applyTargetType($fields, $targetType, $bson, $startOffset, $totalLen);
+        }
+
+        // Determine if Persistable detection is suppressed for this context.
+        // It is suppressed when the user explicitly requested 'object' (= stdClass), meaning
+        // they do not want __pclass-based class instantiation.
+        $persistableDisabled = match ($context) {
+            'root'  => $noRootPersistable,
+            'array' => true,
+            default => $noDocumentPersistable,
+        };
+
+        // Try __pclass Persistable override: if the document carries a __pclass Binary (subtype
+        // 0x80) whose class name implements Persistable, use that class regardless of type map.
+        if (
+            $handlePersistable
+            && !$persistableDisabled
+            && isset($fields['__pclass'])
+            && $fields['__pclass'] instanceof Binary
+            && $fields['__pclass']->getType() === Binary::TYPE_USER_DEFINED
+        ) {
+            $pclassName = $fields['__pclass']->getData();
+            if (class_exists($pclassName)) {
+                $rc = new ReflectionClass($pclassName);
+                if ($rc->isInstantiable() && $rc->implementsInterface(Persistable::class)) {
+                    $obj = $rc->newInstanceWithoutConstructor();
+                    $obj->bsonUnserialize($fields); // pass ALL fields including __pclass
+                    return $obj;
+                }
+            }
+        }
+
+        // Resolve 'object' target to stdClass
+        if ($targetType === 'object') {
+            return self::arrayToStdClass($fields);
+        }
+
+        // User-supplied class name: validate and instantiate
+        return self::instantiateClass($targetType, $fields);
     }
 
 /**
@@ -164,17 +253,23 @@ final class BsonDecoder
         int &$offset,
         int $type,
         array $typeMap = [],
+        bool $handlePersistable = false,
+        string $fieldPath = '',
+        bool $noRootPersistable = false,
+        bool $noDocumentPersistable = false,
     ): mixed {
         return match ($type) {
             self::TYPE_DOUBLE => self::readDouble($bson, $offset),
 
             self::TYPE_STRING => self::readString($bson, $offset),
 
-            self::TYPE_DOCUMENT => self::decodeDocument($bson, $offset, $typeMap, 'document'),
+            self::TYPE_DOCUMENT => self::decodeDocument($bson, $offset, $typeMap, 'document', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
 
-            self::TYPE_ARRAY => self::decodeDocument($bson, $offset, $typeMap, 'array'),
+            self::TYPE_ARRAY => self::decodeDocument($bson, $offset, $typeMap, 'array', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
 
             self::TYPE_BINARY => self::readBinary($bson, $offset),
+
+            self::TYPE_UNDEFINED => BsonUndefined::create(),
 
             self::TYPE_OBJECTID => self::readObjectId($bson, $offset),
 
@@ -186,9 +281,13 @@ final class BsonDecoder
 
             self::TYPE_REGEX => self::readRegex($bson, $offset),
 
+            self::TYPE_DBPOINTER => self::readDbPointer($bson, $offset),
+
             self::TYPE_JAVASCRIPT => self::readJavascript($bson, $offset),
 
-            self::TYPE_JAVASCRIPT_WITH_SCOPE => self::readJavascriptWithScope($bson, $offset, $typeMap),
+            self::TYPE_SYMBOL => self::readSymbol($bson, $offset),
+
+            self::TYPE_JAVASCRIPT_WITH_SCOPE => self::readJavascriptWithScope($bson, $offset, $typeMap, $noRootPersistable, $noDocumentPersistable),
 
             self::TYPE_INT32 => self::readInt32($bson, $offset),
 
@@ -202,8 +301,8 @@ final class BsonDecoder
 
             self::TYPE_MINKEY => new MinKey(),
 
-            default => throw new RuntimeException(
-                sprintf('Unknown BSON type 0x%02X at offset %d', $type, $offset),
+            default => throw new DriverUnexpectedValueException(
+                sprintf('Detected unknown BSON type 0x%02X for field path "%s". Are you using the latest driver?', $type, $fieldPath),
             ),
         };
     }
@@ -356,6 +455,30 @@ final class BsonDecoder
     }
 
 /**
+ * Read a BSON DBPointer value (deprecated type 0x0C).
+ * Format: string (ref name) + 12-byte ObjectId bytes.
+ */
+    private static function readDbPointer(string $bson, int &$offset): DBPointer
+    {
+        $ref = self::readString($bson, $offset);
+        $oid = bin2hex(substr($bson, $offset, 12));
+        $offset += 12;
+
+        return DBPointer::create($ref, $oid);
+    }
+
+/**
+ * Read a BSON Symbol value (deprecated type 0x0E).
+ * Format: same as string (int32 length + bytes + null).
+ */
+    private static function readSymbol(string $bson, int &$offset): Symbol
+    {
+        $sym = self::readString($bson, $offset);
+
+        return Symbol::create($sym);
+    }
+
+/**
  * Read a BSON JavaScript code value (no scope).
  */
     private static function readJavascript(string $bson, int &$offset): Javascript
@@ -372,12 +495,14 @@ final class BsonDecoder
         string $bson,
         int &$offset,
         array $typeMap,
+        bool $noRootPersistable = false,
+        bool $noDocumentPersistable = false,
     ): Javascript {
         // Total length of the javascript_with_scope value (includes the 4-byte length itself)
         $totalLen = self::readInt32Unsigned($bson, $offset);
 
-        $code     = self::readString($bson, $offset);
-        $scope    = self::decodeDocument($bson, $offset, $typeMap, 'document');
+        $code  = self::readString($bson, $offset);
+        $scope = self::decodeDocument($bson, $offset, $typeMap, 'document', false, false, $noRootPersistable, $noDocumentPersistable);
 
         return new Javascript($code, $scope);
     }
@@ -439,9 +564,9 @@ final class BsonDecoder
 
             'object' => self::arrayToStdClass($fields),
 
-            'bsonDocument' => Document::fromPHP($fields),
+            'bsonDocument' => Document::fromBSON(substr($rawBson, $docOffset, $docLen)),
 
-            'bsonArray' => PackedArray::fromPHP(array_values($fields)),
+            'bsonArray' => PackedArray::fromBSON(substr($rawBson, $docOffset, $docLen)),
 
             default => self::instantiateClass($targetType, $fields),
         };
@@ -471,24 +596,29 @@ final class BsonDecoder
  */
     private static function instantiateClass(string $className, array $fields): object
     {
-        if (! class_exists($className)) {
-            throw new InvalidArgumentException(
-                sprintf('Type map class "%s" does not exist', $className),
+        try {
+            $rc = new ReflectionClass($className);
+        } catch (\ReflectionException) {
+            throw new DriverInvalidArgumentException(
+                sprintf('Class %s does not exist', $className),
             );
         }
 
-        $obj = (new ReflectionClass($className))->newInstanceWithoutConstructor();
-
-        if ($obj instanceof Unserializable) {
-            $obj->bsonUnserialize($fields);
-
-            return $obj;
+        if (! $rc->isInstantiable()) {
+            $kind = $rc->isInterface() ? 'Interface' : 'Abstract class';
+            throw new DriverInvalidArgumentException(
+                sprintf('%s %s is not instantiatable', $kind, $className),
+            );
         }
 
-        // Fallback: populate public properties or use array cast
-        foreach ($fields as $key => $value) {
-            $obj->$key = $value;
+        if (! $rc->implementsInterface(Unserializable::class)) {
+            throw new DriverInvalidArgumentException(
+                sprintf('Class %s does not implement MongoDB\BSON\Unserializable', $className),
+            );
         }
+
+        $obj = $rc->newInstanceWithoutConstructor();
+        $obj->bsonUnserialize($fields);
 
         return $obj;
     }

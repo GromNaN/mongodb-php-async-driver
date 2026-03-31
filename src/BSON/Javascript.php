@@ -5,16 +5,26 @@ declare(strict_types=1);
 namespace MongoDB\BSON;
 
 use JsonSerializable;
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use Stringable;
 
+use function get_debug_type;
 use function is_array;
+use function is_object;
+use function is_string;
+use function sprintf;
+use function str_contains;
 
 final class Javascript implements JavascriptInterface, JsonSerializable, Type, Stringable
 {
-    private ?object $scope;
+    public readonly ?object $scope;
 
-    public function __construct(private string $code, array|object|null $scope = null)
+    public function __construct(public readonly string $code, array|object|null $scope = null)
     {
+        if (str_contains($code, "\0")) {
+            throw new InvalidArgumentException('Code cannot contain null bytes');
+        }
+
         if (is_array($scope)) {
             $this->scope = (object) $scope;
         } else {
@@ -71,13 +81,49 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
 
     public function __unserialize(array $data): void
     {
+        if (! isset($data['code']) || ! is_string($data['code'])) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\Javascript initialization requires "code" string field',
+            );
+        }
+
+        if (str_contains($data['code'], "\0")) {
+            throw new InvalidArgumentException('Code cannot contain null bytes');
+        }
+
+        $scope = $data['scope'] ?? null;
+
+        if ($scope !== null && ! is_array($scope) && ! is_object($scope)) {
+            throw new InvalidArgumentException(
+                sprintf('Expected scope to be array or object, %s given', get_debug_type($scope)),
+            );
+        }
+
         $this->code  = $data['code'];
-        $this->scope = $data['scope'];
+        $this->scope = is_array($scope) ? (object) $scope : $scope;
     }
 
     public static function __set_state(array $properties): static
     {
-        return new static($properties['code'], $properties['scope'] ?? null);
+        if (! isset($properties['code']) || ! is_string($properties['code'])) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\Javascript initialization requires "code" string field',
+            );
+        }
+
+        if (str_contains($properties['code'], "\0")) {
+            throw new InvalidArgumentException('Code cannot contain null bytes');
+        }
+
+        $scope = $properties['scope'] ?? null;
+
+        if ($scope !== null && ! is_array($scope) && ! is_object($scope)) {
+            throw new InvalidArgumentException(
+                sprintf('Expected scope to be array or object, %s given', get_debug_type($scope)),
+            );
+        }
+
+        return new static($properties['code'], $scope);
     }
 
     public function __debugInfo(): array

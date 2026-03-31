@@ -4,19 +4,27 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
+use JsonSerializable;
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use Stringable;
 
+use function is_string;
+use function preg_match;
 use function sprintf;
+use function strtolower;
 
 /**
  * Represents a BSON DBPointer type (deprecated in the BSON spec).
  *
  * @deprecated The BSON DBPointer type is deprecated. Use DBRef documents instead.
  */
-final class DBPointer implements Type, Stringable
+final class DBPointer implements JsonSerializable, Type, Stringable
 {
-    private function __construct(private string $ref, private string $id)
+    public readonly string $id;
+
+    private function __construct(public readonly string $ref, string $id)
     {
+        $this->id  = strtolower($id);
     }
 
     /**
@@ -26,6 +34,8 @@ final class DBPointer implements Type, Stringable
      */
     public static function create(string $ref, string $id): static
     {
+        self::validateId($id);
+
         return new static($ref, $id);
     }
 
@@ -41,7 +51,21 @@ final class DBPointer implements Type, Stringable
 
     public function __toString(): string
     {
-        return sprintf('DBPointer(%s, %s)', $this->ref, $this->id);
+        return sprintf('[%s/%s]', $this->ref, $this->id);
+    }
+
+    // ------------------------------------------------------------------
+    // JsonSerializable
+    // ------------------------------------------------------------------
+
+    public function jsonSerialize(): mixed
+    {
+        return [
+            '$dbPointer' => [
+                '$ref' => $this->ref,
+                '$id'  => ['$oid' => $this->id],
+            ],
+        ];
     }
 
     // ------------------------------------------------------------------
@@ -58,12 +82,36 @@ final class DBPointer implements Type, Stringable
 
     public function __unserialize(array $data): void
     {
+        if (
+            ! isset($data['ref'], $data['id']) ||
+            ! is_string($data['ref']) ||
+            ! is_string($data['id'])
+        ) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\DBPointer initialization requires "ref" and "id" string fields',
+            );
+        }
+
+        self::validateId($data['id']);
+
         $this->ref = $data['ref'];
-        $this->id  = $data['id'];
+        $this->id  = strtolower($data['id']);
     }
 
     public static function __set_state(array $properties): static
     {
+        if (
+            ! isset($properties['ref'], $properties['id']) ||
+            ! is_string($properties['ref']) ||
+            ! is_string($properties['id'])
+        ) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\DBPointer initialization requires "ref" and "id" string fields',
+            );
+        }
+
+        self::validateId($properties['id']);
+
         return new static($properties['ref'], $properties['id']);
     }
 
@@ -73,5 +121,18 @@ final class DBPointer implements Type, Stringable
             'ref' => $this->ref,
             'id'  => $this->id,
         ];
+    }
+
+    // ------------------------------------------------------------------
+    // Private helpers
+    // ------------------------------------------------------------------
+
+    private static function validateId(string $id): void
+    {
+        if (! preg_match('/^[0-9a-fA-F]{24}$/', $id)) {
+            throw new InvalidArgumentException(
+                sprintf('Error parsing ObjectId string: %s', $id),
+            );
+        }
     }
 }

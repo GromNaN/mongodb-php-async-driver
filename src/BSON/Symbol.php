@@ -4,17 +4,25 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
+use JsonSerializable;
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use Stringable;
+
+use function is_string;
+use function str_contains;
 
 /**
  * Represents a BSON symbol type (deprecated in the BSON spec).
  *
  * @deprecated The BSON symbol type is deprecated. Use strings instead.
  */
-final class Symbol implements Type, Stringable
+final class Symbol implements JsonSerializable, Type, Stringable
 {
-    private function __construct(private string $symbol)
+    private function __construct(public readonly string $symbol)
     {
+        if (str_contains($symbol, "\0")) {
+            throw new InvalidArgumentException('Symbol cannot contain null bytes');
+        }
     }
 
     /**
@@ -34,6 +42,15 @@ final class Symbol implements Type, Stringable
     }
 
     // ------------------------------------------------------------------
+    // JsonSerializable
+    // ------------------------------------------------------------------
+
+    public function jsonSerialize(): mixed
+    {
+        return ['$symbol' => $this->symbol];
+    }
+
+    // ------------------------------------------------------------------
     // Serialization helpers
     // ------------------------------------------------------------------
 
@@ -44,11 +61,27 @@ final class Symbol implements Type, Stringable
 
     public function __unserialize(array $data): void
     {
+        if (! isset($data['symbol']) || ! is_string($data['symbol'])) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\Symbol initialization requires "symbol" string field',
+            );
+        }
+
+        if (str_contains($data['symbol'], "\0")) {
+            throw new InvalidArgumentException('Symbol cannot contain null bytes');
+        }
+
         $this->symbol = $data['symbol'];
     }
 
     public static function __set_state(array $properties): static
     {
+        if (! isset($properties['symbol']) || ! is_string($properties['symbol'])) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\Symbol initialization requires "symbol" string field',
+            );
+        }
+
         return new static($properties['symbol']);
     }
 

@@ -6,6 +6,7 @@ namespace MongoDB\Internal\BSON;
 
 use DateTimeImmutable;
 use MongoDB\BSON\Binary;
+use MongoDB\BSON\DBPointer;
 use MongoDB\BSON\Decimal128;
 use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
@@ -15,7 +16,9 @@ use MongoDB\BSON\MinKey;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\PackedArray;
 use MongoDB\BSON\Regex;
+use MongoDB\BSON\Symbol;
 use MongoDB\BSON\Timestamp;
+use MongoDB\BSON\Undefined as BsonUndefined;
 use MongoDB\BSON\UTCDateTime;
 use stdClass;
 
@@ -148,6 +151,10 @@ final class ExtendedJson
             return new Regex($r['pattern'] ?? '', $r['options'] ?? '');
         }
 
+        if (isset($value['$regex']) && isset($value['$options'])) {
+            return new Regex($value['$regex'], $value['$options']);
+        }
+
         if (isset($value['$timestamp'])) {
             $t = $value['$timestamp'];
 
@@ -193,6 +200,22 @@ final class ExtendedJson
 
         if (isset($value['$minKey'])) {
             return new MinKey();
+        }
+
+        if (isset($value['$dbPointer']) && is_array($value['$dbPointer'])) {
+            $dbp = $value['$dbPointer'];
+            $ref = $dbp['$ref'] ?? '';
+            $oid = is_array($dbp['$id'] ?? null) ? ($dbp['$id']['$oid'] ?? '') : '';
+
+            return DBPointer::create($ref, $oid);
+        }
+
+        if (isset($value['$symbol']) && is_string($value['$symbol'])) {
+            return Symbol::create($value['$symbol']);
+        }
+
+        if (isset($value['$undefined']) && $value['$undefined'] === true) {
+            return BsonUndefined::create();
         }
 
         // Recurse into plain associative arrays (BSON documents) and lists
@@ -284,6 +307,23 @@ final class ExtendedJson
 
         if ($v instanceof MinKey) {
             return ['$minKey' => 1];
+        }
+
+        if ($v instanceof DBPointer) {
+            return [
+                '$dbPointer' => [
+                    '$ref' => $v->getRef(),
+                    '$id'  => ['$oid' => $v->getId()],
+                ],
+            ];
+        }
+
+        if ($v instanceof Symbol) {
+            return ['$symbol' => (string) $v];
+        }
+
+        if ($v instanceof BsonUndefined) {
+            return ['$undefined' => true];
         }
 
         if ($v instanceof Document) {
@@ -391,10 +431,11 @@ final class ExtendedJson
                 $ms = (int) (string) $ms;
             }
 
-            // Relaxed: use ISO-8601 date string
+            // Relaxed: use ISO-8601 date string; omit milliseconds when zero
             $dt = $v->toDateTime();
+            $fmt = ((int) $dt->format('v') === 0) ? 'Y-m-d\TH:i:s\Z' : 'Y-m-d\TH:i:s.v\Z';
 
-            return ['$date' => $dt->format('Y-m-d\TH:i:s.v\Z')];
+            return ['$date' => $dt->format($fmt)];
         }
 
         if ($v instanceof Regex) {
@@ -447,6 +488,23 @@ final class ExtendedJson
 
         if ($v instanceof MinKey) {
             return ['$minKey' => 1];
+        }
+
+        if ($v instanceof DBPointer) {
+            return [
+                '$dbPointer' => [
+                    '$ref' => $v->getRef(),
+                    '$id'  => ['$oid' => $v->getId()],
+                ],
+            ];
+        }
+
+        if ($v instanceof Symbol) {
+            return ['$symbol' => (string) $v];
+        }
+
+        if ($v instanceof BsonUndefined) {
+            return ['$undefined' => true];
         }
 
         if ($v instanceof Document) {
@@ -570,8 +628,12 @@ final class ExtendedJson
             return 'false';
         }
 
-        if (is_int($value) || is_float($value)) {
+        if (is_int($value)) {
             return json_encode($value, JSON_THROW_ON_ERROR);
+        }
+
+        if (is_float($value)) {
+            return json_encode($value, JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR);
         }
 
         if (is_string($value)) {
@@ -581,7 +643,7 @@ final class ExtendedJson
         if (is_array($value)) {
             if (array_is_list($value)) {
                 if ($value === []) {
-                    return '[  ]';
+                    return '[ ]';
                 }
 
                 $items = array_map(self::encodeJson(...), $value);
@@ -591,7 +653,7 @@ final class ExtendedJson
 
             // Associative array → object
             if ($value === []) {
-                return '{  }';
+                return '{ }';
             }
 
             $pairs = [];
@@ -606,7 +668,7 @@ final class ExtendedJson
         if ($value instanceof stdClass) {
             $arr = (array) $value;
             if ($arr === []) {
-                return '{  }';
+                return '{ }';
             }
 
             $pairs = [];

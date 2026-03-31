@@ -4,17 +4,19 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-use InvalidArgumentException;
 use JsonSerializable;
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use Stringable;
 
 use function bin2hex;
 use function hex2bin;
+use function is_string;
 use function pack;
 use function preg_match;
 use function random_bytes;
 use function random_int;
 use function sprintf;
+use function strtolower;
 use function substr;
 use function time;
 use function unpack;
@@ -24,22 +26,22 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
     /** @var int Static counter, initialized to a random value on first use. */
     private static int $counter = -1;
 
-    /** @var string 12 raw bytes representing the ObjectId. */
-    private string $bytes;
+    /** Hex-encoded 12-byte ObjectId. */
+    public readonly string $oid;
 
     /** @throws InvalidArgumentException if $id is not a valid 24-character hex string. */
     public function __construct(?string $id = null)
     {
         if ($id === null) {
-            $this->bytes = self::generate();
+            $this->oid = bin2hex(self::generate());
         } else {
             if (! preg_match('/^[0-9a-fA-F]{24}$/', $id)) {
                 throw new InvalidArgumentException(
-                    sprintf('"%s" is not a valid 24-character hexadecimal ObjectId string.', $id),
+                    sprintf('Error parsing ObjectId string: %s', $id),
                 );
             }
 
-            $this->bytes = hex2bin($id);
+            $this->oid = strtolower($id);
         }
     }
 
@@ -50,14 +52,14 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
     public function getTimestamp(): int
     {
         /** @var array{ts: int} $unpacked */
-        $unpacked = unpack('Nts', substr($this->bytes, 0, 4));
+        $unpacked = unpack('Nts', hex2bin(substr($this->oid, 0, 8)));
 
         return $unpacked['ts'];
     }
 
     public function __toString(): string
     {
-        return bin2hex($this->bytes);
+        return $this->oid;
     }
 
     // ------------------------------------------------------------------
@@ -66,7 +68,7 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
 
     public function jsonSerialize(): mixed
     {
-        return ['$oid' => $this->__toString()];
+        return ['$oid' => $this->oid];
     }
 
     // ------------------------------------------------------------------
@@ -75,22 +77,46 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
 
     public function __serialize(): array
     {
-        return ['oid' => $this->__toString()];
+        return ['oid' => $this->oid];
     }
 
     public function __unserialize(array $data): void
     {
-        $this->bytes = hex2bin($data['oid']);
+        if (! isset($data['oid']) || ! is_string($data['oid'])) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\ObjectId initialization requires "oid" string field',
+            );
+        }
+
+        if (! preg_match('/^[0-9a-fA-F]{24}$/', $data['oid'])) {
+            throw new InvalidArgumentException(
+                sprintf('Error parsing ObjectId string: %s', $data['oid']),
+            );
+        }
+
+        $this->oid = strtolower($data['oid']);
     }
 
     public static function __set_state(array $properties): static
     {
-        return new static($properties['oid'] ?? bin2hex($properties['bytes'] ?? ''));
+        if (! isset($properties['oid']) || ! is_string($properties['oid'])) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\ObjectId initialization requires "oid" string field',
+            );
+        }
+
+        if (! preg_match('/^[0-9a-fA-F]{24}$/', $properties['oid'])) {
+            throw new InvalidArgumentException(
+                sprintf('Error parsing ObjectId string: %s', $properties['oid']),
+            );
+        }
+
+        return new static($properties['oid']);
     }
 
     public function __debugInfo(): array
     {
-        return ['oid' => $this->__toString()];
+        return ['oid' => $this->oid];
     }
 
     // ------------------------------------------------------------------

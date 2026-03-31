@@ -5,84 +5,122 @@ declare(strict_types=1);
 namespace MongoDB\BSON;
 
 use ArrayAccess;
-use BadMethodCallException;
 use IteratorAggregate;
+use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
+use MongoDB\Driver\Exception\LogicException as DriverLogicException;
+use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
+use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueException;
 use MongoDB\Internal\BSON\BsonDecoder;
 use MongoDB\Internal\BSON\BsonEncoder;
 use MongoDB\Internal\BSON\ExtendedJson;
-use RuntimeException;
 use Stringable;
+use WeakMap;
 
+use function array_is_list;
 use function array_key_exists;
 use function array_values;
 use function base64_decode;
 use function base64_encode;
+use function get_debug_type;
 use function is_array;
+use function is_int;
 use function json_decode;
 use function sprintf;
+use function strlen;
+use function substr;
+use function unpack;
 
 use const JSON_THROW_ON_ERROR;
 
 /**
  * Represents a BSON array (packed array – keys must be sequential integers
  * starting at 0).
- *
- * Instances must be created via one of the static factory methods:
- *   - {@see self::fromBSON()}
- *   - {@see self::fromJSON()}
- *   - {@see self::fromPHP()}
- *
- * The constructor is private; the class is immutable once created.
  */
 final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringable
 {
-    /** Raw BSON bytes. Lazily populated by encoder when created from PHP. */
-    private ?string $bson;
+    /** Base64-encoded raw BSON bytes — public for get_object_vars() / var_export() compat. */
+    public readonly string $data;
 
-    /** Decoded PHP representation. Lazily populated on first access. */
-    private ?array $decoded;
+    /**
+     * @var WeakMap<static, array<int, mixed>>|null
+     */
+    private static ?WeakMap $decodedCache = null;
 
     // ------------------------------------------------------------------
     // Private constructor
     // ------------------------------------------------------------------
 
-    private function __construct(?string $bson, ?array $decoded)
+    private function __construct(string $bson)
     {
-        $this->bson    = $bson;
-        $this->decoded = $decoded;
+        $this->data = base64_encode($bson);
     }
 
     // ------------------------------------------------------------------
     // Static factories
     // ------------------------------------------------------------------
 
-    /**
-     * Create a PackedArray from raw BSON bytes.
-     */
     public static function fromBSON(string $bson): static
     {
-        return new static($bson, null);
+        $len = strlen($bson);
+        if ($len < 4) {
+            throw new DriverUnexpectedValueException('Could not read document from BSON reader');
+        }
+        $claimed = unpack('V', substr($bson, 0, 4))[1];
+        if ($claimed < 5) {
+            throw new DriverUnexpectedValueException('Could not read document from BSON reader');
+        }
+        if ($claimed > $len) {
+            throw new DriverUnexpectedValueException('Could not read document from BSON reader');
+        }
+        if ($claimed < $len) {
+            throw new DriverUnexpectedValueException('Reading document did not exhaust input buffer');
+        }
+
+        return new static($bson);
     }
 
-    /**
-     * Create a PackedArray from a MongoDB Extended JSON string.
-     */
     public static function fromJSON(string $json): static
     {
-        $phpValue = json_decode($json, associative: true, flags: JSON_THROW_ON_ERROR);
-        $decoded = is_array($phpValue) ? array_values($phpValue) : array_values((array) $phpValue);
+        try {
+            $phpValue = json_decode($json, associative: true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new DriverUnexpectedValueException(
+                sprintf('Got parse error at "%s", position 1: "SPECIAL_EXPECTED"', substr($json, 0, 1)),
+                previous: $e,
+            );
+        }
 
-        return new static(null, $decoded);
+        if (! is_array($phpValue)) {
+            throw new DriverUnexpectedValueException(
+                'Received invalid JSON array: expected key 0, but found ""',
+            );
+        }
+
+        // Validate sequential integer keys starting at 0
+        $expected = 0;
+        foreach ($phpValue as $key => $v) {
+            if ((string) $key !== (string) $expected) {
+                throw new DriverUnexpectedValueException(
+                    sprintf('Received invalid JSON array: expected key %d, but found "%s"', $expected, $key),
+                );
+            }
+
+            $expected++;
+        }
+
+        $decoded = ExtendedJson::fromValue($phpValue);
+        $bson    = BsonEncoder::encodeList(is_array($decoded) ? $decoded : (array) $decoded);
+
+        return new static($bson);
     }
 
-    /**
-     * Create a PackedArray from a PHP array or object.
-     */
-    public static function fromPHP(array|object $value): static
+    public static function fromPHP(array $value): static
     {
-        $decoded = array_values((array) $value);
+        if (! array_is_list($value)) {
+            throw new DriverInvalidArgumentException('Expected value to be a list, but given array is not');
+        }
 
-        return new static(null, $decoded);
+        return new static(BsonEncoder::encodeList($value));
     }
 
     // ------------------------------------------------------------------
@@ -99,9 +137,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
         $decoded = $this->decode();
 
         if (! array_key_exists($index, $decoded)) {
-            throw new RuntimeException(
-                sprintf('Index %d does not exist in the packed array.', $index),
-            );
+            throw new DriverRuntimeException(sprintf('Could not find index "%d" in BSON array', $index));
         }
 
         return $decoded[$index];
@@ -111,34 +147,38 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     // Conversion
     // ------------------------------------------------------------------
 
-    /**
-     * Convert to a PHP value applying an optional type map.
-     *
-     * @param array<string, string>|null $typeMap
-     */
     public function toPHP(?array $typeMap = null): array|object
     {
-        return BsonDecoder::decode($this->getBson(), $typeMap ?? []);
+        $map = $typeMap ?? ['root' => 'array'];
+        // Resolve 'bson' root to PackedArray
+        if (($map['root'] ?? null) === 'bson') {
+            $map['root'] = 'bsonArray';
+        }
+
+        // For array root, ignore degenerate BSON keys (reindex by insertion order)
+        $rootTarget = $map['root'] ?? 'array';
+        $ignoreRoot = ($rootTarget === 'array' || $rootTarget === 'bsonArray');
+
+        return BsonDecoder::decode(base64_decode($this->data), $map, ignoreRootKeys: $ignoreRoot);
     }
 
     public function toCanonicalExtendedJSON(): string
     {
-        return ExtendedJson::toCanonical(BsonDecoder::decode($this->getBson(), ['root' => 'array']));
+        return ExtendedJson::toCanonical(BsonDecoder::decode(base64_decode($this->data), ['root' => 'array']));
     }
 
     public function toRelaxedExtendedJSON(): string
     {
-        return ExtendedJson::toRelaxed(BsonDecoder::decode($this->getBson(), ['root' => 'array']));
+        return ExtendedJson::toRelaxed(BsonDecoder::decode(base64_decode($this->data), ['root' => 'array']));
     }
 
     // ------------------------------------------------------------------
     // Stringable
     // ------------------------------------------------------------------
 
-    /** Returns the raw BSON bytes. */
     public function __toString(): string
     {
-        return $this->getBson();
+        return base64_decode($this->data);
     }
 
     // ------------------------------------------------------------------
@@ -156,22 +196,33 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
 
     public function offsetExists(mixed $offset): bool
     {
-        return $this->has((int) $offset);
+        if (is_int($offset)) {
+            return $this->has($offset);
+        }
+
+        return false;
     }
 
     public function offsetGet(mixed $offset): mixed
     {
-        return $this->get((int) $offset);
+        $type = get_debug_type($offset);
+        if ($type === 'int') {
+            return $this->get($offset);
+        }
+
+        throw new DriverRuntimeException(
+            sprintf('Could not find index of type "%s" in BSON array', $type),
+        );
     }
 
     public function offsetSet(mixed $offset, mixed $value): void
     {
-        throw new BadMethodCallException('MongoDB\BSON\PackedArray is immutable and does not support offsetSet().');
+        throw new DriverLogicException('Cannot write to MongoDB\BSON\PackedArray offset');
     }
 
     public function offsetUnset(mixed $offset): void
     {
-        throw new BadMethodCallException('MongoDB\BSON\PackedArray is immutable and does not support offsetUnset().');
+        throw new DriverLogicException('Cannot unset MongoDB\BSON\PackedArray offset');
     }
 
     // ------------------------------------------------------------------
@@ -180,52 +231,60 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
 
     public function __serialize(): array
     {
-        return ['bson' => base64_encode($this->getBson())];
+        return ['data' => $this->data];
     }
 
     public function __unserialize(array $data): void
     {
-        $this->bson    = base64_decode($data['bson']);
-        $this->decoded = null;
+        $bson = base64_decode($data['data'] ?? '');
+        self::assertValidBson($bson, self::class);
+        $this->data = base64_encode($bson);
+    }
+
+    public static function __set_state(array $properties): static
+    {
+        $bson = base64_decode($properties['data'] ?? '');
+        self::assertValidBson($bson, self::class);
+
+        return new static($bson);
     }
 
     // ------------------------------------------------------------------
     // Internal helpers
     // ------------------------------------------------------------------
 
-    /**
-     * Return the raw BSON bytes, encoding from the decoded form if necessary.
-     */
-    private function getBson(): string
-    {
-        if ($this->bson === null) {
-            $this->bson = BsonEncoder::encodeArray($this->decoded ?? []);
-        }
-
-        return $this->bson;
-    }
-
     public function __debugInfo(): array
     {
         return [
-            'data'  => base64_encode($this->getBson()),
+            'data'  => $this->data,
             'value' => $this->toPHP(['root' => 'array', 'document' => 'bson', 'array' => 'bson']),
         ];
     }
 
-    /**
-     * Return the decoded PHP array, decoding from raw BSON if necessary.
-     *
-     * @return array<int, mixed>
-     */
     private function decode(): array
     {
-        if ($this->decoded === null) {
-            $this->decoded = array_values(
-                (array) BsonDecoder::decode($this->bson, ['root' => 'array']),
-            );
+        $cache = self::$decodedCache ??= new WeakMap();
+        if (! isset($cache[$this])) {
+            // ignoreRootKeys=true handles degenerate BSON with non-sequential or duplicate keys
+            $raw           = BsonDecoder::decode(base64_decode($this->data), [
+                'root'     => 'array',
+                'document' => 'bsonDocument',
+                'array'    => 'bsonArray',
+            ], ignoreRootKeys: true);
+            $cache[$this]  = array_values((array) $raw);
         }
 
-        return $this->decoded;
+        return $cache[$this];
+    }
+
+    private static function assertValidBson(string $bson, string $className): void
+    {
+        $len     = strlen($bson);
+        $claimed = $len >= 4 ? unpack('V', substr($bson, 0, 4))[1] : 0;
+        if ($len < 5 || $claimed !== $len) {
+            throw new DriverInvalidArgumentException(
+                sprintf('%s initialization requires valid BSON', $className),
+            );
+        }
     }
 }

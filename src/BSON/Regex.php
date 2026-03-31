@@ -5,14 +5,31 @@ declare(strict_types=1);
 namespace MongoDB\BSON;
 
 use JsonSerializable;
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use Stringable;
 
+use function implode;
+use function is_string;
+use function sort;
 use function sprintf;
+use function str_contains;
+use function str_split;
 
 final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
 {
-    public function __construct(private string $pattern, private string $flags = '')
+    public readonly string $flags;
+
+    public function __construct(public readonly string $pattern, string $flags = '')
     {
+        if (str_contains($pattern, "\0")) {
+            throw new InvalidArgumentException('Pattern cannot contain null bytes');
+        }
+
+        if (str_contains($flags, "\0")) {
+            throw new InvalidArgumentException('Flags cannot contain null bytes');
+        }
+
+        $this->flags   = self::sortFlags($flags);
     }
 
     // ------------------------------------------------------------------
@@ -41,10 +58,8 @@ final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
     public function jsonSerialize(): mixed
     {
         return [
-            '$regularExpression' => [
-                'pattern' => $this->pattern,
-                'options' => $this->flags,
-            ],
+            '$regex'   => $this->pattern,
+            '$options' => $this->flags,
         ];
     }
 
@@ -62,13 +77,25 @@ final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
 
     public function __unserialize(array $data): void
     {
+        self::validateInitFields($data);
+
+        if (str_contains($data['pattern'], "\0")) {
+            throw new InvalidArgumentException('Pattern cannot contain null bytes');
+        }
+
+        if (str_contains($data['flags'], "\0")) {
+            throw new InvalidArgumentException('Flags cannot contain null bytes');
+        }
+
         $this->pattern = $data['pattern'];
-        $this->flags   = $data['flags'];
+        $this->flags   = self::sortFlags($data['flags']);
     }
 
     public static function __set_state(array $properties): static
     {
-        return new static($properties['pattern'], $properties['flags'] ?? '');
+        self::validateInitFields($properties);
+
+        return new static($properties['pattern'], $properties['flags']);
     }
 
     public function __debugInfo(): array
@@ -77,5 +104,34 @@ final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
             'pattern' => $this->pattern,
             'flags'   => $this->flags,
         ];
+    }
+
+    // ------------------------------------------------------------------
+    // Private helpers
+    // ------------------------------------------------------------------
+
+    private static function validateInitFields(array $data): void
+    {
+        if (
+            ! isset($data['pattern'], $data['flags']) ||
+            ! is_string($data['pattern']) ||
+            ! is_string($data['flags'])
+        ) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\Regex initialization requires "pattern" and "flags" string fields',
+            );
+        }
+    }
+
+    private static function sortFlags(string $flags): string
+    {
+        if ($flags === '') {
+            return '';
+        }
+
+        $chars = str_split($flags);
+        sort($chars);
+
+        return implode('', $chars);
     }
 }

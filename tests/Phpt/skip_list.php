@@ -114,4 +114,63 @@ return [
 
     'bson/bson-int64-operation_error-001.phpt'
         => 'PHP has no userland arithmetic-operator hook; Int64 operation error paths require the C extension do_operation handler',
+
+    // -------------------------------------------------------------------------
+    // Int64 type-casting (C extension `cast_object` handler)
+    // -------------------------------------------------------------------------
+
+    'bson/bson-int64-cast-001.phpt'
+        => 'PHP has no userland cast_object hook; (int)/(float)/(bool) casts on Int64 require the C extension cast_object handler',
+
+    'bson/bson-int64-cast-002.phpt'
+        => 'PHP has no userland cast_object hook; (int)/(float)/(bool) casts on Int64 require the C extension cast_object handler',
+
+    'bson/bson-int64-cast-003.phpt'
+        => 'PHP has no userland cast_object hook; (int)/(float)/(bool) casts on Int64 require the C extension cast_object handler',
+
+    // -------------------------------------------------------------------------
+    // Decimal128 normalization (requires libbson IEEE 754 decimal128 library)
+    // -------------------------------------------------------------------------
+
+    'bson/bson-decimal128-001.phpt'
+        => 'Decimal128 normalization (e.g. "1234e5" → "1.234E+8") requires libbson IEEE 754 decimal128 implementation; impossible in userland PHP',
+
+    'bson/bson-decimal128-serialization-002.phpt'
+        => 'Decimal128 normalization during round-trip requires libbson IEEE 754 decimal128 implementation; impossible in userland PHP',
+
+    // -------------------------------------------------------------------------
+    // Document/PackedArray: libbson "corrupt BSON data" field-path error messages
+    // -------------------------------------------------------------------------
+
+    'bson/bson-document-fromBSON_error-003.phpt'
+        => 'Detailed "Detected corrupt BSON data for field path" error messages require libbson bson_iter_visit_all(); impossible to replicate with exact field paths in userland',
+
+    'bson/bson-document-fromBSON_error-004.phpt'
+        => 'Detailed "Detected corrupt BSON data for field path" error messages with nested paths require libbson; impossible in userland',
+
+    // -------------------------------------------------------------------------
+    // Document/PackedArray::toPHP() fieldPath type maps
+    // -------------------------------------------------------------------------
+
+    'bson/bson-document-toPHP-007.phpt'
+        => 'fieldPath type maps in toPHP() require full field-path resolution logic matching libbson; complex feature not yet implemented',
+
+    'bson/bson-document-toPHP-008.phpt'
+        => 'fieldPath type maps with string keys require field-path resolution; not yet implemented',
+
+    'bson/bson-document-toPHP-009.phpt'
+        => 'fieldPath type maps with numerical keys require field-path resolution; not yet implemented',
+
+    'bson/bson-document-toPHP-010.phpt'
+        => 'fieldPath type maps with wildcard keys require field-path resolution; not yet implemented',
+
+    'bson/bson-document-toPHP-011.phpt'
+        => 'fieldPath type maps with nested wildcards require field-path resolution; not yet implemented',
+
+    // -------------------------------------------------------------------------
+    // PackedArray::fromJSON() libbson-specific JSON parse error format
+    // -------------------------------------------------------------------------
+
+    'bson/bson-packedarray-fromJSON_error-001.phpt'
+        => 'libbson-specific JSON parse error format (character at error position) cannot be replicated exactly from PHP JsonException',
 ];
