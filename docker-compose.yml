@@ -1,0 +1,211 @@
+# MongoDB test topologies for the phpt test suite.
+#
+# Profiles:
+#   standalone        – single mongod on 27017 (no auth)
+#   standalone-auth   – single mongod on 27017 with SCRAM auth (root / password)
+#   replicaset        – 3-node replica set (primary 27018, secondary 27019, arbiter 27020)
+#   sharded           – mongos on 27021, 1 config-server on 27022, 1 shard on 27023
+#
+# Quick start:
+#   docker compose --profile standalone       up -d
+#   docker compose --profile standalone-auth  up -d
+#   docker compose --profile replicaset       up -d
+#   docker compose --profile sharded          up -d
+#
+# To point the phpt suite at a topology set the env var before running:
+#   MONGODB_URI=mongodb://127.0.0.1:27018/?replicaSet=rs0  tests/run-phpt.sh 'connect/*.phpt'
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Standalone (no auth)  –  MONGODB_URI=mongodb://127.0.0.1:27017/
+  # ---------------------------------------------------------------------------
+  mongo-standalone:
+    image: mongo:7
+    profiles: [standalone]
+    ports:
+      - "27017:27017"
+    command: mongod --bind_ip_all --port 27017
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27017", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Standalone with auth  –  MONGODB_URI=mongodb://root:password@127.0.0.1:27017/admin
+  # ---------------------------------------------------------------------------
+  mongo-standalone-auth:
+    image: mongo:7
+    profiles: [standalone-auth]
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: password
+    command: mongod --bind_ip_all --port 27017 --auth
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27017", "-u", "root", "-p", "password", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Replica set  –  MONGODB_URI=mongodb://127.0.0.1:27018/?replicaSet=rs0
+  #
+  # Three members: primary (27018), secondary (27019), arbiter (27020).
+  # An init container runs rs.initiate() after all three are up.
+  # ---------------------------------------------------------------------------
+  mongo-rs-primary:
+    image: mongo:7
+    profiles: [replicaset]
+    ports:
+      - "27018:27018"
+    command: mongod --bind_ip_all --port 27018 --replSet rs0
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27018", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo-rs-secondary:
+    image: mongo:7
+    profiles: [replicaset]
+    ports:
+      - "27019:27019"
+    command: mongod --bind_ip_all --port 27019 --replSet rs0
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27019", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo-rs-arbiter:
+    image: mongo:7
+    profiles: [replicaset]
+    ports:
+      - "27020:27020"
+    command: mongod --bind_ip_all --port 27020 --replSet rs0
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27020", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo-rs-init:
+    image: mongo:7
+    profiles: [replicaset]
+    network_mode: host
+    depends_on:
+      mongo-rs-primary:
+        condition: service_healthy
+      mongo-rs-secondary:
+        condition: service_healthy
+      mongo-rs-arbiter:
+        condition: service_healthy
+    restart: "no"
+    command: >
+      mongosh --port 27018 --eval "
+        rs.initiate({
+          _id: 'rs0',
+          members: [
+            { _id: 0, host: '127.0.0.1:27018', priority: 2 },
+            { _id: 1, host: '127.0.0.1:27019', priority: 1 },
+            { _id: 2, host: '127.0.0.1:27020', arbiterOnly: true }
+          ]
+        });
+        sleep(3000);
+        rs.status();
+      "
+
+  # ---------------------------------------------------------------------------
+  # Sharded cluster  –  MONGODB_URI=mongodb://127.0.0.1:27021/
+  #
+  # Config server (27022), one shard (27023), mongos (27021).
+  # An init container wires up the shard.
+  # ---------------------------------------------------------------------------
+  mongo-configsvr:
+    image: mongo:7
+    profiles: [sharded]
+    ports:
+      - "27022:27022"
+    command: mongod --bind_ip_all --port 27022 --configsvr --replSet cfgrs
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27022", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo-shard1:
+    image: mongo:7
+    profiles: [sharded]
+    ports:
+      - "27023:27023"
+    command: mongod --bind_ip_all --port 27023 --shardsvr --replSet shard1rs
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27023", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo-configsvr-init:
+    image: mongo:7
+    profiles: [sharded]
+    network_mode: host
+    depends_on:
+      mongo-configsvr:
+        condition: service_healthy
+      mongo-shard1:
+        condition: service_healthy
+    restart: "no"
+    command: >
+      mongosh --port 27022 --eval "
+        rs.initiate({ _id: 'cfgrs', configsvr: true, members: [{ _id: 0, host: '127.0.0.1:27022' }] });
+      "
+
+  mongo-shard1-init:
+    image: mongo:7
+    profiles: [sharded]
+    network_mode: host
+    depends_on:
+      mongo-configsvr:
+        condition: service_healthy
+      mongo-shard1:
+        condition: service_healthy
+    restart: "no"
+    command: >
+      mongosh --port 27023 --eval "
+        rs.initiate({ _id: 'shard1rs', members: [{ _id: 0, host: '127.0.0.1:27023' }] });
+      "
+
+  mongo-mongos:
+    image: mongo:7
+    profiles: [sharded]
+    network_mode: host
+    depends_on:
+      mongo-configsvr-init:
+        condition: service_completed_successfully
+      mongo-shard1-init:
+        condition: service_completed_successfully
+    command: >
+      mongos --bind_ip_all --port 27021
+             --configdb cfgrs/127.0.0.1:27022
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27021", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo-sharded-init:
+    image: mongo:7
+    profiles: [sharded]
+    network_mode: host
+    depends_on:
+      mongo-mongos:
+        condition: service_healthy
+    restart: "no"
+    command: >
+      mongosh --port 27021 --eval "
+        sh.addShard('shard1rs/127.0.0.1:27023');
+        sh.status();
+      "
