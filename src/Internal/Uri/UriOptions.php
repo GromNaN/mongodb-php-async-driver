@@ -6,16 +6,23 @@ namespace MongoDB\Internal\Uri;
 
 use Closure;
 use InvalidArgumentException;
+use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueException;
 
+use function array_filter;
 use function array_key_exists;
+use function array_map;
 use function array_values;
 use function ctype_digit;
+use function explode;
 use function get_debug_type;
+use function in_array;
 use function is_array;
 use function is_bool;
 use function is_int;
 use function is_string;
+use function mb_check_encoding;
 use function sprintf;
+use function trigger_error;
 
 /**
  * Validated, strongly-typed DTO for MongoDB URI options.
@@ -248,16 +255,38 @@ final class UriOptions
             self::assignReadonly($self, 'readPreferenceTags', []);
         }
 
-        // ----- compressors (array) --------------------------------------------
+        // ----- compressors (string or array) ----------------------------------
         if (isset($options['compressors'])) {
             $compressors = $options['compressors'];
-            if (! is_array($compressors)) {
+
+            if (is_string($compressors)) {
+                if (! mb_check_encoding($compressors, 'UTF-8')) {
+                    throw new DriverUnexpectedValueException(
+                        sprintf('Detected invalid UTF-8 for field path "compressors": %s', $compressors),
+                    );
+                }
+
+                $compressors = array_filter(
+                    array_map('trim', explode(',', $compressors)),
+                    static fn ($s) => $s !== '',
+                );
+            } elseif (! is_array($compressors)) {
                 throw new InvalidArgumentException(
-                    sprintf('Option "compressors" must be an array, got %s.', get_debug_type($compressors)),
+                    sprintf('Option "compressors" must be a string or array, got %s.', get_debug_type($compressors)),
                 );
             }
 
-            self::assignReadonly($self, 'compressors', array_values($compressors));
+            $supported        = ['snappy', 'zlib', 'zstd'];
+            $validCompressors = [];
+            foreach ($compressors as $c) {
+                if (! in_array($c, $supported, true)) {
+                    trigger_error(sprintf("WARNING > Unsupported compressor: '%s'", $c), E_USER_WARNING);
+                } else {
+                    $validCompressors[] = $c;
+                }
+            }
+
+            self::assignReadonly($self, 'compressors', $validCompressors);
         } else {
             self::assignReadonly($self, 'compressors', []);
         }

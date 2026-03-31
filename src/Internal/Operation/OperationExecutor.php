@@ -759,6 +759,7 @@ final class OperationExecutor
             latency:           $sd->roundTripTimeMs,
             serverDescription: $serverDescription,
             tags:              $sd->tags,
+            executor:          $this,
         );
     }
 }

@@ -185,7 +185,23 @@ final class Manager
         return SyncRunner::run(function () {
             $servers = [];
             foreach ($this->topologyManager->getServers() as $sd) {
-                $servers[] = Server::createFromDescription($sd, $this->executor);
+                $serverDesc = ServerDescription::createFromInternal(
+                    host:           $sd->host,
+                    port:           $sd->port,
+                    type:           $sd->type,
+                    roundTripTime:  $sd->roundTripTimeMs,
+                    helloResponse:  $sd->helloResponse,
+                    lastUpdateTime: $sd->lastUpdateTime,
+                );
+                $servers[] = Server::createFromInternal(
+                    host:              $sd->host,
+                    port:              $sd->port,
+                    type:              self::mapInternalServerType($sd->type),
+                    latency:           $sd->roundTripTimeMs,
+                    serverDescription: $serverDesc,
+                    tags:              $sd->tags,
+                    executor:          $this->executor,
+                );
             }
 
             return $servers;
@@ -215,6 +231,7 @@ final class Manager
                 latency:           $sd->roundTripTimeMs,
                 serverDescription: $serverDesc,
                 tags:              $sd->tags,
+                executor:          $this->executor,
             );
         });
     }

@@ -25,6 +25,7 @@ final class Server
     private ServerDescription $serverDescription;
     private array $info;
     private array $tags;
+    private ?OperationExecutor $executor;
 
     /**
      * Private constructor. Use the internal factory to create instances.
@@ -44,6 +45,7 @@ final class Server
         ServerDescription $serverDescription,
         array $info = [],
         array $tags = [],
+        ?OperationExecutor $executor = null,
     ): static {
         $instance = new static();
         $instance->host = $host;
@@ -53,6 +55,7 @@ final class Server
         $instance->serverDescription = $serverDescription;
         $instance->info = $info;
         $instance->tags = $tags;
+        $instance->executor = $executor;
 
         return $instance;
     }
@@ -119,31 +122,40 @@ final class Server
 
     public function executeCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        return OperationExecutor::executeCommand($this, $db, $command, $options);
+        $readPreference = $options['readPreference'] ?? null;
+        $session        = $options['session'] ?? null;
+
+        return $this->executor->executeCommand($db, $command, $readPreference, $session);
     }
 
     public function executeReadCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        return OperationExecutor::executeReadCommand($this, $db, $command, $options);
+        return $this->executeCommand($db, $command, $options);
     }
 
     public function executeWriteCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        return OperationExecutor::executeWriteCommand($this, $db, $command, $options);
+        return $this->executeCommand($db, $command, $options);
     }
 
     public function executeReadWriteCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        return OperationExecutor::executeReadWriteCommand($this, $db, $command, $options);
+        return $this->executeCommand($db, $command, $options);
     }
 
     public function executeQuery(string $namespace, Query $query, ?array $options = null): CursorInterface
     {
-        return OperationExecutor::executeQuery($this, $namespace, $query, $options);
+        $readPreference = $options['readPreference'] ?? null;
+        $session        = $options['session'] ?? null;
+
+        return $this->executor->executeQuery($namespace, $query, $readPreference, $session);
     }
 
     public function executeBulkWrite(string $namespace, BulkWrite $bulk, ?array $options = null): WriteResult
     {
-        return OperationExecutor::executeBulkWrite($this, $namespace, $bulk, $options);
+        $writeConcern = $options['writeConcern'] ?? null;
+        $session      = $options['session'] ?? null;
+
+        return $this->executor->executeBulkWrite($namespace, $bulk, $writeConcern, $session);
     }
 }
