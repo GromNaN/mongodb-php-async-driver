@@ -40,4 +40,15 @@ final class ServerChangedEvent
     {
         return $this->newDescription;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'host'           => $this->host,
+            'port'           => $this->port,
+            'topologyId'     => $this->topologyId,
+            'newDescription' => $this->newDescription,
+            'oldDescription' => $this->previousDescription,
+        ];
+    }
 }

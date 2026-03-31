@@ -14,4 +14,9 @@ final class TopologyOpeningEvent
     {
         return $this->topologyId;
     }
+
+    public function __debugInfo(): array
+    {
+        return ['topologyId' => $this->topologyId];
+    }
 }

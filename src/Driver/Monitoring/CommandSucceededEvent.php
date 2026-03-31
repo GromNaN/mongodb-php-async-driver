@@ -52,4 +52,17 @@ final class CommandSucceededEvent
     {
         return $this->serviceId;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'commandName'   => $this->commandName,
+            'databaseName'  => $this->databaseName,
+            'reply'         => $this->reply,
+            'operationId'   => $this->operationId,
+            'requestId'     => $this->requestId,
+            'serviceId'     => $this->serviceId,
+            'durationMicros' => $this->durationMicros,
+        ];
+    }
 }

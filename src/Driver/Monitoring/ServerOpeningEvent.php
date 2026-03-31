@@ -26,4 +26,13 @@ final class ServerOpeningEvent
     {
         return $this->topologyId;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'host'       => $this->host,
+            'port'       => $this->port,
+            'topologyId' => $this->topologyId,
+        ];
+    }
 }

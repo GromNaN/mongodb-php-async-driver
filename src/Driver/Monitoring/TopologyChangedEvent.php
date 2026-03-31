@@ -26,4 +26,13 @@ final class TopologyChangedEvent
     {
         return $this->newTopologyType;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'topologyId'     => $this->topologyId,
+            'newDescription' => $this->newTopologyType,
+            'oldDescription' => $this->previousTopologyType,
+        ];
+    }
 }

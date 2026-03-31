@@ -53,4 +53,17 @@ final class CommandFailedEvent
     {
         return $this->serviceId;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'commandName'    => $this->commandName,
+            'databaseName'   => $this->databaseName,
+            'error'          => $this->error,
+            'operationId'    => $this->operationId,
+            'requestId'      => $this->requestId,
+            'serviceId'      => $this->serviceId,
+            'durationMicros' => $this->durationMicros,
+        ];
+    }
 }

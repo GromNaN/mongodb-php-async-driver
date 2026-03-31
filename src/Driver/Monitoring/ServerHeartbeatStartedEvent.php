@@ -26,4 +26,13 @@ final class ServerHeartbeatStartedEvent
     {
         return $this->awaited;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'host'    => $this->host,
+            'port'    => $this->port,
+            'awaited' => $this->awaited,
+        ];
+    }
 }

@@ -46,4 +46,16 @@ final class CommandStartedEvent
     {
         return $this->serviceId;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'commandName'  => $this->commandName,
+            'databaseName' => $this->databaseName,
+            'command'      => $this->command,
+            'operationId'  => $this->operationId,
+            'requestId'    => $this->requestId,
+            'serviceId'    => $this->serviceId,
+        ];
+    }
 }

@@ -40,4 +40,15 @@ final class ServerHeartbeatFailedEvent
     {
         return $this->awaited;
     }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'host'           => $this->host,
+            'port'           => $this->port,
+            'awaited'        => $this->awaited,
+            'durationMicros' => $this->durationMicros,
+            'error'          => $this->error,
+        ];
+    }
 }
