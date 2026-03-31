@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\BSON;
 
+use DateTimeImmutable;
 use MongoDB\BSON\Binary;
 use MongoDB\BSON\Decimal128;
 use MongoDB\BSON\Document;
@@ -20,7 +21,10 @@ use stdClass;
 
 use function array_is_list;
 use function array_map;
+use function base64_decode;
 use function base64_encode;
+use function hexdec;
+use function implode;
 use function is_array;
 use function is_bool;
 use function is_float;
@@ -30,12 +34,15 @@ use function is_nan;
 use function is_object;
 use function is_string;
 use function json_encode;
+use function round;
 use function sprintf;
 use function str_contains;
 
+use const INF;
 use const JSON_THROW_ON_ERROR;
 use const JSON_UNESCAPED_SLASHES;
 use const JSON_UNESCAPED_UNICODE;
+use const NAN;
 
 /**
  * Converts PHP values (including BSON extension types) to Extended JSON v2.
@@ -61,22 +68,140 @@ final class ExtendedJson
 
     /**
      * Serialize $value to Canonical Extended JSON.
+     *
+     * Uses libbson-style spacing: { "key" : value } and [ val, val ].
      */
     public static function toCanonical(array|object $value): string
     {
         $normalized = self::canonicalizeValue($value);
 
-        return json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        return self::encodeJson($normalized);
     }
 
     /**
      * Serialize $value to Relaxed Extended JSON.
+     *
+     * Uses libbson-style spacing: { "key" : value } and [ val, val ].
      */
     public static function toRelaxed(array|object $value): string
     {
         $normalized = self::relaxValue($value);
 
-        return json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        return self::encodeJson($normalized);
+    }
+
+    /**
+     * Convert a PHP value decoded from Extended JSON back into BSON type objects.
+     *
+     * Recognises the canonical ($binary, $oid, $date, etc.) wrapper patterns
+     * produced by toCanonical() / toRelaxed() and converts them back to the
+     * corresponding MongoDB\BSON\* instances.  Plain scalars pass through
+     * unchanged.
+     */
+    public static function fromValue(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        // Detect extended JSON type wrappers (associative arrays with a single
+        // $ key, or a known two-key pattern).
+
+        if (isset($value['$oid']) && is_string($value['$oid'])) {
+            return new ObjectId($value['$oid']);
+        }
+
+        if (isset($value['$binary'])) {
+            $bin = $value['$binary'];
+            // Canonical v2: { "$binary": { "base64": "...", "subType": "xx" } }
+            if (is_array($bin) && isset($bin['base64'], $bin['subType'])) {
+                return new Binary(
+                    base64_decode($bin['base64']),
+                    (int) hexdec($bin['subType']),
+                );
+            }
+
+            // Legacy v1: { "$binary": "base64string", "$type": "xx" }
+            if (is_string($bin) && isset($value['$type']) && is_string($value['$type'])) {
+                return new Binary(
+                    base64_decode($bin),
+                    (int) hexdec($value['$type']),
+                );
+            }
+        }
+
+        if (isset($value['$date'])) {
+            $d = $value['$date'];
+            if (is_array($d) && isset($d['$numberLong'])) {
+                return new UTCDateTime((int) $d['$numberLong']);
+            }
+
+            if (is_string($d)) {
+                // ISO-8601 relaxed format
+                return new UTCDateTime((int) (round((new DateTimeImmutable($d))->getTimestamp() * 1000)));
+            }
+        }
+
+        if (isset($value['$regularExpression'])) {
+            $r = $value['$regularExpression'];
+
+            return new Regex($r['pattern'] ?? '', $r['options'] ?? '');
+        }
+
+        if (isset($value['$timestamp'])) {
+            $t = $value['$timestamp'];
+
+            return new Timestamp((int) ($t['i'] ?? 0), (int) ($t['t'] ?? 0));
+        }
+
+        if (isset($value['$code'])) {
+            return new Javascript($value['$code'], isset($value['$scope']) ? (object) $value['$scope'] : null);
+        }
+
+        if (isset($value['$numberInt'])) {
+            return (int) $value['$numberInt'];
+        }
+
+        if (isset($value['$numberLong'])) {
+            return new Int64((int) $value['$numberLong']);
+        }
+
+        if (isset($value['$numberDouble'])) {
+            $s = $value['$numberDouble'];
+            if ($s === 'NaN') {
+                return NAN;
+            }
+
+            if ($s === 'Infinity') {
+                return INF;
+            }
+
+            if ($s === '-Infinity') {
+                return -INF;
+            }
+
+            return (float) $s;
+        }
+
+        if (isset($value['$numberDecimal'])) {
+            return new Decimal128($value['$numberDecimal']);
+        }
+
+        if (isset($value['$maxKey'])) {
+            return new MaxKey();
+        }
+
+        if (isset($value['$minKey'])) {
+            return new MinKey();
+        }
+
+        // Recurse into plain associative arrays (BSON documents) and lists
+        $result = [];
+        foreach ($value as $k => $v) {
+            $result[$k] = self::fromValue($v);
+        }
+
+        return $result;
     }
 
     // -------------------------------------------------------------------------
@@ -421,5 +546,79 @@ final class ExtendedJson
     private static function isJsSafeInteger(int $v): bool
     {
         return $v >= -9007199254740991 && $v <= 9007199254740991;
+    }
+
+    /**
+     * Encode a normalized value as JSON using libbson-style spacing:
+     *   objects → { "key" : value, "key2" : value2 }
+     *   arrays  → [ value, value2 ]
+     *
+     * This matches the output of bson_as_canonical_extended_json() so that
+     * phpt tests comparing against C-driver output pass.
+     */
+    private static function encodeJson(mixed $value): string
+    {
+        if ($value === null) {
+            return 'null';
+        }
+
+        if ($value === true) {
+            return 'true';
+        }
+
+        if ($value === false) {
+            return 'false';
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return json_encode($value, JSON_THROW_ON_ERROR);
+        }
+
+        if (is_string($value)) {
+            return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        }
+
+        if (is_array($value)) {
+            if (array_is_list($value)) {
+                if ($value === []) {
+                    return '[  ]';
+                }
+
+                $items = array_map(self::encodeJson(...), $value);
+
+                return '[ ' . implode(', ', $items) . ' ]';
+            }
+
+            // Associative array → object
+            if ($value === []) {
+                return '{  }';
+            }
+
+            $pairs = [];
+            foreach ($value as $k => $v) {
+                $key     = json_encode((string) $k, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+                $pairs[] = $key . ' : ' . self::encodeJson($v);
+            }
+
+            return '{ ' . implode(', ', $pairs) . ' }';
+        }
+
+        if ($value instanceof stdClass) {
+            $arr = (array) $value;
+            if ($arr === []) {
+                return '{  }';
+            }
+
+            $pairs = [];
+            foreach ($arr as $k => $v) {
+                $key     = json_encode((string) $k, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+                $pairs[] = $key . ' : ' . self::encodeJson($v);
+            }
+
+            return '{ ' . implode(', ', $pairs) . ' }';
+        }
+
+        // Fallback for any other type
+        return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     }
 }

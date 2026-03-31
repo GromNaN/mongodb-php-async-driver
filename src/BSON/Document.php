@@ -69,15 +69,15 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
      */
     public static function fromJSON(string $json): static
     {
-        // Parse Extended JSON by decoding it as a PHP array then re-encoding
+        // Decode JSON then convert extended JSON type wrappers to BSON objects
         $phpValue = json_decode($json, associative: true, flags: JSON_THROW_ON_ERROR);
         if (! is_array($phpValue) && ! is_object($phpValue)) {
             throw new InvalidArgumentException('Invalid Extended JSON string');
         }
 
-        $decoded = (array) $phpValue;
+        $decoded = ExtendedJson::fromValue((array) $phpValue);
 
-        return new static(null, $decoded);
+        return new static(null, (array) $decoded);
     }
 
     /**

@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
-use InvalidArgumentException;
 use JsonSerializable;
+use MongoDB\Driver\Exception\InvalidArgumentException;
+use MongoDB\Driver\Exception\LogicException;
 use Stringable;
 
-use function base64_decode;
 use function base64_encode;
+use function is_int;
+use function is_string;
+use function ord;
 use function sprintf;
+use function strlen;
 
 final class Binary implements BinaryInterface, JsonSerializable, Type, Stringable
 {
@@ -26,13 +30,39 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
     public const TYPE_VECTOR       = 9;
     public const TYPE_USER_DEFINED = 128;
 
-    public function __construct(private string $data, private int $type = self::TYPE_GENERIC)
+    public function __construct(public readonly string $data, public readonly int $type = self::TYPE_GENERIC)
     {
         if ($type < 0 || $type > 255) {
             throw new InvalidArgumentException(
-                sprintf('Binary type must be between 0 and 255, %d given.', $type),
+                sprintf('Expected type to be an unsigned 8-bit integer, %d given', $type),
             );
         }
+
+        if ($type === self::TYPE_OLD_UUID || $type === self::TYPE_UUID) {
+            $len = strlen($data);
+            if ($len !== 16) {
+                throw new InvalidArgumentException(
+                    sprintf('Expected UUID length to be 16 bytes, %d given', $len),
+                );
+            }
+        }
+
+        if ($type !== self::TYPE_VECTOR) {
+            return;
+        }
+
+        self::validateVectorData($data);
+    }
+
+    // ------------------------------------------------------------------
+    // Static factories
+    // ------------------------------------------------------------------
+
+    public static function fromVector(array $vector, VectorType $vectorType): Binary
+    {
+        $data = $vectorType->encode($vector);
+
+        return new self($data, self::TYPE_VECTOR);
     }
 
     // ------------------------------------------------------------------
@@ -49,6 +79,28 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
         return $this->type;
     }
 
+    public function getVectorType(): VectorType
+    {
+        if ($this->type !== self::TYPE_VECTOR) {
+            throw new LogicException(
+                sprintf('Expected Binary of type vector (9) but it is %d', $this->type),
+            );
+        }
+
+        return VectorType::fromDtypeByte(ord($this->data[0]));
+    }
+
+    public function toArray(): array
+    {
+        if ($this->type !== self::TYPE_VECTOR) {
+            throw new LogicException(
+                sprintf('Expected Binary of type vector (9) but it is %d', $this->type),
+            );
+        }
+
+        return VectorType::fromDtypeByte(ord($this->data[0]))->decode($this->data);
+    }
+
     public function __toString(): string
     {
         return $this->data;
@@ -61,10 +113,8 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
     public function jsonSerialize(): mixed
     {
         return [
-            '$binary' => [
-                'base64'  => base64_encode($this->data),
-                'subType' => sprintf('%02x', $this->type),
-            ],
+            '$binary' => base64_encode($this->data),
+            '$type'   => sprintf('%02x', $this->type),
         ];
     }
 
@@ -75,27 +125,98 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
     public function __serialize(): array
     {
         return [
-            'data' => base64_encode($this->data),
+            'data' => $this->data,
             'type' => $this->type,
         ];
     }
 
     public function __unserialize(array $data): void
     {
-        $this->data = base64_decode($data['data']);
+        self::validateInitFields($data);
+        self::validateTypeRange($data['type']);
+
+        if ($data['type'] === self::TYPE_OLD_UUID || $data['type'] === self::TYPE_UUID) {
+            $len = strlen($data['data']);
+            if ($len !== 16) {
+                throw new InvalidArgumentException(
+                    sprintf('Expected UUID length to be 16 bytes, %d given', $len),
+                );
+            }
+        }
+
+        if ($data['type'] === self::TYPE_VECTOR) {
+            self::validateVectorData($data['data']);
+        }
+
+        $this->data = $data['data'];
         $this->type = $data['type'];
     }
 
     public static function __set_state(array $properties): static
     {
+        self::validateInitFields($properties);
+        self::validateTypeRange($properties['type']);
+
+        if ($properties['type'] === self::TYPE_OLD_UUID || $properties['type'] === self::TYPE_UUID) {
+            $len = strlen($properties['data']);
+            if ($len !== 16) {
+                throw new InvalidArgumentException(
+                    sprintf('Expected UUID length to be 16 bytes, %d given', $len),
+                );
+            }
+        }
+
+        if ($properties['type'] === self::TYPE_VECTOR) {
+            self::validateVectorData($properties['data']);
+        }
+
         return new static($properties['data'], $properties['type']);
     }
 
     public function __debugInfo(): array
     {
-        return [
+        $info = [
             'data' => base64_encode($this->data),
             'type' => $this->type,
         ];
+
+        if ($this->type === self::TYPE_VECTOR && strlen($this->data) >= 2) {
+            $info['vector']     = $this->toArray();
+            $info['vectorType'] = $this->getVectorType();
+        }
+
+        return $info;
+    }
+
+    // ------------------------------------------------------------------
+    // Private helpers
+    // ------------------------------------------------------------------
+
+    private static function validateInitFields(array $data): void
+    {
+        if (
+            ! isset($data['data']) || ! is_string($data['data']) ||
+            ! isset($data['type']) || ! is_int($data['type'])
+        ) {
+            throw new InvalidArgumentException(
+                'MongoDB\BSON\Binary initialization requires "data" string and "type" integer fields',
+            );
+        }
+    }
+
+    private static function validateTypeRange(int $type): void
+    {
+        if ($type < 0 || $type > 255) {
+            throw new InvalidArgumentException(
+                sprintf('Expected type to be an unsigned 8-bit integer, %d given', $type),
+            );
+        }
+    }
+
+    private static function validateVectorData(string $data): void
+    {
+        if (strlen($data) < 2) {
+            throw new InvalidArgumentException('Binary vector data is invalid');
+        }
     }
 }
