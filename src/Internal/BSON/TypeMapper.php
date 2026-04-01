@@ -54,6 +54,11 @@ final class TypeMapper
 
         $targetType = self::resolveContextType($typeMap, $context);
 
+        // Resolve 'bson' shorthand to concrete BSON type based on context.
+        if ($targetType === 'bson') {
+            $targetType = ($context === 'array') ? 'bsonArray' : 'bsonDocument';
+        }
+
         // Recursively apply typeMap to children before converting the container
         $value = self::applyToChildren($value, $typeMap);
 

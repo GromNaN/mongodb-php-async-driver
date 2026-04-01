@@ -93,7 +93,7 @@ final class BsonDecoder
     public static function decode(
         string $bson,
         array $typeMap = [],
-        bool $handlePersistable = false,
+        bool $handlePersistable = true,
         bool $ignoreRootKeys = false,
     ): array|object {
         // Resolve null type map values to defaults

@@ -5,23 +5,58 @@ namespace MongoDB\Driver;
 
 use Closure;
 use MongoDB\BSON\Int64;
+use MongoDB\BSON\Unserializable;
+use MongoDB\Driver\Exception\InvalidArgumentException;
+use MongoDB\Driver\Exception\LogicException;
 use MongoDB\Driver\Exception\RuntimeException;
+use MongoDB\Internal\BSON\TypeMapper;
+use ReflectionClass;
 use Throwable;
 
+use function array_is_list;
+use function class_exists;
 use function count;
-use function is_int;
+use function interface_exists;
+use function is_array;
+use function is_string;
+use function str_contains;
+use function str_ends_with;
+use function str_starts_with;
 
 final class Cursor implements CursorInterface
 {
+    /** Raw-decoded items in the current batch (default BsonDecoder output: stdClass/arrays). */
     private array $items = [];
+
+    /** Position within the current batch (0-indexed). */
     private int $position = 0;
+
+    /** Total number of items from all previous batches (for global key tracking). */
+    private int $globalOffset = 0;
+
+    /** Current BSON type map for decoding items. */
     private array $typeMap = [];
-    private ?int $cursorId = null;
+
+    /** Server-side cursor ID (0 means no more batches available). */
+    private int $cursorId = 0;
+
+    /** The server this cursor is bound to. */
     private ?Server $server = null;
+
+    /** Namespace string ("db.collection") for getMore commands. */
     private string $namespace = '';
-    /** @var Closure|null Callable that fetches more items: fn(int $cursorId): array */
+
+    /**
+     * Closure to fetch the next batch.
+     * Signature: fn(int $cursorId, string $ns): array{0: list<array|object>, 1: int}
+     */
     private ?Closure $getMoreFn = null;
+
+    /** True when all batches have been fetched and the cursor cannot fetch more. */
     private bool $exhausted = false;
+
+    /** True after the first call to next(), preventing rewind(). */
+    private bool $started = false;
 
     private function __construct()
     {
@@ -33,12 +68,12 @@ final class Cursor implements CursorInterface
         int|Int64 $cursorId,
         string $namespace,
         Server $server,
-        array $typeMap,
+        array $typeMap = [],
         ?Closure $getMoreFn = null,
     ): self {
         $instance = new self();
         $instance->items = $items;
-        $instance->cursorId = is_int($cursorId) ? $cursorId : (int) (string) $cursorId;
+        $instance->cursorId = $cursorId instanceof Int64 ? (int) (string) $cursorId : $cursorId;
         $instance->namespace = $namespace;
         $instance->server = $server;
         $instance->typeMap = $typeMap;
@@ -62,12 +97,18 @@ final class Cursor implements CursorInterface
 
     public function current(): array|object|null
     {
-        return $this->items[$this->position] ?? null;
+        if (! $this->valid()) {
+            return null;
+        }
+
+        $item = $this->items[$this->position];
+
+        return $this->typeMap !== [] ? TypeMapper::apply($item, $this->typeMap, 'root') : $item;
     }
 
     public function getId(): Int64
     {
-        return new Int64($this->cursorId ?? 0);
+        return new Int64($this->cursorId);
     }
 
     public function getServer(): Server
@@ -86,27 +127,57 @@ final class Cursor implements CursorInterface
 
     public function key(): ?int
     {
-        return $this->valid() ? $this->position : null;
+        if (! $this->valid()) {
+            return null;
+        }
+
+        return $this->globalOffset + $this->position;
     }
 
     public function next(): void
     {
-        $this->position++;
-        // Fetch more if we've consumed all current items and cursor is still open
-        if ($this->position < count($this->items) || $this->exhausted || $this->getMoreFn === null) {
+        if (! $this->valid()) {
+            if ($this->exhausted) {
+                // Regular cursor fully consumed: superfluous iteration.
+                throw new RuntimeException('Cannot advance a completed or failed cursor.');
+            }
+
+            // Tailable cursor: buffer temporarily empty but cursor still alive.
+            // Fetch the next batch (may return empty; caller should check valid()/current()).
+            $this->started = true;
+            $this->fetchMore();
+
             return;
         }
 
-        $this->fetchMore();
+        $this->started = true;
+        $this->position++;
+
+        // Still within the current batch — nothing more to do.
+        if ($this->position < count($this->items)) {
+            return;
+        }
+
+        // Batch exhausted. Fetch more if cursor is still alive.
+        if (! $this->exhausted && $this->getMoreFn !== null && $this->cursorId !== 0) {
+            $this->fetchMore();
+        } else {
+            $this->exhausted = true;
+        }
     }
 
     public function rewind(): void
     {
+        if ($this->started) {
+            throw new LogicException('Cursors cannot rewind after starting iteration');
+        }
+
         $this->position = 0;
     }
 
     public function setTypeMap(array $typemap): void
     {
+        $this->validateTypeMap($typemap);
         $this->typeMap = $typemap;
     }
 
@@ -119,40 +190,111 @@ final class Cursor implements CursorInterface
             $this->next();
         }
 
-        // Also fetch remaining batches
-        while (! $this->exhausted && $this->getMoreFn !== null) {
-            $this->fetchMore();
-            while ($this->position < count($this->items)) {
-                $result[] = $this->items[$this->position++];
-            }
-        }
-
         return $result;
     }
 
     public function valid(): bool
     {
-        return $this->position < count($this->items);
+        return isset($this->items[$this->position]);
     }
+
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
 
     private function fetchMore(): void
     {
-        if ($this->getMoreFn === null || $this->cursorId === 0) {
-            $this->exhausted = true;
-
-            return;
-        }
-
         try {
             [$newItems, $newCursorId] = ($this->getMoreFn)($this->cursorId, $this->namespace);
+            $this->globalOffset += count($this->items);
             $this->items = $newItems;
             $this->position = 0;
             $this->cursorId = $newCursorId;
             $this->exhausted = ($newCursorId === 0);
         } catch (Throwable $e) {
             $this->exhausted = true;
-
             throw $e;
+        }
+    }
+
+    /**
+     * Validate a type map array, throwing InvalidArgumentException for invalid entries.
+     *
+     * Valid top-level keys: 'root', 'document', 'array', 'fieldPaths'.
+     * Valid values for root/document/array: 'array', 'object', 'bson', or a valid class name.
+     */
+    private function validateTypeMap(array $typemap): void
+    {
+        foreach (['root', 'document', 'array'] as $key) {
+            if (isset($typemap[$key])) {
+                $this->validateTypeMapValue($typemap[$key]);
+            }
+        }
+
+        if (array_key_exists('fieldPaths', $typemap)) {
+            $this->validateFieldPaths($typemap['fieldPaths']);
+        }
+    }
+
+    private function validateTypeMapValue(mixed $value): void
+    {
+        if (! is_string($value)) {
+            return;
+        }
+
+        // Built-in type tokens are always valid.
+        if ($value === 'array' || $value === 'object' || $value === 'bson') {
+            return;
+        }
+
+        if (! class_exists($value) && ! interface_exists($value)) {
+            throw new InvalidArgumentException('Class ' . $value . ' does not exist');
+        }
+
+        $rc = new ReflectionClass($value);
+
+        if (! $rc->isInstantiable()) {
+            $prefix = $rc->isInterface() ? 'Interface' : 'Class';
+            throw new InvalidArgumentException($prefix . ' ' . $value . ' is not instantiatable');
+        }
+
+        if (! $rc->implementsInterface(Unserializable::class)) {
+            throw new InvalidArgumentException(
+                'Class ' . $value . ' does not implement MongoDB\BSON\Unserializable',
+            );
+        }
+    }
+
+    private function validateFieldPaths(mixed $fieldPaths): void
+    {
+        if (! is_array($fieldPaths)) {
+            throw new InvalidArgumentException("The 'fieldPaths' element is not an array");
+        }
+
+        if (array_is_list($fieldPaths)) {
+            throw new InvalidArgumentException("The 'fieldPaths' element is not an associative array");
+        }
+
+        foreach ($fieldPaths as $key => $value) {
+            $key = (string) $key;
+
+            if ($key === '') {
+                throw new InvalidArgumentException("The 'fieldPaths' element may not be an empty string");
+            }
+
+            if (str_starts_with($key, '.')) {
+                throw new InvalidArgumentException("A 'fieldPaths' key may not start with a '.'");
+            }
+
+            if (str_ends_with($key, '.')) {
+                throw new InvalidArgumentException("A 'fieldPaths' key may not end with a '.'");
+            }
+
+            if (str_contains($key, '..')) {
+                throw new InvalidArgumentException("A 'fieldPaths' key may not have an empty segment");
+            }
+
+            $this->validateTypeMapValue($value);
         }
     }
 }

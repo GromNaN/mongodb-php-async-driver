@@ -6,6 +6,7 @@ namespace MongoDB\Internal\Operation;
 
 use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
+use MongoDB\Driver\Cursor;
 use MongoDB\Driver\BulkWrite;
 use MongoDB\Driver\BulkWriteCommand;
 use MongoDB\Driver\BulkWriteCommandResult;
@@ -202,7 +203,9 @@ final class OperationExecutor
             session:        $session,
         );
 
-        return $this->sendCommand($pool, $db, 'find', $prepared, $server);
+        $maxAwaitTimeMS = isset($opts['maxAwaitTimeMS']) ? (int) $opts['maxAwaitTimeMS'] : 0;
+
+        return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS);
     }
 
     /**
@@ -718,10 +721,11 @@ final class OperationExecutor
         string $cmdName,
         array $prepared,
         InternalServerDescription $server,
+        int $maxAwaitTimeMS = 0,
     ): CursorInterface {
         $body = $this->doSendCommand($pool, $db, $cmdName, $prepared, $server);
 
-        return $this->buildCursor($body, $db, $cmdName, $pool, $server);
+        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS);
     }
 
     // -------------------------------------------------------------------------
@@ -744,8 +748,11 @@ final class OperationExecutor
         string $cmdName,
         ConnectionPool $pool,
         InternalServerDescription $server,
+        int $maxAwaitTimeMS = 0,
     ): CursorInterface {
-        // Commands that return a cursor sub-document.
+        $publicServer = $this->buildPublicServer($server);
+
+        // Commands that return a cursor sub-document (find, aggregate, …).
         $rawCursor = $body['cursor'] ?? null;
         if ($rawCursor !== null && (is_array($rawCursor) || is_object($rawCursor))) {
             $cursorDoc  = (array) $rawCursor;
@@ -754,146 +761,46 @@ final class OperationExecutor
             $ns         = (string) ($cursorDoc['ns'] ?? $db);
             $firstBatch = (array) ($cursorDoc['firstBatch'] ?? []);
 
-            return new class (
-                $firstBatch,
-                (int) $cursorId,
-                (string) $ns,
-                $db,
-                $pool,
-                $server,
-            ) implements CursorInterface {
-                /** @var list<array|object> */
-                private array $buffer;
-                private int $position = 0;
+            $getMoreFn = static function (int $cursorId, string $ns) use ($pool, $db, $maxAwaitTimeMS): array {
+                $conn = $pool->acquire();
+                try {
+                    $getMoreCmd = [
+                        'getMore'    => $cursorId,
+                        'collection' => explode('.', $ns, 2)[1] ?? $ns,
+                        '$db'        => $db,
+                    ];
 
-                public function __construct(
-                    array $firstBatch,
-                    private int $cursorId,
-                    private string $ns,
-                    private string $db,
-                    private ConnectionPool $pool,
-                    private InternalServerDescription $server,
-                ) {
-                    $this->buffer = $firstBatch;
-                }
-
-                public function current(): mixed
-                {
-                    return $this->buffer[$this->position];
-                }
-
-                public function key(): int
-                {
-                    return $this->position;
-                }
-
-                public function next(): void
-                {
-                    ++$this->position;
-
-                    // Fetch next batch when the local buffer is exhausted.
-                    if ($this->position < count($this->buffer) || $this->cursorId === 0) {
-                        return;
+                    if ($maxAwaitTimeMS > 0) {
+                        $getMoreCmd['maxTimeMS'] = $maxAwaitTimeMS;
                     }
 
-                    $this->fetchNextBatch();
-                }
+                    [$bytes] = OpMsgEncoder::encodeWithRequestId($getMoreCmd);
+                    $responseBytes = $conn->sendMessage($bytes);
+                    $decoded   = OpMsgDecoder::decodeAndCheck($responseBytes);
+                    $body      = is_array($decoded) ? $decoded : (array) $decoded;
+                    $cursorDoc = (array) ($body['cursor'] ?? []);
+                    $cursorIdRaw = $cursorDoc['id'] ?? 0;
+                    $newCursorId = $cursorIdRaw instanceof Int64 ? (int) (string) $cursorIdRaw : (int) $cursorIdRaw;
+                    $nextBatch   = (array) ($cursorDoc['nextBatch'] ?? []);
 
-                public function rewind(): void
-                {
-                    $this->position = 0;
-                }
-
-                public function valid(): bool
-                {
-                    return isset($this->buffer[$this->position]);
-                }
-
-                public function toArray(): array
-                {
-                    $this->rewind();
-                    $result = [];
-                    while ($this->valid()) {
-                        $result[] = $this->current();
-                        $this->next();
-                    }
-
-                    return $result;
-                }
-
-                private function fetchNextBatch(): void
-                {
-                    $conn = $this->pool->acquire();
-
-                    try {
-                        $getMoreCmd = [
-                            'getMore'    => $this->cursorId,
-                            'collection' => explode('.', $this->ns, 2)[1] ?? $this->ns,
-                            '$db'        => $this->db,
-                        ];
-
-                        [$bytes] = OpMsgEncoder::encodeWithRequestId($getMoreCmd);
-                        $responseBytes = $conn->sendMessage($bytes);
-                        $decoded   = OpMsgDecoder::decodeAndCheck($responseBytes);
-                        $body      = is_array($decoded) ? $decoded : (array) $decoded;
-                        $cursorDoc = (array) ($body['cursor'] ?? []);
-                        $cursorIdRaw     = $cursorDoc['id'] ?? 0;
-                        $this->cursorId  = $cursorIdRaw instanceof Int64 ? (int) (string) $cursorIdRaw : (int) $cursorIdRaw;
-                        $nextBatch       = (array) ($cursorDoc['nextBatch'] ?? []);
-
-                        // Append new batch, drop already-iterated documents.
-                        $this->buffer   = array_values(array_slice($this->buffer, $this->position));
-                        foreach ($nextBatch as $doc) {
-                            $this->buffer[] = $doc;
-                        }
-
-                        $this->position = 0;
-                    } finally {
-                        $this->pool->release($conn);
-                    }
+                    return [$nextBatch, $newCursorId];
+                } finally {
+                    $pool->release($conn);
                 }
             };
+
+            return Cursor::createFromCommandResult(
+                items:      $firstBatch,
+                cursorId:   $cursorId,
+                namespace:  $ns,
+                server:     $publicServer,
+                typeMap:    [],
+                getMoreFn:  $getMoreFn,
+            );
         }
 
         // Non-cursor commands: return the single response document as a one-element cursor.
-        // Wrap as stdClass so cursor->toArray()[0] returns an object, matching ext-mongodb behaviour.
-        return new class ([(object) $body]) implements CursorInterface {
-            private int $position = 0;
-
-            public function __construct(private readonly array $items)
-            {
-            }
-
-            public function current(): mixed
-            {
-                return $this->items[$this->position];
-            }
-
-            public function key(): int
-            {
-                return $this->position;
-            }
-
-            public function next(): void
-            {
-                ++$this->position;
-            }
-
-            public function rewind(): void
-            {
-                $this->position = 0;
-            }
-
-            public function valid(): bool
-            {
-                return isset($this->items[$this->position]);
-            }
-
-            public function toArray(): array
-            {
-                return $this->items;
-            }
-        };
+        return Cursor::createFromArray([(object) $body], $publicServer);
     }
 
     // -------------------------------------------------------------------------

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MongoDB\Internal\Operation;
 
 use InvalidArgumentException;
+use MongoDB\BSON\Document;
 use MongoDB\Driver\ReadConcern;
 use MongoDB\Driver\ReadPreference;
 use MongoDB\Driver\ServerApi;
@@ -96,7 +97,12 @@ final class CommandHelper
         ?Session $session = null,
         ?ServerApi $serverApi = null,
     ): array {
-        // 1. Normalise to array.
+        // 1. Normalise to array. MongoDB\BSON\Document must be decoded via toPHP()
+        //    because casting to array yields internal PHP properties, not document fields.
+        if ($command instanceof Document) {
+            $command = (array) $command->toPHP(['root' => 'array', 'document' => 'array']);
+        }
+
         $doc = is_array($command) ? $command : (array) $command;
 
         // 2. Target database.
@@ -200,7 +206,9 @@ final class CommandHelper
      */
     public static function getCommandName(array|object $command): string
     {
-        if (is_object($command)) {
+        if ($command instanceof Document) {
+            $command = (array) $command->toPHP(['root' => 'array', 'document' => 'array']);
+        } elseif (is_object($command)) {
             $command = (array) $command;
         }
 

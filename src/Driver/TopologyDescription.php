@@ -12,21 +12,15 @@ final class TopologyDescription
     public const TYPE_REPLICA_SET_WITH_PRIMARY   = 'ReplicaSetWithPrimary';
     public const TYPE_LOAD_BALANCED              = 'LoadBalanced';
 
-    /** @var list<Server> */
-    private array $servers;
-
     private function __construct(
         private readonly string $type,
-        array $servers = [],
+        private array $servers = [],
     ) {
-        $this->servers = $servers;
     }
 
     public static function createFromInternal(string $type, array $servers = []): self
     {
-        $instance = new self($type, $servers);
-
-        return $instance;
+        return new self($type, $servers);
     }
 
     public function getType(): string
