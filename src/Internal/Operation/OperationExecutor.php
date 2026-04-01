@@ -10,6 +10,7 @@ use MongoDB\Driver\Command;
 use MongoDB\Driver\CursorInterface;
 use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
+use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Driver\Monitoring\CommandFailedEvent;
 use MongoDB\Driver\Monitoring\CommandStartedEvent;
 use MongoDB\Driver\Monitoring\CommandSubscriber;
@@ -34,6 +35,7 @@ use MongoDB\Internal\Uri\UriOptions;
 use Throwable;
 
 use function array_map;
+use function array_merge;
 use function array_slice;
 use function array_values;
 use function count;
@@ -226,13 +228,13 @@ final class OperationExecutor
                 $acknowledged   = ! ($result['acknowledged'] ?? true) ? false : $acknowledged;
 
                 foreach ((array) ($result['writeErrors'] ?? []) as $e) {
-                    $e         = (array) $e;
-                    $localIdx  = (int) ($e['index'] ?? 0);
+                    $localIdx  = (int) ($e->index ?? 0);
                     $globalIdx = $insertGlobalIndices[$localIdx] ?? $localIdx;
                     $writeErrors[] = new WriteError(
-                        code:    (int) ($e['code']   ?? 0),
+                        code:    (int) ($e->code    ?? 0),
                         index:   $globalIdx,
-                        message: (string) ($e['errmsg'] ?? ''),
+                        message: (string) ($e->errmsg ?? ''),
+                        info:    $e->errInfo ?? null,
                     );
                 }
 
@@ -303,13 +305,13 @@ final class OperationExecutor
                 }
 
                 foreach ((array) ($result['writeErrors'] ?? []) as $e) {
-                    $e         = (array) $e;
-                    $localIdx  = (int) ($e['index'] ?? 0);
+                    $localIdx  = (int) ($e->index ?? 0);
                     $globalIdx = $updateGlobalIndices[$localIdx] ?? $localIdx;
                     $writeErrors[] = new WriteError(
-                        code:    (int) ($e['code']   ?? 0),
+                        code:    (int) ($e->code    ?? 0),
                         index:   $globalIdx,
-                        message: (string) ($e['errmsg'] ?? ''),
+                        message: (string) ($e->errmsg ?? ''),
+                        info:    $e->errInfo ?? null,
                     );
                 }
 
@@ -359,13 +361,13 @@ final class OperationExecutor
                 $totalDeleted += (int) ($result['n'] ?? 0);
 
                 foreach ((array) ($result['writeErrors'] ?? []) as $e) {
-                    $e         = (array) $e;
-                    $localIdx  = (int) ($e['index'] ?? 0);
+                    $localIdx  = (int) ($e->index ?? 0);
                     $globalIdx = $deleteGlobalIndices[$localIdx] ?? $localIdx;
                     $writeErrors[] = new WriteError(
-                        code:    (int) ($e['code']   ?? 0),
+                        code:    (int) ($e->code    ?? 0),
                         index:   $globalIdx,
-                        message: (string) ($e['errmsg'] ?? ''),
+                        message: (string) ($e->errmsg ?? ''),
+                        info:    $e->errInfo ?? null,
                     );
                 }
 
@@ -678,7 +680,8 @@ final class OperationExecutor
             operationId: $requestId,
         );
 
-        foreach ($this->subscribers as $subscriber) {
+        $allSubscribers = array_merge($this->subscribers, GlobalSubscriberRegistry::getAll());
+        foreach ($allSubscribers as $subscriber) {
             if (! ($subscriber instanceof CommandSubscriber)) {
                 continue;
             }
@@ -707,7 +710,8 @@ final class OperationExecutor
             durationMicros: $durationMicros,
         );
 
-        foreach ($this->subscribers as $subscriber) {
+        $allSubscribers = array_merge($this->subscribers, GlobalSubscriberRegistry::getAll());
+        foreach ($allSubscribers as $subscriber) {
             if (! ($subscriber instanceof CommandSubscriber)) {
                 continue;
             }
@@ -736,7 +740,8 @@ final class OperationExecutor
             durationMicros: $durationMicros,
         );
 
-        foreach ($this->subscribers as $subscriber) {
+        $allSubscribers = array_merge($this->subscribers, GlobalSubscriberRegistry::getAll());
+        foreach ($allSubscribers as $subscriber) {
             if (! ($subscriber instanceof CommandSubscriber)) {
                 continue;
             }

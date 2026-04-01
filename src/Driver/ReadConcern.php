@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
-use AllowDynamicProperties;
 use MongoDB\BSON\Serializable;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use stdClass;
@@ -11,11 +10,11 @@ use stdClass;
 use function is_string;
 
 /**
- * Dynamic-property approach: the public "level" property is only set when
- * the level is non-null, so var_dump / var_export both produce an empty
- * object when no level is given.
+ * The "level" dynamic property is set only when non-null, making var_export
+ * produce an empty array for the default (no-level) case.  __debugInfo()
+ * provides the same view for var_dump.
  */
-#[AllowDynamicProperties]
+#[\AllowDynamicProperties]
 final class ReadConcern implements Serializable
 {
     public const string LINEARIZABLE = 'linearizable';
@@ -26,11 +25,9 @@ final class ReadConcern implements Serializable
 
     public function __construct(?string $level = null)
     {
-        if ($level === null) {
-            return;
+        if ($level !== null) {
+            $this->level = $level;
         }
-
-        $this->level = $level;
     }
 
     public function getLevel(): ?string
@@ -87,5 +84,14 @@ final class ReadConcern implements Serializable
         }
 
         return new static(null);
+    }
+
+    public function __debugInfo(): array
+    {
+        if (! isset($this->level)) {
+            return [];
+        }
+
+        return ['level' => $this->level];
     }
 }

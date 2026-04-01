@@ -10,19 +10,19 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver\Monitoring {
 
+    use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
+
     use function function_exists;
 
     if (! function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
         function addSubscriber(Subscriber $subscriber): void
         {
-            // Global subscriber registry is managed via Manager instances.
-            // This function is a no-op at the global level in this driver;
-            // use Manager::addSubscriber() to register per-manager.
+            GlobalSubscriberRegistry::add($subscriber);
         }
 
         function removeSubscriber(Subscriber $subscriber): void
         {
-            // No-op at global level. Use Manager::removeSubscriber().
+            GlobalSubscriberRegistry::remove($subscriber);
         }
     }
 }

@@ -3,13 +3,27 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
+use MongoDB\BSON\PackedArray;
 use MongoDB\BSON\Serializable;
+use MongoDB\Driver\Exception\InvalidArgumentException;
+use MongoDB\Driver\Exception\UnexpectedValueException;
 use stdClass;
 
-use function array_filter;
-use function in_array;
-use function sprintf;
+use function is_array;
+use function is_int;
+use function is_object;
+use function is_string;
 
+/**
+ * Dynamic-property approach: only non-default properties are set, so
+ * var_dump / var_export produce minimal output.
+ *
+ *   $this->mode                — string (always set)
+ *   $this->tags                — array of stdClass (only when non-empty)
+ *   $this->maxStalenessSeconds — int (only when != -1)
+ *   $this->hedge               — stdClass (only when set)
+ */
+#[\AllowDynamicProperties]
 final class ReadPreference implements Serializable
 {
     public const string PRIMARY = 'primary';
@@ -21,29 +35,92 @@ final class ReadPreference implements Serializable
     public const int NO_MAX_STALENESS = -1;
     public const int SMALLEST_MAX_STALENESS_SECONDS = 90;
 
-    private array $tagSets;
-    private int $maxStalenessSeconds;
-    private ?object $hedge;
+    private const MODE_MAP = [
+        'primary'            => self::PRIMARY,
+        'primarypreferred'   => self::PRIMARY_PREFERRED,
+        'secondary'          => self::SECONDARY,
+        'secondarypreferred' => self::SECONDARY_PREFERRED,
+        'nearest'            => self::NEAREST,
+    ];
 
-    public function __construct(private string $mode, ?array $tagSets = null, ?array $options = null)
+    public function __construct(string $mode, ?array $tagSets = null, ?array $options = null)
     {
-        $validModes = [
-            self::PRIMARY,
-            self::PRIMARY_PREFERRED,
-            self::SECONDARY,
-            self::SECONDARY_PREFERRED,
-            self::NEAREST,
-        ];
+        $canonicalMode = self::MODE_MAP[\strtolower($mode)] ?? null;
+        if ($canonicalMode === null) {
+            throw new InvalidArgumentException("Invalid mode: '" . $mode . "'");
+        }
+        $mode = $canonicalMode;
 
-        if (! in_array($mode, $validModes, true)) {
-            throw new Exception\InvalidArgumentException(
-                sprintf('Invalid mode "%s" given for ReadPreference', $mode),
-            );
+        // Validate and convert tagSets
+        $normalizedTagSets = null;
+        if ($tagSets !== null && $tagSets !== []) {
+            // First validate each item's type
+            foreach ($tagSets as $tagSet) {
+                if (! is_array($tagSet) && ! is_object($tagSet)) {
+                    throw new InvalidArgumentException(
+                        'tagSets must be an array of zero or more documents',
+                    );
+                }
+            }
+
+            // Then check primary mode restriction
+            if ($mode === self::PRIMARY) {
+                throw new InvalidArgumentException('tagSets may not be used with primary mode');
+            }
+
+            // Convert array items to stdClass (without modifying original)
+            $normalizedTagSets = [];
+            foreach ($tagSets as $tagSet) {
+                $normalizedTagSets[] = is_array($tagSet) ? (object) $tagSet : $tagSet;
+            }
         }
 
-        $this->tagSets = $tagSets ?? [];
-        $this->maxStalenessSeconds = $options['maxStalenessSeconds'] ?? self::NO_MAX_STALENESS;
-        $this->hedge = isset($options['hedge']) ? (object) $options['hedge'] : null;
+        // Validate maxStalenessSeconds
+        $maxStalenessSeconds = self::NO_MAX_STALENESS;
+        if (isset($options['maxStalenessSeconds'])) {
+            $ms = $options['maxStalenessSeconds'];
+            if ($mode === self::PRIMARY) {
+                throw new InvalidArgumentException('maxStalenessSeconds may not be used with primary mode');
+            }
+            if ($ms > 2147483647) {
+                throw new InvalidArgumentException(
+                    'Expected maxStalenessSeconds to be <= 2147483647, ' . $ms . ' given',
+                );
+            }
+            if ($ms !== self::NO_MAX_STALENESS && $ms < self::SMALLEST_MAX_STALENESS_SECONDS) {
+                throw new InvalidArgumentException(
+                    'Expected maxStalenessSeconds to be >= 90, ' . $ms . ' given',
+                );
+            }
+            $maxStalenessSeconds = $ms;
+        }
+
+        // Handle hedge option
+        $hedge = null;
+        if (isset($options['hedge'])) {
+            $hedgeVal = $options['hedge'];
+            \trigger_error(
+                'MongoDB\Driver\ReadPreference::__construct(): The "hedge" option is deprecated as of MongoDB 8.0 and will be removed in a future release',
+                \E_USER_DEPRECATED,
+            );
+
+            if ($hedgeVal instanceof PackedArray) {
+                throw new UnexpectedValueException('MongoDB\BSON\PackedArray cannot be serialized as a root document');
+            }
+
+            if (! is_array($hedgeVal) && ! is_object($hedgeVal)) {
+                throw new InvalidArgumentException('hedge must be an array or object');
+            }
+
+            if ($mode === self::PRIMARY) {
+                throw new InvalidArgumentException('hedge may not be used with primary mode');
+            }
+
+            $hedgeObj = (object) $hedgeVal;
+            $hedge    = ((array) $hedgeObj) !== [] ? $hedgeObj : null;
+        }
+
+        $this->applyState($mode, $normalizedTagSets, $maxStalenessSeconds, $hedge);
     }
 
     public function getModeString(): string
@@ -51,35 +128,63 @@ final class ReadPreference implements Serializable
         return $this->mode;
     }
 
+    public function __debugInfo(): array
+    {
+        $info = ['mode' => $this->mode];
+
+        if (isset($this->tags)) {
+            $info['tags'] = $this->tags;
+        }
+
+        if (isset($this->maxStalenessSeconds)) {
+            $info['maxStalenessSeconds'] = $this->maxStalenessSeconds;
+        }
+
+        if (isset($this->hedge)) {
+            $info['hedge'] = $this->hedge;
+        }
+
+        return $info;
+    }
+
     public function getTagSets(): array
     {
-        return $this->tagSets;
+        if (! isset($this->tags)) {
+            return [];
+        }
+
+        return \array_map(static fn (object $t) => (array) $t, $this->tags);
     }
 
     public function getMaxStalenessSeconds(): int
     {
-        return $this->maxStalenessSeconds;
+        return $this->maxStalenessSeconds ?? self::NO_MAX_STALENESS;
     }
 
     public function getHedge(): ?object
     {
-        return $this->hedge;
+        \trigger_error(
+            'Method MongoDB\Driver\ReadPreference::getHedge() is deprecated',
+            \E_USER_DEPRECATED,
+        );
+
+        return $this->hedge ?? null;
     }
 
     public function bsonSerialize(): stdClass
     {
-        $doc = new stdClass();
+        $doc       = new stdClass();
         $doc->mode = $this->mode;
 
-        if ($this->tagSets !== []) {
-            $doc->tags = $this->tagSets;
+        if (isset($this->tags)) {
+            $doc->tags = $this->tags;
         }
 
-        if ($this->maxStalenessSeconds !== self::NO_MAX_STALENESS) {
+        if (isset($this->maxStalenessSeconds)) {
             $doc->maxStalenessSeconds = $this->maxStalenessSeconds;
         }
 
-        if ($this->hedge !== null) {
+        if (isset($this->hedge)) {
             $doc->hedge = $this->hedge;
         }
 
@@ -88,43 +193,173 @@ final class ReadPreference implements Serializable
 
     public function __serialize(): array
     {
-        return [
-            'mode' => $this->mode,
-            'tagSets' => $this->tagSets,
-            'maxStalenessSeconds' => $this->maxStalenessSeconds,
-            'hedge' => $this->hedge,
-        ];
+        $data = ['mode' => $this->mode];
+
+        if (isset($this->tags)) {
+            $data['tags'] = $this->tags;
+        }
+
+        if (isset($this->maxStalenessSeconds)) {
+            $data['maxStalenessSeconds'] = $this->maxStalenessSeconds;
+        }
+
+        if (isset($this->hedge)) {
+            $data['hedge'] = $this->hedge;
+        }
+
+        return $data;
     }
 
     public function __unserialize(array $data): void
     {
-        $this->mode = $data['mode'];
-        $this->tagSets = $data['tagSets'] ?? [];
-        $this->maxStalenessSeconds = $data['maxStalenessSeconds'] ?? self::NO_MAX_STALENESS;
-        $this->hedge = $data['hedge'] ?? null;
+        $mode = $data['mode'] ?? null;
+
+        if (! is_string($mode)) {
+            throw new InvalidArgumentException(
+                'MongoDB\Driver\ReadPreference initialization requires "mode" field to be string',
+            );
+        }
+
+        if (! \in_array($mode, self::MODE_MAP, true)) {
+            throw new InvalidArgumentException(
+                'MongoDB\Driver\ReadPreference initialization requires specific values for "mode" string field',
+            );
+        }
+
+        $tags               = $data['tags'] ?? null;
+        $maxStalenessSeconds = $data['maxStalenessSeconds'] ?? self::NO_MAX_STALENESS;
+        $hedge              = $data['hedge'] ?? null;
+
+        if ($hedge !== null) {
+            \trigger_error(
+                'MongoDB\Driver\ReadPreference::__unserialize(): The "hedge" option is deprecated as of MongoDB 8.0 and will be removed in a future release',
+                \E_USER_DEPRECATED,
+            );
+        }
+
+        $this->applyState($mode, $tags, $maxStalenessSeconds, $hedge);
     }
 
     public static function __set_state(array $properties): static
     {
-        $instance = new static(
-            $properties['mode'],
-            $properties['tagSets'] ?? null,
-            array_filter([
-                'maxStalenessSeconds' => $properties['maxStalenessSeconds'] ?? null,
-                'hedge' => $properties['hedge'] ?? null,
-            ], static fn ($v) => $v !== null),
-        );
+        $mode = $properties['mode'] ?? null;
 
-        return $instance;
+        // Validate mode type
+        if (! is_string($mode)) {
+            throw new InvalidArgumentException(
+                'MongoDB\Driver\ReadPreference initialization requires "mode" field to be string',
+            );
+        }
+
+        // Validate mode value
+        if (! \in_array($mode, self::MODE_MAP, true)) {
+            throw new InvalidArgumentException(
+                'MongoDB\Driver\ReadPreference initialization requires specific values for "mode" string field',
+            );
+        }
+
+        // Validate tags
+        $tags = null;
+        if (isset($properties['tags'])) {
+            if (! is_array($properties['tags'])) {
+                throw new InvalidArgumentException(
+                    'MongoDB\Driver\ReadPreference initialization requires "tags" field to be array',
+                );
+            }
+            foreach ($properties['tags'] as $tagSet) {
+                if (! is_array($tagSet) && ! is_object($tagSet)) {
+                    throw new InvalidArgumentException(
+                        'MongoDB\Driver\ReadPreference initialization requires "tags" array field to have zero or more documents',
+                    );
+                }
+            }
+            if ($properties['tags'] !== [] && $mode === self::PRIMARY) {
+                throw new InvalidArgumentException(
+                    'MongoDB\Driver\ReadPreference initialization requires "tags" array field to not be present with "primary" mode',
+                );
+            }
+            // Convert arrays to stdClass
+            $normalizedTags = [];
+            foreach ($properties['tags'] as $tagSet) {
+                $normalizedTags[] = is_array($tagSet) ? (object) $tagSet : $tagSet;
+            }
+            $tags = $normalizedTags !== [] ? $normalizedTags : null;
+        }
+
+        // Validate maxStalenessSeconds
+        $maxStalenessSeconds = self::NO_MAX_STALENESS;
+        if (isset($properties['maxStalenessSeconds'])) {
+            $ms = $properties['maxStalenessSeconds'];
+            if ($mode === self::PRIMARY) {
+                throw new InvalidArgumentException(
+                    'MongoDB\Driver\ReadPreference initialization requires "maxStalenessSeconds" field to not be present with "primary" mode',
+                );
+            }
+            if ($ms > 2147483647) {
+                throw new InvalidArgumentException(
+                    'MongoDB\Driver\ReadPreference initialization requires "maxStalenessSeconds" integer field to be <= 2147483647',
+                );
+            }
+            if ($ms < self::SMALLEST_MAX_STALENESS_SECONDS && $ms !== self::NO_MAX_STALENESS) {
+                throw new InvalidArgumentException(
+                    'MongoDB\Driver\ReadPreference initialization requires "maxStalenessSeconds" integer field to be >= 90',
+                );
+            }
+            $maxStalenessSeconds = $ms;
+        }
+
+        // Validate hedge
+        $hedge = null;
+        if (isset($properties['hedge'])) {
+            $hedgeVal = $properties['hedge'];
+
+            if (! is_array($hedgeVal) && ! is_object($hedgeVal)) {
+                throw new InvalidArgumentException(
+                    'MongoDB\Driver\ReadPreference initialization requires "hedge" field to be an array or object',
+                );
+            }
+
+            \trigger_error(
+                'MongoDB\Driver\ReadPreference::__set_state(): The "hedge" option is deprecated as of MongoDB 8.0 and will be removed in a future release',
+                \E_USER_DEPRECATED,
+            );
+
+            if ($hedgeVal instanceof PackedArray) {
+                throw new UnexpectedValueException('MongoDB\BSON\PackedArray cannot be serialized as a root document');
+            }
+
+            if ($mode === self::PRIMARY) {
+                throw new InvalidArgumentException(
+                    'MongoDB\Driver\ReadPreference initialization requires "hedge" field to not be present with "primary" mode',
+                );
+            }
+
+            $hedgeObj = (object) $hedgeVal;
+            $hedge    = ((array) $hedgeObj) !== [] ? $hedgeObj : null;
+        }
+
+        $obj = new static($mode);
+        $obj->applyState($mode, $tags, $maxStalenessSeconds, $hedge);
+
+        return $obj;
     }
 
-    public function __debugInfo(): array
+    private function applyState(string $mode, ?array $tags, int $maxStalenessSeconds, ?object $hedge): void
     {
-        return [
-            'mode'                => $this->mode,
-            'tags'                => $this->tagSets !== [] ? $this->tagSets : null,
-            'maxStalenessSeconds' => $this->maxStalenessSeconds !== self::NO_MAX_STALENESS ? $this->maxStalenessSeconds : null,
-            'hedge'               => $this->hedge,
-        ];
+        unset($this->mode, $this->tags, $this->maxStalenessSeconds, $this->hedge);
+
+        $this->mode = $mode;
+
+        if ($tags !== null && $tags !== []) {
+            $this->tags = $tags;
+        }
+
+        if ($maxStalenessSeconds !== self::NO_MAX_STALENESS) {
+            $this->maxStalenessSeconds = $maxStalenessSeconds;
+        }
+
+        if ($hedge !== null) {
+            $this->hedge = $hedge;
+        }
     }
 }

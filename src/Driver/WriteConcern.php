@@ -81,7 +81,7 @@ final class WriteConcern implements Serializable
             $effectiveW = $w;
         }
 
-        $this->_applyState($effectiveW, $wtimeout ?? 0, $journal);
+        $this->applyState($effectiveW, $wtimeout ?? 0, $journal);
     }
 
     /** @internal Create a WriteConcern that reports isDefault() = true */
@@ -108,6 +108,22 @@ final class WriteConcern implements Serializable
     public function isDefault(): bool
     {
         return ! isset($this->w);
+    }
+
+    public function __debugInfo(): array
+    {
+        $info = [];
+        if (isset($this->w)) {
+            $info['w'] = $this->w;
+        }
+        if (isset($this->j)) {
+            $info['j'] = $this->j;
+        }
+        if (isset($this->wtimeout)) {
+            $info['wtimeout'] = $this->wtimeout;
+        }
+
+        return $info;
     }
 
     public function bsonSerialize(): stdClass
@@ -157,7 +173,7 @@ final class WriteConcern implements Serializable
             throw new InvalidArgumentException('Cannot enable journaling when using w = 0');
         }
 
-        $this->_applyState($w, is_string($wtimeout) ? $wtimeout : (int) $wtimeout, $journal);
+        $this->applyState($w, is_string($wtimeout) ? $wtimeout : (int) $wtimeout, $journal);
     }
 
     public static function __set_state(array $properties): static
@@ -227,12 +243,12 @@ final class WriteConcern implements Serializable
         }
 
         $obj = new static(-2); // Start with isDefault
-        $obj->_applyState($w, $wtimeout ?? 0, $journal);
+        $obj->applyState($w, $wtimeout ?? 0, $journal);
 
         return $obj;
     }
 
-    private function _applyState(string|int|null $w, int|string $wtimeout, ?bool $journal): void
+    private function applyState(string|int|null $w, int|string $wtimeout, ?bool $journal): void
     {
         // Clear any existing dynamic properties first (for __set_state reuse)
         unset($this->w, $this->j, $this->wtimeout);
