@@ -173,4 +173,11 @@ return [
 
     'bson/bson-packedarray-fromJSON_error-001.phpt'
         => 'libbson-specific JSON parse error format (character at error position) cannot be replicated exactly from PHP JsonException',
+
+    // -------------------------------------------------------------------------
+    // Session support not yet implemented
+    // -------------------------------------------------------------------------
+
+    'bulk/bulkwrite-debug-002.phpt'
+        => 'Session::createFromManager() not yet implemented; requires client session support',
 ];

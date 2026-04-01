@@ -15,6 +15,7 @@ use MongoDB\Driver\CursorInterface;
 use MongoDB\Driver\Exception\BulkWriteCommandException;
 use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Driver\Exception\CommandException;
+use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
 use MongoDB\Driver\Exception\ServerException;
 use MongoDB\Driver\Monitoring\CommandFailedEvent;
@@ -42,6 +43,7 @@ use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\UriOptions;
 use Throwable;
 
+use function array_is_list;
 use function array_map;
 use function array_merge;
 use function array_search;
@@ -219,13 +221,20 @@ final class OperationExecutor
     ): WriteResult {
         $this->ensureStarted();
 
+        if ($bulk->isExecuted()) {
+            throw new DriverInvalidArgumentException(
+                'BulkWrite objects may only be executed once and this instance has already been executed'
+            );
+        }
+
         [$db, $collection] = $this->splitNamespace($namespace);
 
         $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
         $pool   = $this->getOrCreatePool($server->host, $server->port);
 
-        $ordered    = (bool) ($bulk->getOptions()['ordered'] ?? true);
-        $operations = $bulk->getOperations();
+        $ordered     = (bool) ($bulk->getOptions()['ordered'] ?? true);
+        $bulkOptions = $bulk->getOptions();
+        $operations  = $bulk->getOperations();
 
         // Accumulators for the aggregate WriteResult.
         $totalInserted  = 0;
@@ -238,207 +247,232 @@ final class OperationExecutor
         $wcError        = null;
         $acknowledged   = $writeConcern === null || $writeConcern->getW() !== 0;
 
-        // Group operations into insert / update / delete batches to minimise
-        // round-trips.  For ordered bulk writes we send each type sequentially
-        // to preserve ordering semantics; for unordered we collect into three
-        // separate commands.
-        $inserts              = [];
-        $updates              = [];
-        $deletes              = [];
-        $insertGlobalIndices  = [];
-        $updateGlobalIndices  = [];
-        $deleteGlobalIndices  = [];
+        // Build consecutive batches of same-type operations to minimise round-trips
+        // while preserving original operation order (required for ordered bulk writes).
+        $batches      = [];
+        $prevType     = null;
+        $currentBatch = null;
 
         foreach ($operations as $globalIdx => $op) {
-            [$type] = $op;
+            $type = $op[0];
 
-            if ($type === 'insert') {
-                $inserts[]             = $op;
-                $insertGlobalIndices[] = $globalIdx;
-            } elseif ($type === 'update') {
-                $updates[]             = $op;
-                $updateGlobalIndices[] = $globalIdx;
-            } elseif ($type === 'delete') {
-                $deletes[]             = $op;
-                $deleteGlobalIndices[] = $globalIdx;
+            if ($type !== $prevType) {
+                if ($currentBatch !== null) {
+                    $batches[] = $currentBatch;
+                }
+
+                $currentBatch = ['type' => $type, 'ops' => [], 'globalIndices' => []];
+                $prevType     = $type;
+            }
+
+            $currentBatch['ops'][]           = $op;
+            $currentBatch['globalIndices'][] = $globalIdx;
+        }
+
+        if ($currentBatch !== null) {
+            $batches[] = $currentBatch;
+        }
+
+        foreach ($batches as $batch) {
+            $batchType          = $batch['type'];
+            $batchOps           = $batch['ops'];
+            $batchGlobalIndices = $batch['globalIndices'];
+
+            if ($batchType === 'insert') {
+                $docs = array_map(static fn ($op) => $op[1], $batchOps);
+
+                $insertBase = ['insert' => $collection, 'documents' => $docs, 'ordered' => $ordered];
+                if (isset($bulkOptions['comment'])) {
+                    $insertBase['comment'] = $bulkOptions['comment'];
+                }
+
+                $insertCmd = CommandHelper::prepareCommand(
+                    command:      $insertBase,
+                    db:           $db,
+                    writeConcern: $writeConcern,
+                    session:      $session,
+                );
+
+                try {
+                    $cursor = $this->sendCommand($pool, $db, 'insert', $insertCmd, $server);
+                    $result = (array) (iterator_to_array($cursor)[0] ?? []);
+
+                    $totalInserted += (int) ($result['n'] ?? count($docs));
+                    $acknowledged   = ! ($result['acknowledged'] ?? true) ? false : $acknowledged;
+
+                    foreach ((array) ($result['writeErrors'] ?? []) as $e) {
+                        $localIdx  = (int) ($e->index ?? 0);
+                        $globalIdx = $batchGlobalIndices[$localIdx] ?? $localIdx;
+                        $writeErrors[] = new WriteError(
+                            code:    (int) ($e->code    ?? 0),
+                            index:   $globalIdx,
+                            message: (string) ($e->errmsg ?? ''),
+                            info:    $e->errInfo ?? null,
+                        );
+                    }
+
+                    if (isset($result['writeConcernError'])) {
+                        $wce     = (array) $result['writeConcernError'];
+                        $wcError = new WriteConcernError(
+                            code:    (int) ($wce['code']   ?? 0),
+                            message: (string) ($wce['errmsg'] ?? ''),
+                        );
+                    }
+                } catch (Throwable $e) {
+                    if ($ordered) {
+                        throw $e;
+                    }
+                }
+            } elseif ($batchType === 'update') {
+                $updateSpecs = array_map(static function ($op): array {
+                    [, $filter, $newObj, $opts] = $op;
+                    $spec = ['q' => $filter, 'u' => $newObj];
+
+                    if ($opts['multi']  ?? false) {
+                        $spec['multi']  = true;
+                    }
+
+                    if ($opts['upsert'] ?? false) {
+                        $spec['upsert'] = true;
+                    }
+
+                    if (isset($opts['arrayFilters'])) {
+                        $spec['arrayFilters'] = $opts['arrayFilters'];
+                    }
+
+                    if (isset($opts['hint'])) {
+                        $spec['hint'] = $opts['hint'];
+                    }
+
+                    if (isset($opts['collation'])) {
+                        $spec['collation'] = $opts['collation'];
+                    }
+
+                    return $spec;
+                }, $batchOps);
+
+                $updateBase = ['update' => $collection, 'updates' => $updateSpecs, 'ordered' => $ordered];
+                if (isset($bulkOptions['comment'])) {
+                    $updateBase['comment'] = $bulkOptions['comment'];
+                }
+
+                if (isset($bulkOptions['let'])) {
+                    $updateBase['let'] = $bulkOptions['let'];
+                }
+
+                $updateCmd = CommandHelper::prepareCommand(
+                    command:      $updateBase,
+                    db:           $db,
+                    writeConcern: $writeConcern,
+                    session:      $session,
+                );
+
+                try {
+                    $cursor = $this->sendCommand($pool, $db, 'update', $updateCmd, $server);
+                    $result = (array) (iterator_to_array($cursor)[0] ?? []);
+
+                    $upsertedInBatch = (array) ($result['upserted'] ?? []);
+                    $totalMatched  += (int) ($result['n'] ?? 0) - count($upsertedInBatch);
+                    $totalModified += (int) ($result['nModified'] ?? 0);
+
+                    foreach ($upsertedInBatch as $upserted) {
+                        $upserted  = (array) $upserted;
+                        $localIdx  = (int) $upserted['index'];
+                        $globalIdx = $batchGlobalIndices[$localIdx] ?? $localIdx;
+                        $upsertedIds[$globalIdx] = $upserted['_id'];
+                        ++$totalUpserted;
+                    }
+
+                    foreach ((array) ($result['writeErrors'] ?? []) as $e) {
+                        $localIdx  = (int) ($e->index ?? 0);
+                        $globalIdx = $batchGlobalIndices[$localIdx] ?? $localIdx;
+                        $writeErrors[] = new WriteError(
+                            code:    (int) ($e->code    ?? 0),
+                            index:   $globalIdx,
+                            message: (string) ($e->errmsg ?? ''),
+                            info:    $e->errInfo ?? null,
+                        );
+                    }
+
+                    if (isset($result['writeConcernError']) && $wcError === null) {
+                        $wce     = (array) $result['writeConcernError'];
+                        $wcError = new WriteConcernError(
+                            code:    (int) ($wce['code']   ?? 0),
+                            message: (string) ($wce['errmsg'] ?? ''),
+                        );
+                    }
+                } catch (Throwable $e) {
+                    if ($ordered) {
+                        throw $e;
+                    }
+                }
+            } elseif ($batchType === 'delete') {
+                $deleteSpecs = array_map(static function ($op): array {
+                    [, $filter, $opts] = $op;
+                    $limit = $opts['limit'] ?? 1 ? 1 : 0;
+                    $spec  = ['q' => $filter, 'limit' => $limit];
+
+                    if (isset($opts['collation'])) {
+                        $spec['collation'] = $opts['collation'];
+                    }
+
+                    if (isset($opts['hint'])) {
+                        $spec['hint'] = $opts['hint'];
+                    }
+
+                    return $spec;
+                }, $batchOps);
+
+                $deleteBase = ['delete' => $collection, 'deletes' => $deleteSpecs, 'ordered' => $ordered];
+                if (isset($bulkOptions['comment'])) {
+                    $deleteBase['comment'] = $bulkOptions['comment'];
+                }
+
+                if (isset($bulkOptions['let'])) {
+                    $deleteBase['let'] = $bulkOptions['let'];
+                }
+
+                $deleteCmd = CommandHelper::prepareCommand(
+                    command:      $deleteBase,
+                    db:           $db,
+                    writeConcern: $writeConcern,
+                    session:      $session,
+                );
+
+                try {
+                    $cursor = $this->sendCommand($pool, $db, 'delete', $deleteCmd, $server);
+                    $result = (array) (iterator_to_array($cursor)[0] ?? []);
+
+                    $totalDeleted += (int) ($result['n'] ?? 0);
+
+                    foreach ((array) ($result['writeErrors'] ?? []) as $e) {
+                        $localIdx  = (int) ($e->index ?? 0);
+                        $globalIdx = $batchGlobalIndices[$localIdx] ?? $localIdx;
+                        $writeErrors[] = new WriteError(
+                            code:    (int) ($e->code    ?? 0),
+                            index:   $globalIdx,
+                            message: (string) ($e->errmsg ?? ''),
+                            info:    $e->errInfo ?? null,
+                        );
+                    }
+
+                    if (isset($result['writeConcernError']) && $wcError === null) {
+                        $wce     = (array) $result['writeConcernError'];
+                        $wcError = new WriteConcernError(
+                            code:    (int) ($wce['code']   ?? 0),
+                            message: (string) ($wce['errmsg'] ?? ''),
+                        );
+                    }
+                } catch (Throwable $e) {
+                    if ($ordered) {
+                        throw $e;
+                    }
+                }
             }
         }
 
-        // --- INSERT ---
-        if ($inserts !== []) {
-            $docs = array_map(static fn ($op) => $op[1], $inserts);
-
-            $insertCmd = CommandHelper::prepareCommand(
-                command:      ['insert' => $collection, 'documents' => $docs, 'ordered' => $ordered],
-                db:           $db,
-                writeConcern: $writeConcern,
-                session:      $session,
-            );
-
-            try {
-                $cursor = $this->sendCommand($pool, $db, 'insert', $insertCmd, $server);
-                $result = (array) (iterator_to_array($cursor)[0] ?? []);
-
-                $totalInserted += (int) ($result['n'] ?? count($docs));
-                $acknowledged   = ! ($result['acknowledged'] ?? true) ? false : $acknowledged;
-
-                foreach ((array) ($result['writeErrors'] ?? []) as $e) {
-                    $localIdx  = (int) ($e->index ?? 0);
-                    $globalIdx = $insertGlobalIndices[$localIdx] ?? $localIdx;
-                    $writeErrors[] = new WriteError(
-                        code:    (int) ($e->code    ?? 0),
-                        index:   $globalIdx,
-                        message: (string) ($e->errmsg ?? ''),
-                        info:    $e->errInfo ?? null,
-                    );
-                }
-
-                if (isset($result['writeConcernError'])) {
-                    $wce     = (array) $result['writeConcernError'];
-                    $wcError = new WriteConcernError(
-                        code:    (int) ($wce['code']   ?? 0),
-                        message: (string) ($wce['errmsg'] ?? ''),
-                    );
-                }
-            } catch (Throwable $e) {
-                if ($ordered) {
-                    throw $e;
-                }
-            }
-        }
-
-        // --- UPDATE ---
-        if ($updates !== []) {
-            $updateSpecs = array_map(static function ($op): array {
-                [, $filter, $newObj, $opts] = $op;
-                $spec = ['q' => $filter, 'u' => $newObj];
-
-                if ($opts['multi']  ?? false) {
-                    $spec['multi']  = true;
-                }
-
-                if ($opts['upsert'] ?? false) {
-                    $spec['upsert'] = true;
-                }
-
-                if (isset($opts['arrayFilters'])) {
-                    $spec['arrayFilters'] = $opts['arrayFilters'];
-                }
-
-                if (isset($opts['hint'])) {
-                    $spec['hint'] = $opts['hint'];
-                }
-
-                if (isset($opts['collation'])) {
-                    $spec['collation'] = $opts['collation'];
-                }
-
-                return $spec;
-            }, $updates);
-
-            $updateCmd = CommandHelper::prepareCommand(
-                command:      ['update' => $collection, 'updates' => $updateSpecs, 'ordered' => $ordered],
-                db:           $db,
-                writeConcern: $writeConcern,
-                session:      $session,
-            );
-
-            try {
-                $cursor = $this->sendCommand($pool, $db, 'update', $updateCmd, $server);
-                $result = (array) (iterator_to_array($cursor)[0] ?? []);
-
-                $upsertedInBatch = (array) ($result['upserted'] ?? []);
-                $totalMatched  += (int) ($result['n'] ?? 0) - count($upsertedInBatch);
-                $totalModified += (int) ($result['nModified'] ?? 0);
-
-                foreach ($upsertedInBatch as $upserted) {
-                    $upserted  = (array) $upserted;
-                    $localIdx  = (int) $upserted['index'];
-                    $globalIdx = $updateGlobalIndices[$localIdx] ?? $localIdx;
-                    $upsertedIds[$globalIdx] = $upserted['_id'];
-                    ++$totalUpserted;
-                }
-
-                foreach ((array) ($result['writeErrors'] ?? []) as $e) {
-                    $localIdx  = (int) ($e->index ?? 0);
-                    $globalIdx = $updateGlobalIndices[$localIdx] ?? $localIdx;
-                    $writeErrors[] = new WriteError(
-                        code:    (int) ($e->code    ?? 0),
-                        index:   $globalIdx,
-                        message: (string) ($e->errmsg ?? ''),
-                        info:    $e->errInfo ?? null,
-                    );
-                }
-
-                if (isset($result['writeConcernError']) && $wcError === null) {
-                    $wce     = (array) $result['writeConcernError'];
-                    $wcError = new WriteConcernError(
-                        code:    (int) ($wce['code']   ?? 0),
-                        message: (string) ($wce['errmsg'] ?? ''),
-                    );
-                }
-            } catch (Throwable $e) {
-                if ($ordered) {
-                    throw $e;
-                }
-            }
-        }
-
-        // --- DELETE ---
-        if ($deletes !== []) {
-            $deleteSpecs = array_map(static function ($op): array {
-                [, $filter, $opts] = $op;
-                $limit = $opts['limit'] ?? 1 ? 1 : 0;
-                $spec  = ['q' => $filter, 'limit' => $limit];
-
-                if (isset($opts['collation'])) {
-                    $spec['collation'] = $opts['collation'];
-                }
-
-                if (isset($opts['hint'])) {
-                    $spec['hint'] = $opts['hint'];
-                }
-
-                return $spec;
-            }, $deletes);
-
-            $deleteCmd = CommandHelper::prepareCommand(
-                command:      ['delete' => $collection, 'deletes' => $deleteSpecs, 'ordered' => $ordered],
-                db:           $db,
-                writeConcern: $writeConcern,
-                session:      $session,
-            );
-
-            try {
-                $cursor = $this->sendCommand($pool, $db, 'delete', $deleteCmd, $server);
-                $result = (array) (iterator_to_array($cursor)[0] ?? []);
-
-                $totalDeleted += (int) ($result['n'] ?? 0);
-
-                foreach ((array) ($result['writeErrors'] ?? []) as $e) {
-                    $localIdx  = (int) ($e->index ?? 0);
-                    $globalIdx = $deleteGlobalIndices[$localIdx] ?? $localIdx;
-                    $writeErrors[] = new WriteError(
-                        code:    (int) ($e->code    ?? 0),
-                        index:   $globalIdx,
-                        message: (string) ($e->errmsg ?? ''),
-                        info:    $e->errInfo ?? null,
-                    );
-                }
-
-                if (isset($result['writeConcernError']) && $wcError === null) {
-                    $wce     = (array) $result['writeConcernError'];
-                    $wcError = new WriteConcernError(
-                        code:    (int) ($wce['code']   ?? 0),
-                        message: (string) ($wce['errmsg'] ?? ''),
-                    );
-                }
-            } catch (Throwable $e) {
-                if ($ordered) {
-                    throw $e;
-                }
-            }
-        }
+        // Mark BulkWrite as executed.
+        $bulk->markExecuted($db, $collection, 1, $writeConcern);
 
         // Build the public Server object for WriteResult.
         $publicServer = $this->buildPublicServer($server);
@@ -665,7 +699,7 @@ final class OperationExecutor
             ? (int) $server->helloResponse['connectionId']
             : null;
 
-        $this->fireCommandStarted($cmdName, (object) $prepared, $db, $requestId, $server->host, $server->port, $serverConnId);
+        $this->fireCommandStarted($cmdName, self::arrayToObject($prepared), $db, $requestId, $server->host, $server->port, $serverConnId);
 
         try {
             [$bytes] = OpMsgEncoder::encodeWithRequestId($prepared);
@@ -999,5 +1033,31 @@ final class OperationExecutor
             tags:              $sd->tags,
             executor:          $this,
         );
+    }
+
+    /**
+     * Recursively convert an array to stdClass, turning associative arrays into objects.
+     * List arrays remain as PHP arrays (since they represent BSON arrays).
+     */
+    private static function arrayToObject(array $arr): object
+    {
+        $obj = new \stdClass();
+
+        foreach ($arr as $key => $value) {
+            if (is_array($value)) {
+                if (array_is_list($value)) {
+                    $obj->$key = array_map(
+                        static fn ($v) => is_array($v) ? self::arrayToObject($v) : $v,
+                        $value,
+                    );
+                } else {
+                    $obj->$key = self::arrayToObject($value);
+                }
+            } else {
+                $obj->$key = $value;
+            }
+        }
+
+        return $obj;
     }
 }
