@@ -68,7 +68,7 @@ final class WriteConcern implements Serializable
         }
 
         if ($journal === true && $w === 0) {
-            throw new InvalidArgumentException('Cannot enable journaling when using w = 0');
+            throw new InvalidArgumentException('Journal conflicts with w value: 0');
         }
 
         // Map special integer w values
@@ -116,9 +116,11 @@ final class WriteConcern implements Serializable
         if (isset($this->w)) {
             $info['w'] = $this->w;
         }
+
         if (isset($this->j)) {
             $info['j'] = $this->j;
         }
+
         if (isset($this->wtimeout)) {
             $info['wtimeout'] = $this->wtimeout;
         }
@@ -170,7 +172,7 @@ final class WriteConcern implements Serializable
         $journal  = isset($data['j']) ? (bool) $data['j'] : null;
 
         if ($journal === true && $w === 0) {
-            throw new InvalidArgumentException('Cannot enable journaling when using w = 0');
+            throw new InvalidArgumentException('Journal conflicts with w value: 0');
         }
 
         $this->applyState($w, is_string($wtimeout) ? $wtimeout : (int) $wtimeout, $journal);

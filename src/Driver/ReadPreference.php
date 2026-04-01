@@ -53,7 +53,7 @@ final class ReadPreference implements Serializable
     {
         $canonicalMode = self::MODE_MAP[strtolower($mode)] ?? null;
         if ($canonicalMode === null) {
-            throw new InvalidArgumentException("Invalid mode: '" . $mode . "'");
+            throw new InvalidArgumentException("Unsupported readPreference value: '" . $mode . "'");
         }
 
         $mode = $canonicalMode;
@@ -65,14 +65,14 @@ final class ReadPreference implements Serializable
             foreach ($tagSets as $tagSet) {
                 if (! is_array($tagSet) && ! is_object($tagSet)) {
                     throw new InvalidArgumentException(
-                        'tagSets must be an array of zero or more documents',
+                        'Read preference tags must be an array of zero or more documents',
                     );
                 }
             }
 
             // Then check primary mode restriction
             if ($mode === self::PRIMARY) {
-                throw new InvalidArgumentException('tagSets may not be used with primary mode');
+                throw new InvalidArgumentException('Primary read preference mode conflicts with tags');
             }
 
             // Convert array items to stdClass (without modifying original)
@@ -87,7 +87,7 @@ final class ReadPreference implements Serializable
         if (isset($options['maxStalenessSeconds'])) {
             $ms = $options['maxStalenessSeconds'];
             if ($mode === self::PRIMARY) {
-                throw new InvalidArgumentException('maxStalenessSeconds may not be used with primary mode');
+                throw new InvalidArgumentException('Primary read preference mode conflicts with maxStalenessSeconds');
             }
 
             if ($ms > 2147483647) {

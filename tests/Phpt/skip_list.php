@@ -180,4 +180,67 @@ return [
 
     'bulk/bulkwrite-debug-002.phpt'
         => 'Session::createFromManager() not yet implemented; requires client session support',
+
+    // -------------------------------------------------------------------------
+    // Manager: C extension internal debug output (PHONGO: DEBUG lines)
+    // -------------------------------------------------------------------------
+
+    'manager/manager-ctor-003.phpt'
+        => 'Test verifies C extension debug output (PHONGO: DEBUG > Connection string); not produced by userland driver',
+
+    'manager/manager-ctor-007.phpt'
+        => 'Test verifies C extension client persistence debug output (PHONGO: DEBUG > Created client with hash); not produced by userland driver',
+
+    'manager/manager-ctor-008.phpt'
+        => 'Test verifies C extension client persistence debug output (PHONGO: DEBUG > Created client with hash); not produced by userland driver',
+
+    'manager/manager-ctor-driver-metadata-001.phpt'
+        => 'Test verifies C extension debug output for handshake driver metadata (PHONGO: DEBUG > Setting driver handshake data); not produced by userland driver',
+
+    // -------------------------------------------------------------------------
+    // Manager: disableClientPersistence — C extension client persistence feature
+    // -------------------------------------------------------------------------
+
+    'manager/manager-ctor-disableClientPersistence-001.phpt'
+        => 'disableClientPersistence is a C extension client-persistence feature; persistent/non-persistent client lifecycle tracking is not available in userland',
+
+    'manager/manager-ctor-disableClientPersistence-002.phpt'
+        => 'disableClientPersistence is a C extension client-persistence feature; non-persistent client destruction timing is not available in userland',
+
+    'manager/manager-ctor-disableClientPersistence-004.phpt'
+        => 'disableClientPersistence is a C extension client-persistence feature; not available in userland',
+
+    'manager/manager-ctor-disableClientPersistence-005.phpt'
+        => 'disableClientPersistence is a C extension client-persistence feature; not available in userland',
+
+    'manager/manager-ctor-disableClientPersistence-006.phpt'
+        => 'disableClientPersistence combined with client-side encryption requires C extension internals; not available in userland',
+
+    'manager/manager-ctor-disableClientPersistence-007.phpt'
+        => 'disableClientPersistence combined with client-side encryption requires C extension internals; not available in userland',
+
+    'manager/manager-ctor-disableClientPersistence_error-001.phpt'
+        => 'disableClientPersistence validation with keyVaultClient requires C extension client-persistence feature; not available in userland',
+
+    // -------------------------------------------------------------------------
+    // Manager: autoEncryption / client-side encryption — not implemented
+    // -------------------------------------------------------------------------
+
+    'manager/manager-ctor-auto_encryption-001.phpt'
+        => 'autoEncryption requires client-side field-level encryption which is not implemented in this userland driver',
+
+    'manager/manager-ctor-auto_encryption-error-001.phpt'
+        => 'autoEncryption driver option validation is not implemented in this userland driver',
+
+    'manager/manager-ctor-auto_encryption-error-003.phpt'
+        => 'autoEncryption driver option type validation is not implemented in this userland driver',
+
+    'manager/manager-ctor-auto_encryption-error-004.phpt'
+        => 'crypt_shared library support is not implemented in this userland driver',
+
+    'manager/manager-createClientEncryption-001.phpt'
+        => 'ClientEncryption is not implemented in this userland driver',
+
+    'manager/manager-createClientEncryption-error-002.phpt'
+        => 'ClientEncryption option validation is not implemented in this userland driver',
 ];

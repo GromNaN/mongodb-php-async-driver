@@ -7,6 +7,7 @@ namespace MongoDB\Internal\Uri;
 use InvalidArgumentException;
 
 use function array_filter;
+use function array_key_exists;
 use function array_map;
 use function array_merge;
 use function array_values;
@@ -92,6 +93,7 @@ final class ConnectionString
         'readpreference'             => 'readPreference',
         'readpreferencetags'         => 'readPreferenceTags',
         'readconcernlevel'           => 'readConcernLevel',
+        'maxstalenessseconds'        => 'maxStalenessSeconds',
         'ssl'                        => 'ssl',
         'tls'                        => 'tls',
         'tlscafile'                  => 'tlsCAFile',
@@ -105,6 +107,13 @@ final class ConnectionString
         'loadbalanced'               => 'loadBalanced',
         'directconnection'           => 'directConnection',
         'timeoutms'                  => 'timeoutMS',
+        'safe'                       => 'safe',
+        'appname'                    => 'appname',
+        'srvmaxhosts'                => 'srvMaxHosts',
+        'srvservicename'             => 'srvServiceName',
+        'tlsinsecure'                => 'tlsInsecure',
+        'tlsdisableocspendpointcheck'             => 'tlsDisableOCSPEndpointCheck',
+        'tlsdisablecertificaterevocationcheck'    => 'tlsDisableCertificateRevocationCheck',
     ];
 
     /** Options whose values are integers */
@@ -122,6 +131,8 @@ final class ConnectionString
         'wTimeoutMS',
         'zlibCompressionLevel',
         'timeoutMS',
+        'maxStalenessSeconds',
+        'srvMaxHosts',
     ];
 
     /** Options whose values are booleans */
@@ -130,11 +141,15 @@ final class ConnectionString
         'tls',
         'tlsAllowInvalidCertificates',
         'tlsAllowInvalidHostnames',
+        'tlsInsecure',
+        'tlsDisableOCSPEndpointCheck',
+        'tlsDisableCertificateRevocationCheck',
         'journal',
         'retryWrites',
         'retryReads',
         'loadBalanced',
         'directConnection',
+        'safe',
     ];
 
     public function __construct(private readonly string $uri)
@@ -219,7 +234,7 @@ final class ConnectionString
         } else {
             throw new InvalidArgumentException(
                 sprintf(
-                    'Invalid MongoDB URI scheme. Expected "mongodb://" or "mongodb+srv://", got: %s',
+                    'Failed to parse MongoDB URI: \'%s\'. Invalid URI, no scheme part specified.',
                     $uri,
                 ),
             );
@@ -288,6 +303,139 @@ final class ConnectionString
 
         // Store SRV flag as private sentinel so getScheme() / isSrv() work.
         $this->options['__srv'] = $srv;
+
+        // --- 7. Semantic validation of URI structure vs options ---
+        $this->validateUriStructuralConstraints($srv);
+    }
+
+    /**
+     * Validate constraints that require both host list and options to be known.
+     */
+    private function validateUriStructuralConstraints(bool $srv): void
+    {
+        $directConnection = $this->options['directConnection'] ?? false;
+        $loadBalanced     = $this->options['loadBalanced'] ?? false;
+
+        if ($directConnection) {
+            if (count($this->hosts) > 1) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. Multiple seeds not allowed with directConnection option.",
+                        $this->uri,
+                    ),
+                );
+            }
+
+            if ($srv) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. SRV URI not allowed with directConnection option.",
+                        $this->uri,
+                    ),
+                );
+            }
+        }
+
+        if ($loadBalanced) {
+            if (count($this->hosts) > 1) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. URI with \"loadbalanced\" enabled must not contain more than one host.",
+                        $this->uri,
+                    ),
+                );
+            }
+
+            if (isset($this->options['replicaSet'])) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. URI with \"loadbalanced\" enabled must not contain option \"replicaset\".",
+                        $this->uri,
+                    ),
+                );
+            }
+
+            if ($directConnection) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. URI with \"loadbalanced\" enabled must not contain option \"directconnection\" enabled.",
+                        $this->uri,
+                    ),
+                );
+            }
+        }
+
+        // srvMaxHosts validation
+        if (isset($this->options['srvMaxHosts'])) {
+            if (! $srv) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. srvmaxhosts must not be specified with a non-SRV URI.",
+                        $this->uri,
+                    ),
+                );
+            }
+
+            if (isset($this->options['replicaSet'])) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. srvmaxhosts must not be specified with replicaset.",
+                        $this->uri,
+                    ),
+                );
+            }
+
+            if ($loadBalanced) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. srvmaxhosts must not be specified with loadbalanced=true.",
+                        $this->uri,
+                    ),
+                );
+            }
+        }
+
+        // srvServiceName validation
+        if (isset($this->options['srvServiceName']) && ! $srv) {
+            throw new InvalidArgumentException(
+                sprintf(
+                    "Failed to parse MongoDB URI: '%s'. srvservicename must not be specified with a non-SRV URI.",
+                    $this->uri,
+                ),
+            );
+        }
+
+        // TLS conflict: tlsInsecure cannot be combined with other TLS options
+        if (array_key_exists('tlsInsecure', $this->options)) {
+            $tlsConflicts = ['tlsAllowInvalidCertificates', 'tlsAllowInvalidHostnames', 'tlsDisableOCSPEndpointCheck', 'tlsDisableCertificateRevocationCheck'];
+            foreach ($tlsConflicts as $conflictKey) {
+                if (array_key_exists($conflictKey, $this->options)) {
+                    throw new InvalidArgumentException(
+                        sprintf(
+                            "Failed to parse MongoDB URI: '%s'. tlsinsecure may not be specified with tlsallowinvalidcertificates, tlsallowinvalidhostnames, tlsdisableocspendpointcheck, or tlsdisablecertificaterevocationcheck.",
+                            $this->uri,
+                        ),
+                    );
+                }
+            }
+        }
+
+        // TLS conflict: tlsAllowInvalidCertificates cannot be combined with OCSP/revocation options
+        if (! array_key_exists('tlsAllowInvalidCertificates', $this->options)) {
+            return;
+        }
+
+        $tlsConflicts = ['tlsDisableOCSPEndpointCheck', 'tlsDisableCertificateRevocationCheck'];
+        foreach ($tlsConflicts as $conflictKey) {
+            if (array_key_exists($conflictKey, $this->options)) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. tlsallowinvalidcertificates may not be specified with tlsdisableocspendpointcheck or tlsdisablecertificaterevocationcheck.",
+                        $this->uri,
+                    ),
+                );
+            }
+        }
     }
 
     /**
@@ -414,7 +562,70 @@ final class ConnectionString
 
             $canonicalKey = $this->normalizeOptionKey($rawKey);
 
-            $options[$canonicalKey] = $this->coerceOptionValue($canonicalKey, $rawValue);
+            try {
+                $coercedValue = $this->coerceOptionValue($canonicalKey, $rawKey, $rawValue);
+            } catch (InvalidArgumentException $e) {
+                throw new InvalidArgumentException(
+                    sprintf("Failed to parse MongoDB URI: '%s'. %s", $this->uri, $e->getMessage()),
+                );
+            }
+
+            // readPreferenceTags may appear multiple times; accumulate into an array of tag sets
+            if ($canonicalKey === 'readPreferenceTags') {
+                $options[$canonicalKey][] = $coercedValue;
+            } else {
+                $options[$canonicalKey] = $coercedValue;
+            }
+        }
+
+        // Validate journal-w conflict in URI
+        if (
+            isset($options['journal']) && $options['journal'] === true &&
+            isset($options['w']) && $options['w'] === 0
+        ) {
+            throw new InvalidArgumentException(
+                sprintf(
+                    "Failed to parse MongoDB URI: '%s'. Error while parsing the 'w' URI option: Journal conflicts with w value [w=0].",
+                    $this->uri,
+                ),
+            );
+        }
+
+        // Validate readPreference value is a valid mode string
+        if (isset($options['readPreference'])) {
+            $validModes = ['primary', 'primarypreferred', 'secondary', 'secondarypreferred', 'nearest'];
+            if (! in_array(strtolower((string) $options['readPreference']), $validModes, true)) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. Error while assigning URI read preference: Unsupported readPreference value [readPreference=%s].",
+                        $this->uri,
+                        $options['readPreference'],
+                    ),
+                );
+            }
+        }
+
+        // Determine if mode is primary (explicit or default)
+        $isPrimary = ! isset($options['readPreference']) ||
+            strtolower((string) $options['readPreference']) === 'primary';
+
+        // Validate primary mode + non-empty readPreferenceTags conflict
+        if (
+            $isPrimary &&
+            isset($options['readPreferenceTags']) &&
+            ! empty($options['readPreferenceTags']) &&
+            ! empty($options['readPreferenceTags'][0])
+        ) {
+            throw new InvalidArgumentException(
+                sprintf("Failed to parse MongoDB URI: '%s'. Invalid readPreferences.", $this->uri),
+            );
+        }
+
+        // Validate maxStalenessSeconds cannot be used with primary mode (default or explicit)
+        if (isset($options['maxStalenessSeconds']) && $isPrimary) {
+            throw new InvalidArgumentException(
+                sprintf("Failed to parse MongoDB URI: '%s'. Invalid readPreferences.", $this->uri),
+            );
         }
 
         return $options;
@@ -433,24 +644,33 @@ final class ConnectionString
     /**
      * Coerce a raw string value to the correct PHP type for the given option.
      */
-    private function coerceOptionValue(string $key, string $value): mixed
+    private function coerceOptionValue(string $key, string $rawKey, string $value): mixed
     {
         if (in_array($key, self::INT_OPTIONS, true)) {
             if (! ctype_digit($value) && ! (str_starts_with($value, '-') && ctype_digit(substr($value, 1)))) {
                 throw new InvalidArgumentException(
-                    sprintf('Option "%s" must be an integer, got "%s".', $key, $value),
+                    sprintf('Unsupported value for "%s": "%s".', strtolower($rawKey), $value),
                 );
             }
 
-            return (int) $value;
+            $intValue = (int) $value;
+
+            // maxStalenessSeconds must fit in 32 bits
+            if ($key === 'maxStalenessSeconds' && $intValue > 2147483647) {
+                throw new InvalidArgumentException(
+                    sprintf('Unsupported value for "%s": "%s".', strtolower($rawKey), $value),
+                );
+            }
+
+            return $intValue;
         }
 
         if (in_array($key, self::BOOL_OPTIONS, true)) {
             return match (strtolower($value)) {
-                'true', '1'  => true,
-                'false', '0' => false,
+                'true', '1', 'yes', 'y', 't'  => true,
+                'false', '0', '-1', 'no', 'n', 'f' => false,
                 default      => throw new InvalidArgumentException(
-                    sprintf('Option "%s" must be a boolean (true/false), got "%s".', $key, $value),
+                    sprintf('Unsupported value for "%s": "%s".', strtolower($rawKey), $value),
                 ),
             };
         }
@@ -470,14 +690,51 @@ final class ConnectionString
             return array_values($compressors);
         }
 
-        // readPreferenceTags: accumulate as array of tag sets
+        // readPreferenceTags: parse "key:value,key:value" into associative array (one tag set)
         if ($key === 'readPreferenceTags') {
-            return $value === '' ? [] : array_map('trim', explode(',', $value));
+            if ($value === '') {
+                return [];
+            }
+
+            $tagSet = [];
+            foreach (explode(',', $value) as $pair) {
+                $pair = trim($pair);
+                if ($pair === '') {
+                    continue;
+                }
+
+                $colonPos = strpos($pair, ':');
+                if ($colonPos === false) {
+                    throw new InvalidArgumentException(
+                        sprintf('Unsupported value for "%s": "%s".', $rawKey, $value),
+                    );
+                }
+
+                $tagSet[substr($pair, 0, $colonPos)] = substr($pair, $colonPos + 1);
+            }
+
+            return $tagSet;
+        }
+
+        // authSource may not be empty
+        if ($key === 'authSource' && $value === '') {
+            throw new InvalidArgumentException(
+                'authSource may not be specified as an empty string.',
+            );
         }
 
         // authMechanismProperties: parse "key:value,key:value" into associative array
         if ($key === 'authMechanismProperties') {
             return $this->parseAuthMechanismProperties($value);
+        }
+
+        // w: numeric strings become int, non-numeric strings stay as string
+        if ($key === 'w') {
+            if (ctype_digit($value) || (str_starts_with($value, '-') && ctype_digit(substr($value, 1)))) {
+                return (int) $value;
+            }
+
+            return $value;
         }
 
         return $value;

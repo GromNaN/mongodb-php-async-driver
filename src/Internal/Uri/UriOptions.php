@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace MongoDB\Internal\Uri;
 
 use Closure;
-use InvalidArgumentException;
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueException;
 
 use function array_filter;
@@ -18,6 +18,7 @@ use function get_debug_type;
 use function in_array;
 use function is_array;
 use function is_bool;
+use function is_float;
 use function is_int;
 use function is_string;
 use function mb_check_encoding;
@@ -180,7 +181,6 @@ final class UriOptions
                 'connectTimeoutMS',
                 'socketTimeoutMS',
                 'maxIdleTimeMS',
-                'wTimeoutMS',
                 'zlibCompressionLevel',
             ] as $key
         ) {
@@ -190,6 +190,24 @@ final class UriOptions
 
             self::assertNonNegativeInt($key, $options[$key]);
             self::assignReadonly($self, $key, (int) $options[$key]);
+        }
+
+        // ----- wTimeoutMS (specific error messages) ---------------------------
+        if (isset($options['wTimeoutMS'])) {
+            $wTimeout = $options['wTimeoutMS'];
+            if (! is_int($wTimeout)) {
+                throw new InvalidArgumentException(
+                    sprintf('Expected integer for "wTimeoutMS" URI option, %s given', get_debug_type($wTimeout)),
+                );
+            }
+
+            if ($wTimeout < 0) {
+                throw new InvalidArgumentException(
+                    sprintf('Expected wtimeoutMS to be >= 0, %d given', $wTimeout),
+                );
+            }
+
+            self::assignReadonly($self, 'wTimeoutMS', $wTimeout);
         }
 
         // ----- Nullable integer options ---------------------------------------
@@ -235,8 +253,22 @@ final class UriOptions
         if (isset($options['w'])) {
             $w = $options['w'];
             if (! is_string($w) && ! is_int($w)) {
+                $typeName = is_float($w) ? 'double' : get_debug_type($w);
+
                 throw new InvalidArgumentException(
-                    sprintf('Option "w" must be a string or integer, got %s.', get_debug_type($w)),
+                    sprintf('Expected 32-bit integer or string for "w" URI option, %s given', $typeName),
+                );
+            }
+
+            if (is_int($w) && $w > 2147483647) {
+                throw new InvalidArgumentException(
+                    'Expected 32-bit integer or string for "w" URI option, 64-bit integer given',
+                );
+            }
+
+            if (is_int($w) && $w < 0) {
+                throw new InvalidArgumentException(
+                    sprintf('Unsupported w value: %d', $w),
                 );
             }
 
@@ -248,7 +280,7 @@ final class UriOptions
             $tags = $options['readPreferenceTags'];
             if (! is_array($tags)) {
                 throw new InvalidArgumentException(
-                    sprintf('Option "readPreferenceTags" must be an array, got %s.', get_debug_type($tags)),
+                    sprintf('Expected array for "readPreferenceTags" URI option, %s given', get_debug_type($tags)),
                 );
             }
 
@@ -338,8 +370,10 @@ final class UriOptions
     private static function assertString(string $key, mixed $value): void
     {
         if (! is_string($value)) {
+            $typeName = is_int($value) ? '32-bit integer' : get_debug_type($value);
+
             throw new InvalidArgumentException(
-                sprintf('Option "%s" must be a string, got %s.', $key, get_debug_type($value)),
+                sprintf('Expected string for "%s" URI option, %s given', $key, $typeName),
             );
         }
     }
@@ -363,7 +397,7 @@ final class UriOptions
     {
         if (! is_bool($value)) {
             throw new InvalidArgumentException(
-                sprintf('Option "%s" must be a boolean, got %s.', $key, get_debug_type($value)),
+                sprintf('Expected boolean for "%s" URI option, %s given', $key, get_debug_type($value)),
             );
         }
     }

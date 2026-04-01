@@ -3,9 +3,11 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
+use Exception;
 use InvalidArgumentException as PhpInvalidArgumentException;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Exception\RuntimeException;
+use MongoDB\Driver\Monitoring\LogSubscriber;
 use MongoDB\Driver\Monitoring\Subscriber;
 use MongoDB\Internal\Connection\ConnectionPool;
 use MongoDB\Internal\Connection\SyncRunner;
@@ -14,14 +16,22 @@ use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\ConnectionString;
 use MongoDB\Internal\Uri\UriOptions;
 
+use function array_key_exists;
 use function array_merge;
 use function array_search;
 use function array_values;
+use function count;
+use function get_debug_type;
 use function in_array;
+use function is_bool;
+use function is_int;
 use function is_string;
+use function sprintf;
+use function strlen;
 
 final class Manager
 {
+    private string $uri;
     private ConnectionString $connectionString;
     private UriOptions $uriOptions;
     private TopologyManager $topologyManager;
@@ -40,6 +50,7 @@ final class Manager
         ?array $driverOptions = null,
     ) {
         $uri ??= 'mongodb://127.0.0.1:27017';
+        $this->uri = $uri;
 
         try {
             $this->connectionString = new ConnectionString($uri);
@@ -47,10 +58,34 @@ final class Manager
             throw new InvalidArgumentException($e->getMessage(), 0, $e);
         }
 
-        // Normalize user-provided URI option keys to camelCase before merging
+        // Validate serverApi driver option
+        if (isset($driverOptions['serverApi']) && ! ($driverOptions['serverApi'] instanceof ServerApi)) {
+            throw new InvalidArgumentException(
+                'Expected "serverApi" driver option to be ' . ServerApi::class . ', ' . get_debug_type($driverOptions['serverApi']) . ' given',
+            );
+        }
+
+        // Normalize user-provided URI option keys to camelCase before merging.
+        // Handle deprecated 'safe' option: convert to 'w' only if 'w' is not explicitly set.
         $normalizedUriOptions = [];
+        $safeValue            = null;
         foreach ($uriOptions ?? [] as $key => $value) {
-            $normalizedUriOptions[ConnectionString::normalizeOptionKey((string) $key)] = $value;
+            $normalizedKey = ConnectionString::normalizeOptionKey((string) $key);
+            if ($normalizedKey === 'safe') {
+                if (! is_bool($value)) {
+                    throw new InvalidArgumentException(
+                        'Expected boolean for "safe" URI option, ' . get_debug_type($value) . ' given',
+                    );
+                }
+
+                $safeValue = $value;
+            } else {
+                $normalizedUriOptions[$normalizedKey] = $value;
+            }
+        }
+
+        if ($safeValue !== null && ! array_key_exists('w', $normalizedUriOptions)) {
+            $normalizedUriOptions['w'] = $safeValue ? 1 : 0;
         }
 
         // Merge URI options from connection string with overrides
@@ -58,6 +93,10 @@ final class Manager
             $this->connectionString->getOptions(),
             $normalizedUriOptions,
         );
+
+        // Validate constraints that depend on both URI structure and merged options
+        $this->validateMergedOptions($mergedOptions);
+
         $this->uriOptions = UriOptions::fromArray($mergedOptions);
 
         // Build default read/write/read concern from URI options
@@ -82,6 +121,16 @@ final class Manager
         // registered via addSubscriber() receive the initial SDAM events.
     }
 
+    public function __sleep(): array
+    {
+        throw new Exception("Serialization of 'MongoDB\\Driver\\Manager' is not allowed");
+    }
+
+    public function __wakeup(): void
+    {
+        throw new Exception("Unserialization of 'MongoDB\\Driver\\Manager' is not allowed");
+    }
+
     public function __destruct()
     {
         if (! $this->topologyManager->isStarted()) {
@@ -93,6 +142,10 @@ final class Manager
 
     public function addSubscriber(Subscriber $subscriber): void
     {
+        if ($subscriber instanceof LogSubscriber) {
+            throw new InvalidArgumentException('LogSubscriber instances cannot be registered with a Manager');
+        }
+
         if (in_array($subscriber, $this->subscribers, true)) {
             return;
         }
@@ -144,7 +197,7 @@ final class Manager
         array|null $options = null,
     ): CursorInterface {
         $readPreference = $this->extractReadPreference($options);
-        $session = $this->extractSession($options);
+        $session        = $this->extractSession($options);
 
         return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, $readPreference, $session));
     }
@@ -155,7 +208,7 @@ final class Manager
         array|null $options = null,
     ): CursorInterface {
         $readPreference = $this->extractReadPreference($options) ?? $this->readPreference;
-        $session = $this->extractSession($options);
+        $session        = $this->extractSession($options);
 
         return SyncRunner::run(fn () => $this->executor->executeQuery($namespace, $query, $readPreference, $session));
     }
@@ -165,11 +218,11 @@ final class Manager
         Command $command,
         ?array $options = null,
     ): CursorInterface {
-        if (! isset($options['readPreference'])) {
-            $options['readPreference'] = $this->readPreference;
-        }
+        $readPreference = $this->extractReadPreference($options) ?? $this->readPreference;
+        $readConcern    = $this->extractReadConcern($options);
+        $session        = $this->extractSession($options);
 
-        return $this->executeCommand($db, $command, $options);
+        return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern));
     }
 
     public function executeWriteCommand(
@@ -177,11 +230,10 @@ final class Manager
         Command $command,
         ?array $options = null,
     ): CursorInterface {
-        if (! isset($options['writeConcern'])) {
-            $options['writeConcern'] = $this->writeConcern;
-        }
+        $writeConcern = $this->extractWriteConcern($options) ?? $this->writeConcern;
+        $session      = $this->extractSession($options);
 
-        return $this->executeCommand($db, $command, $options);
+        return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, null, $session, null, $writeConcern));
     }
 
     public function executeReadWriteCommand(
@@ -189,7 +241,12 @@ final class Manager
         Command $command,
         ?array $options = null,
     ): CursorInterface {
-        return $this->executeCommand($db, $command, $options);
+        $readPreference = $this->extractReadPreference($options);
+        $readConcern    = $this->extractReadConcern($options);
+        $writeConcern   = $this->extractWriteConcern($options);
+        $session        = $this->extractSession($options);
+
+        return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, $writeConcern));
     }
 
     public function getReadConcern(): ReadConcern
@@ -257,6 +314,7 @@ final class Manager
                 type:              self::mapInternalServerType($sd->type),
                 latency:           $sd->roundTripTimeMs,
                 serverDescription: $serverDesc,
+                info:              $sd->helloResponse,
                 tags:              $sd->tags,
                 executor:          $this->executor,
             );
@@ -279,15 +337,163 @@ final class Manager
         throw new RuntimeException('Client-side encryption is not supported in this driver');
     }
 
+    public function __debugInfo(): array
+    {
+        $cluster = [];
+
+        foreach ($this->topologyManager->getServers() as $sd) {
+            $isPrimary   = $sd->type === 'RSPrimary';
+            $isSecondary = $sd->type === 'RSSecondary';
+            $isArbiter   = $sd->type === 'RSArbiter';
+            $isHidden    = (bool) ($sd->helloResponse['hidden'] ?? false);
+            $isPassive   = (bool) ($sd->helloResponse['passive'] ?? false);
+
+            $cluster[] = [
+                'host'                => $sd->host,
+                'port'                => $sd->port,
+                'type'                => self::mapInternalServerType($sd->type),
+                'is_primary'          => $isPrimary,
+                'is_secondary'        => $isSecondary,
+                'is_arbiter'          => $isArbiter,
+                'is_hidden'           => $isHidden,
+                'is_passive'          => $isPassive,
+                'last_hello_response' => $sd->helloResponse,
+                'round_trip_time'     => $sd->roundTripTimeMs,
+            ];
+        }
+
+        return [
+            'uri'                => $this->uri,
+            'cluster'            => $cluster,
+            'cryptSharedVersion' => null,
+        ];
+    }
+
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    private function validateMergedOptions(array $options): void
+    {
+        $hostCount        = count($this->connectionString->getHosts());
+        $isSrv            = $this->connectionString->isSrv();
+        $directConnection = $options['directConnection'] ?? false;
+        $loadBalanced     = $options['loadBalanced'] ?? false;
+
+        if ($directConnection) {
+            if ($hostCount > 1) {
+                throw new InvalidArgumentException(
+                    'Failed to parse URI options: Multiple seeds not allowed with directConnection option',
+                );
+            }
+
+            if ($isSrv) {
+                throw new InvalidArgumentException(
+                    'Failed to parse URI options: SRV URI not allowed with directConnection option',
+                );
+            }
+        }
+
+        if ($loadBalanced) {
+            if ($hostCount > 1) {
+                throw new InvalidArgumentException(
+                    'Failed to parse URI options: URI with "loadbalanced" enabled must not contain more than one host',
+                );
+            }
+
+            if (isset($options['replicaSet'])) {
+                throw new InvalidArgumentException(
+                    'Failed to parse URI options: URI with "loadbalanced" enabled must not contain option "replicaset"',
+                );
+            }
+
+            if ($directConnection) {
+                throw new InvalidArgumentException(
+                    'Failed to parse URI options: URI with "loadbalanced" enabled must not contain option "directconnection" enabled',
+                );
+            }
+        }
+
+        // authSource may not be empty
+        if (array_key_exists('authSource', $options) && $options['authSource'] === '') {
+            throw new InvalidArgumentException(
+                'Failed to parse URI options: authSource may not be specified as an empty string',
+            );
+        }
+
+        // appname max length is 128 bytes
+        if (isset($options['appname']) && strlen((string) $options['appname']) > 128) {
+            throw new InvalidArgumentException(
+                sprintf("Invalid appname value: '%s'", $options['appname']),
+            );
+        }
+
+        // srvMaxHosts validation
+        if (isset($options['srvMaxHosts'])) {
+            if (! $isSrv) {
+                throw new InvalidArgumentException(
+                    'Failed to parse URI options: srvmaxhosts must not be specified with a non-SRV URI',
+                );
+            }
+
+            if (isset($options['replicaSet'])) {
+                throw new InvalidArgumentException(
+                    'Failed to parse URI options: srvmaxhosts must not be specified with replicaset',
+                );
+            }
+
+            if ($loadBalanced) {
+                throw new InvalidArgumentException(
+                    'Failed to parse URI options: srvmaxhosts must not be specified with loadbalanced=true',
+                );
+            }
+        }
+
+        // srvServiceName validation
+        if (isset($options['srvServiceName']) && ! $isSrv) {
+            throw new InvalidArgumentException(
+                'Failed to parse URI options: srvservicename must not be specified with a non-SRV URI',
+            );
+        }
+
+        // TLS conflict: tlsInsecure cannot be combined with other TLS options
+        if (array_key_exists('tlsInsecure', $options)) {
+            $tlsConflicts = ['tlsAllowInvalidCertificates', 'tlsAllowInvalidHostnames', 'tlsDisableOCSPEndpointCheck', 'tlsDisableCertificateRevocationCheck'];
+            foreach ($tlsConflicts as $conflictKey) {
+                if (array_key_exists($conflictKey, $options)) {
+                    throw new InvalidArgumentException(
+                        'Failed to parse URI options: tlsinsecure may not be specified with tlsallowinvalidcertificates, tlsallowinvalidhostnames, tlsdisableocspendpointcheck, or tlsdisablecertificaterevocationcheck',
+                    );
+                }
+            }
+        }
+
+        // TLS conflict: tlsAllowInvalidCertificates cannot be combined with OCSP/revocation options
+        if (! array_key_exists('tlsAllowInvalidCertificates', $options)) {
+            return;
+        }
+
+        $tlsConflicts = ['tlsDisableOCSPEndpointCheck', 'tlsDisableCertificateRevocationCheck'];
+        foreach ($tlsConflicts as $conflictKey) {
+            if (array_key_exists($conflictKey, $options)) {
+                throw new InvalidArgumentException(
+                    'Failed to parse URI options: tlsallowinvalidcertificates may not be specified with tlsdisableocspendpointcheck or tlsdisablecertificaterevocationcheck',
+                );
+            }
+        }
+    }
 
     private function buildReadPreference(array $options): ReadPreference
     {
         $mode = $options['readPreference'] ?? ReadPreference::PRIMARY;
         $tagSets = $options['readPreferenceTags'] ?? null;
         $maxStaleness = $options['maxStalenessSeconds'] ?? null;
+
+        if ($maxStaleness !== null && ! is_int($maxStaleness)) {
+            throw new InvalidArgumentException(
+                'Expected integer for "maxStalenessSeconds" URI option, ' . get_debug_type($maxStaleness) . ' given',
+            );
+        }
 
         $rpOptions = [];
         if ($maxStaleness !== null) {
@@ -303,6 +509,11 @@ final class Manager
         $wtimeout = isset($options['wTimeoutMS']) ? (int) $options['wTimeoutMS'] : null;
         $journal  = $options['journal'] ?? null;
 
+        // Handle deprecated 'safe' URI option: only if 'w' is not already set
+        if ($w === null && isset($options['safe'])) {
+            $w = $options['safe'] ? 1 : 0;
+        }
+
         // Empty string w or no w/wtimeout/journal at all → driver default
         if ($w === '' || ($w === null && $wtimeout === null && $journal === null)) {
             return WriteConcern::createDefault();
@@ -314,6 +525,14 @@ final class Manager
     private function buildReadConcern(array $options): ReadConcern
     {
         $level = $options['readConcernLevel'] ?? null;
+
+        if ($level !== null && ! is_string($level)) {
+            $typeName = is_int($level) ? '32-bit integer' : get_debug_type($level);
+
+            throw new InvalidArgumentException(
+                'Expected string for "readConcernLevel" URI option, ' . $typeName . ' given',
+            );
+        }
 
         return new ReadConcern($level);
     }
@@ -333,7 +552,9 @@ final class Manager
             return new ReadPreference($rp);
         }
 
-        return null;
+        throw new InvalidArgumentException(
+            'Expected "readPreference" option to be ' . ReadPreference::class . ', ' . get_debug_type($rp) . ' given',
+        );
     }
 
     private function extractWriteConcern(?array $options): ?WriteConcern
@@ -347,12 +568,41 @@ final class Manager
             return $wc;
         }
 
-        return null;
+        throw new InvalidArgumentException(
+            'Expected "writeConcern" option to be ' . WriteConcern::class . ', ' . get_debug_type($wc) . ' given',
+        );
+    }
+
+    private function extractReadConcern(?array $options): ?ReadConcern
+    {
+        if ($options === null || ! isset($options['readConcern'])) {
+            return null;
+        }
+
+        $rc = $options['readConcern'];
+        if ($rc instanceof ReadConcern) {
+            return $rc;
+        }
+
+        throw new InvalidArgumentException(
+            'Expected "readConcern" option to be ' . ReadConcern::class . ', ' . get_debug_type($rc) . ' given',
+        );
     }
 
     private function extractSession(?array $options): ?Session
     {
-        return $options['session'] ?? null;
+        if ($options === null || ! isset($options['session'])) {
+            return null;
+        }
+
+        $session = $options['session'];
+        if ($session instanceof Session) {
+            return $session;
+        }
+
+        throw new InvalidArgumentException(
+            'Expected "session" option to be ' . Session::class . ', ' . get_debug_type($session) . ' given',
+        );
     }
 
     private static function mapInternalServerType(string $type): int
