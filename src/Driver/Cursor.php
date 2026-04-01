@@ -22,6 +22,8 @@ use function is_string;
 use function str_contains;
 use function str_ends_with;
 use function str_starts_with;
+use function strpos;
+use function substr;
 
 final class Cursor implements CursorInterface
 {
@@ -58,6 +60,15 @@ final class Cursor implements CursorInterface
     /** True after the first call to next(), preventing rewind(). */
     private bool $started = false;
 
+    /** @internal Debug context — database name for __debugInfo(). */
+    private string $debugDatabase = '';
+
+    /** @internal Debug context — command that produced this cursor (null for query cursors). */
+    private ?Command $debugCommand = null;
+
+    /** @internal Debug context — query that produced this cursor (null for command cursors). */
+    private ?Query $debugQuery = null;
+
     private function __construct()
     {
     }
@@ -70,6 +81,8 @@ final class Cursor implements CursorInterface
         Server $server,
         array $typeMap = [],
         ?Closure $getMoreFn = null,
+        string $database = '',
+        ?Command $command = null,
     ): self {
         $instance = new self();
         $instance->items = $items;
@@ -79,18 +92,22 @@ final class Cursor implements CursorInterface
         $instance->typeMap = $typeMap;
         $instance->getMoreFn = $getMoreFn;
         $instance->exhausted = ($instance->cursorId === 0);
+        $instance->debugDatabase = $database;
+        $instance->debugCommand = $command;
 
         return $instance;
     }
 
     /** @internal */
-    public static function createFromArray(array $items, Server $server): self
+    public static function createFromArray(array $items, Server $server, string $database = '', ?Command $command = null): self
     {
         $instance = new self();
         $instance->items = $items;
         $instance->cursorId = 0;
         $instance->server = $server;
         $instance->exhausted = true;
+        $instance->debugDatabase = $database;
+        $instance->debugCommand = $command;
 
         return $instance;
     }
@@ -196,6 +213,28 @@ final class Cursor implements CursorInterface
     public function valid(): bool
     {
         return isset($this->items[$this->position]);
+    }
+
+    public function __debugInfo(): array
+    {
+        // Extract collection from namespace ("db.collection" → "collection", or null for commands).
+        $collection = null;
+        if ($this->namespace !== '' && str_contains($this->namespace, '.')) {
+            $collection = substr($this->namespace, strpos($this->namespace, '.') + 1);
+        }
+
+        return [
+            'database'        => $this->debugDatabase !== '' ? $this->debugDatabase : null,
+            'collection'      => $collection,
+            'query'           => $this->debugQuery,
+            'command'         => $this->debugCommand,
+            'readPreference'  => null,
+            'session'         => null,
+            'isDead'          => $this->isDead(),
+            'currentIndex'    => $this->globalOffset + $this->position,
+            'currentDocument' => null,
+            'server'          => $this->server,
+        ];
     }
 
     // -------------------------------------------------------------------------

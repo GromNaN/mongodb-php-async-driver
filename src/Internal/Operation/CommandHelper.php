@@ -127,7 +127,7 @@ final class CommandHelper
                 $rpDoc['maxStalenessSeconds'] = $maxStaleness;
             }
 
-            $hedge = $readPreference->getHedge();
+            $hedge = @$readPreference->getHedge();
             if ($hedge !== null) {
                 $rpDoc['hedge'] = $hedge;
             }

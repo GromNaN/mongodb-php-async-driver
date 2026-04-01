@@ -3,7 +3,10 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Internal\Operation\OperationExecutor;
+
+use function get_debug_type;
 
 final class Server
 {
@@ -122,30 +125,59 @@ final class Server
 
     public function executeCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        $readPreference = $options['readPreference'] ?? null;
+        $options ??= [];
+        self::validateOptions($options, ['readConcern', 'readPreference', 'session', 'writeConcern']);
+
+        $readPreference = $this->type === self::TYPE_STANDALONE ? null : ($options['readPreference'] ?? null);
+        $readConcern    = $options['readConcern'] ?? null;
+        $writeConcern   = $options['writeConcern'] ?? null;
         $session        = $options['session'] ?? null;
 
-        return $this->executor->executeCommand($db, $command, $readPreference, $session);
+        return $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, $writeConcern);
     }
 
     public function executeReadCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        return $this->executeCommand($db, $command, $options);
+        $options ??= [];
+        self::validateOptions($options, ['readConcern', 'readPreference', 'session']);
+
+        $readPreference = $this->type === self::TYPE_STANDALONE ? null : ($options['readPreference'] ?? null);
+        $readConcern    = $options['readConcern'] ?? null;
+        $session        = $options['session'] ?? null;
+
+        return $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern);
     }
 
     public function executeWriteCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        return $this->executeCommand($db, $command, $options);
+        $options ??= [];
+        self::validateOptions($options, ['session', 'writeConcern']);
+
+        $writeConcern = $options['writeConcern'] ?? null;
+        $session      = $options['session'] ?? null;
+
+        return $this->executor->executeCommand($db, $command, null, $session, null, $writeConcern);
     }
 
     public function executeReadWriteCommand(string $db, Command $command, ?array $options = null): CursorInterface
     {
-        return $this->executeCommand($db, $command, $options);
+        $options ??= [];
+        self::validateOptions($options, ['readConcern', 'readPreference', 'session', 'writeConcern']);
+
+        $readPreference = $this->type === self::TYPE_STANDALONE ? null : ($options['readPreference'] ?? null);
+        $readConcern    = $options['readConcern'] ?? null;
+        $writeConcern   = $options['writeConcern'] ?? null;
+        $session        = $options['session'] ?? null;
+
+        return $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, $writeConcern);
     }
 
     public function executeQuery(string $namespace, Query $query, ?array $options = null): CursorInterface
     {
-        $readPreference = $options['readPreference'] ?? null;
+        $options ??= [];
+        self::validateOptions($options, ['readPreference', 'session']);
+
+        $readPreference = $this->type === self::TYPE_STANDALONE ? null : ($options['readPreference'] ?? null);
         $session        = $options['session'] ?? null;
 
         return $this->executor->executeQuery($namespace, $query, $readPreference, $session);
@@ -153,6 +185,9 @@ final class Server
 
     public function executeBulkWrite(string $namespace, BulkWrite $bulk, ?array $options = null): WriteResult
     {
+        $options ??= [];
+        self::validateOptions($options, ['session', 'writeConcern']);
+
         $writeConcern = $options['writeConcern'] ?? null;
         $session      = $options['session'] ?? null;
 
@@ -163,9 +198,65 @@ final class Server
         BulkWriteCommand $bulkWriteCommand,
         ?array $options = null,
     ): BulkWriteCommandResult {
+        $options ??= [];
+        self::validateOptions($options, ['session', 'writeConcern']);
+
         $writeConcern = $options['writeConcern'] ?? null;
         $session      = $options['session'] ?? null;
 
         return $this->executor->executeBulkWriteCommand($bulkWriteCommand, $writeConcern, $session);
+    }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'host'                => $this->host,
+            'port'                => $this->port,
+            'type'                => $this->type,
+            'is_primary'          => $this->isPrimary(),
+            'is_secondary'        => $this->isSecondary(),
+            'is_arbiter'          => $this->isArbiter(),
+            'is_hidden'           => $this->isHidden(),
+            'is_passive'          => $this->isPassive(),
+            'last_hello_response' => $this->info,
+            'round_trip_time'     => $this->latency,
+        ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Validate a subset of options, throwing InvalidArgumentException for type mismatches.
+     *
+     * @param list<string> $keys  Options to validate.
+     */
+    private static function validateOptions(array $options, array $keys): void
+    {
+        $expectedTypes = [
+            'readConcern'    => ReadConcern::class,
+            'readPreference' => ReadPreference::class,
+            'session'        => Session::class,
+            'writeConcern'   => WriteConcern::class,
+        ];
+
+        foreach ($keys as $key) {
+            if (! isset($expectedTypes[$key])) {
+                continue;
+            }
+
+            if (! isset($options[$key])) {
+                continue;
+            }
+
+            $expected = $expectedTypes[$key];
+
+            if (! ($options[$key] instanceof $expected)) {
+                throw new InvalidArgumentException(
+                    'Expected "' . $key . '" option to be ' . $expected . ', ' . get_debug_type($options[$key]) . ' given',
+                );
+            }
+        }
     }
 }

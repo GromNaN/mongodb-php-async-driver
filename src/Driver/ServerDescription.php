@@ -19,14 +19,12 @@ final class ServerDescription
     private string $host;
     private int $port;
     private string $type;
-    private ?int $roundTripTime;
-    private array $helloResponse;
-    private int $lastUpdateTime;
+    private array $hello_response;
+    private int $last_update_time;
+    private ?int $round_trip_time;
 
     /**
      * Private constructor. Use the internal factory to create instances.
-     *
-     * @see \MongoDB\Internal\Server\ServerDescriptionFactory
      */
     private function __construct()
     {
@@ -42,12 +40,12 @@ final class ServerDescription
         int $lastUpdateTime,
     ): static {
         $instance = new static();
-        $instance->host = $host;
-        $instance->port = $port;
-        $instance->type = $type;
-        $instance->roundTripTime = $roundTripTime;
-        $instance->helloResponse = $helloResponse;
-        $instance->lastUpdateTime = $lastUpdateTime;
+        $instance->host             = $host;
+        $instance->port             = $port;
+        $instance->type             = $type;
+        $instance->round_trip_time  = $roundTripTime;
+        $instance->hello_response   = $helloResponse;
+        $instance->last_update_time = $lastUpdateTime;
 
         return $instance;
     }
@@ -69,16 +67,28 @@ final class ServerDescription
 
     public function getRoundTripTime(): ?int
     {
-        return $this->roundTripTime;
+        return $this->round_trip_time;
     }
 
     public function getHelloResponse(): array
     {
-        return $this->helloResponse;
+        return $this->hello_response;
     }
 
     public function getLastUpdateTime(): int
     {
-        return $this->lastUpdateTime;
+        return $this->last_update_time;
+    }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'host'             => $this->host,
+            'port'             => $this->port,
+            'type'             => $this->type,
+            'hello_response'   => $this->hello_response,
+            'last_update_time' => $this->last_update_time,
+            'round_trip_time'  => $this->round_trip_time,
+        ];
     }
 }

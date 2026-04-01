@@ -6,7 +6,10 @@ namespace MongoDB\Driver;
 use MongoDB\BSON\Serializable;
 use stdClass;
 
+use function array_key_exists;
 use function in_array;
+use function is_bool;
+use function is_string;
 use function sprintf;
 
 final class ServerApi implements Serializable
@@ -19,7 +22,7 @@ final class ServerApi implements Serializable
 
         if (! in_array($version, $validVersions, true)) {
             throw new Exception\InvalidArgumentException(
-                sprintf('Invalid version "%s" given for ServerApi', $version),
+                sprintf('Server API version "%s" is not supported in this driver version', $version),
             );
         }
     }
@@ -66,9 +69,54 @@ final class ServerApi implements Serializable
 
     public function __unserialize(array $data): void
     {
-        $this->version = $data['version'];
-        $this->strict = $data['strict'] ?? null;
+        if (! is_string($data['version'] ?? null)) {
+            throw new Exception\InvalidArgumentException(
+                'MongoDB\Driver\ServerApi initialization requires "version" field to be string',
+            );
+        }
+
+        if (array_key_exists('strict', $data) && $data['strict'] !== null && ! is_bool($data['strict'])) {
+            throw new Exception\InvalidArgumentException(
+                'MongoDB\Driver\ServerApi initialization requires "strict" field to be bool or null',
+            );
+        }
+
+        if (array_key_exists('deprecationErrors', $data) && $data['deprecationErrors'] !== null && ! is_bool($data['deprecationErrors'])) {
+            throw new Exception\InvalidArgumentException(
+                'MongoDB\Driver\ServerApi initialization requires "deprecationErrors" field to be bool or null',
+            );
+        }
+
+        $this->version           = $data['version'];
+        $this->strict            = $data['strict'] ?? null;
         $this->deprecationErrors = $data['deprecationErrors'] ?? null;
+    }
+
+    public static function __set_state(array $array): static
+    {
+        if (! is_string($array['version'] ?? null)) {
+            throw new Exception\InvalidArgumentException(
+                'MongoDB\Driver\ServerApi initialization requires "version" field to be string',
+            );
+        }
+
+        if (array_key_exists('strict', $array) && $array['strict'] !== null && ! is_bool($array['strict'])) {
+            throw new Exception\InvalidArgumentException(
+                'MongoDB\Driver\ServerApi initialization requires "strict" field to be bool or null',
+            );
+        }
+
+        if (array_key_exists('deprecationErrors', $array) && $array['deprecationErrors'] !== null && ! is_bool($array['deprecationErrors'])) {
+            throw new Exception\InvalidArgumentException(
+                'MongoDB\Driver\ServerApi initialization requires "deprecationErrors" field to be bool or null',
+            );
+        }
+
+        return new static(
+            $array['version'],
+            $array['strict'] ?? null,
+            $array['deprecationErrors'] ?? null,
+        );
     }
 
     public function __debugInfo(): array

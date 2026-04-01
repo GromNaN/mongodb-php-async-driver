@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace MongoDB\Internal\Topology;
 
 use MongoDB\BSON\ObjectId;
+use MongoDB\Driver\Exception\ConnectionTimeoutException as DriverConnectionTimeoutException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
 use MongoDB\Driver\Monitoring\SDAMSubscriber;
-use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Driver\Monitoring\ServerChangedEvent;
 use MongoDB\Driver\Monitoring\ServerClosedEvent;
 use MongoDB\Driver\Monitoring\ServerOpeningEvent;
@@ -17,12 +17,14 @@ use MongoDB\Driver\Monitoring\TopologyClosedEvent;
 use MongoDB\Driver\Monitoring\TopologyOpeningEvent;
 use MongoDB\Driver\ReadPreference;
 use MongoDB\Driver\ServerDescription;
+use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Internal\Uri\UriOptions;
 use Throwable;
 
 use function Amp\delay;
 use function array_filter;
 use function array_keys;
+use function array_map;
 use function array_merge;
 use function array_rand;
 use function array_values;
@@ -258,10 +260,17 @@ final class TopologyManager
 
         // Fire topologyChanged event if the topology type changed.
         if ($previousType !== $this->topologyType) {
+            $newServers = array_values(array_map(
+                fn (InternalServerDescription $s) => $this->buildPublicServerDescription($s),
+                $this->servers,
+            ));
+
             $this->fireSdamEvent('topologyChanged', new TopologyChangedEvent(
-                topologyId:          $this->topologyId,
+                topologyId:           $this->topologyId,
                 previousTopologyType: $previousType->value,
                 newTopologyType:      $this->topologyType->value,
+                previousServers:      [],
+                newServers:           $newServers,
             ));
         }
 
@@ -325,13 +334,9 @@ final class TopologyManager
             }
         }
 
-        throw new DriverRuntimeException(
+        throw new DriverConnectionTimeoutException(
             sprintf(
-                'No suitable servers found for read preference "%s" within %d ms. '
-                . 'Topology type: %s, servers: [%s]',
-                $rp->getModeString(),
-                $timeoutMs,
-                $this->topologyType->value,
+                'No suitable servers found (`serverSelectionTryOnce` set): [%s]',
                 implode(', ', array_keys($this->servers)),
             ),
         );

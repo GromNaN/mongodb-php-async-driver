@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace MongoDB\Driver\Monitoring;
 
 use MongoDB\BSON\ObjectId;
+use MongoDB\Driver\ServerDescription;
 use MongoDB\Driver\TopologyDescription;
 
 final class TopologyChangedEvent
@@ -11,13 +12,19 @@ final class TopologyChangedEvent
     private TopologyDescription $newDescription;
     private TopologyDescription $previousDescription;
 
+    /**
+     * @param list<ServerDescription> $previousServers
+     * @param list<ServerDescription> $newServers
+     */
     public function __construct(
         private readonly ObjectId $topologyId,
         private readonly string $previousTopologyType,
         private readonly string $newTopologyType,
+        array $previousServers = [],
+        array $newServers = [],
     ) {
-        $this->previousDescription = TopologyDescription::createFromInternal($previousTopologyType);
-        $this->newDescription      = TopologyDescription::createFromInternal($newTopologyType);
+        $this->previousDescription = TopologyDescription::createFromInternal($previousTopologyType, $previousServers);
+        $this->newDescription      = TopologyDescription::createFromInternal($newTopologyType, $newServers);
     }
 
     public function getTopologyId(): ObjectId

@@ -6,11 +6,11 @@ namespace MongoDB\Internal\Operation;
 
 use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
-use MongoDB\Driver\Cursor;
 use MongoDB\Driver\BulkWrite;
 use MongoDB\Driver\BulkWriteCommand;
 use MongoDB\Driver\BulkWriteCommandResult;
 use MongoDB\Driver\Command;
+use MongoDB\Driver\Cursor;
 use MongoDB\Driver\CursorInterface;
 use MongoDB\Driver\Exception\BulkWriteCommandException;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -24,6 +24,7 @@ use MongoDB\Driver\Monitoring\CommandSubscriber;
 use MongoDB\Driver\Monitoring\CommandSucceededEvent;
 use MongoDB\Driver\Monitoring\Subscriber;
 use MongoDB\Driver\Query;
+use MongoDB\Driver\ReadConcern;
 use MongoDB\Driver\ReadPreference;
 use MongoDB\Driver\Server;
 use MongoDB\Driver\ServerDescription;
@@ -41,13 +42,13 @@ use MongoDB\Internal\Protocol\RequestIdGenerator;
 use MongoDB\Internal\Topology\InternalServerDescription;
 use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\UriOptions;
+use stdClass;
 use Throwable;
 
 use function array_is_list;
 use function array_map;
 use function array_merge;
 use function array_search;
-use function array_slice;
 use function array_values;
 use function count;
 use function explode;
@@ -136,6 +137,8 @@ final class OperationExecutor
         Command $command,
         ?ReadPreference $readPreference = null,
         ?Session $session = null,
+        ?ReadConcern $readConcern = null,
+        ?WriteConcern $writeConcern = null,
     ): CursorInterface {
         $this->ensureStarted();
 
@@ -147,14 +150,21 @@ final class OperationExecutor
         $rawCmd  = $command->getDocument();
         $cmdName = CommandHelper::getCommandName($rawCmd);
 
+        // Standalone servers ignore read preference; do not inject it into the command.
+        $effectiveReadPreference = $server->type === InternalServerDescription::TYPE_STANDALONE
+            ? null
+            : $readPreference;
+
         $prepared = CommandHelper::prepareCommand(
             command:        $rawCmd,
             db:             $db,
-            readPreference: $readPreference,
+            readPreference: $effectiveReadPreference,
+            readConcern:    $readConcern,
+            writeConcern:   $writeConcern,
             session:        $session,
         );
 
-        return $this->sendCommand($pool, $db, $cmdName, $prepared, $server);
+        return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, 0, $command);
     }
 
     /**
@@ -182,7 +192,7 @@ final class OperationExecutor
         foreach (
             [
                 'sort', 'projection', 'skip', 'limit', 'batchSize',
-                'singleBatch', 'comment', 'maxTimeMS', 'hint',
+                'singleBatch', 'comment', 'maxTimeMS', 'hint', 'let',
                 'allowPartialResults', 'noCursorTimeout', 'tailable',
                 'awaitData', 'oplogReplay', 'returnKey', 'showRecordId',
                 'snapshot', 'min', 'max',
@@ -221,9 +231,13 @@ final class OperationExecutor
     ): WriteResult {
         $this->ensureStarted();
 
+        if ($bulk->count() === 0) {
+            throw new DriverInvalidArgumentException('Cannot do an empty bulk write');
+        }
+
         if ($bulk->isExecuted()) {
             throw new DriverInvalidArgumentException(
-                'BulkWrite objects may only be executed once and this instance has already been executed'
+                'BulkWrite objects may only be executed once and this instance has already been executed',
             );
         }
 
@@ -756,10 +770,11 @@ final class OperationExecutor
         array $prepared,
         InternalServerDescription $server,
         int $maxAwaitTimeMS = 0,
+        ?Command $debugCommand = null,
     ): CursorInterface {
         $body = $this->doSendCommand($pool, $db, $cmdName, $prepared, $server);
 
-        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS);
+        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand);
     }
 
     // -------------------------------------------------------------------------
@@ -783,6 +798,7 @@ final class OperationExecutor
         ConnectionPool $pool,
         InternalServerDescription $server,
         int $maxAwaitTimeMS = 0,
+        ?Command $debugCommand = null,
     ): CursorInterface {
         $publicServer = $this->buildPublicServer($server);
 
@@ -830,11 +846,13 @@ final class OperationExecutor
                 server:     $publicServer,
                 typeMap:    [],
                 getMoreFn:  $getMoreFn,
+                database:   $db,
+                command:    $debugCommand,
             );
         }
 
         // Non-cursor commands: return the single response document as a one-element cursor.
-        return Cursor::createFromArray([(object) $body], $publicServer);
+        return Cursor::createFromArray([(object) $body], $publicServer, $db, $debugCommand);
     }
 
     // -------------------------------------------------------------------------
@@ -987,9 +1005,7 @@ final class OperationExecutor
     {
         $pos = strpos($namespace, '.');
         if ($pos === false) {
-            throw new DriverRuntimeException(
-                'Invalid namespace "' . $namespace . '": missing dot separator',
-            );
+            throw new DriverInvalidArgumentException('Invalid namespace provided: ' . $namespace);
         }
 
         return [substr($namespace, 0, $pos), substr($namespace, $pos + 1)];
@@ -1030,6 +1046,7 @@ final class OperationExecutor
             type:              $publicType,
             latency:           $sd->roundTripTimeMs,
             serverDescription: $serverDescription,
+            info:              $sd->helloResponse,
             tags:              $sd->tags,
             executor:          $this,
         );
@@ -1041,7 +1058,7 @@ final class OperationExecutor
      */
     private static function arrayToObject(array $arr): object
     {
-        $obj = new \stdClass();
+        $obj = new stdClass();
 
         foreach ($arr as $key => $value) {
             if (is_array($value)) {

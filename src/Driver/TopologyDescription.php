@@ -12,12 +12,14 @@ final class TopologyDescription
     public const TYPE_REPLICA_SET_WITH_PRIMARY   = 'ReplicaSetWithPrimary';
     public const TYPE_LOAD_BALANCED              = 'LoadBalanced';
 
+    /** @param list<ServerDescription> $servers */
     private function __construct(
         private readonly string $type,
         private array $servers = [],
     ) {
     }
 
+    /** @param list<ServerDescription> $servers */
     public static function createFromInternal(string $type, array $servers = []): self
     {
         return new self($type, $servers);
@@ -28,7 +30,7 @@ final class TopologyDescription
         return $this->type;
     }
 
-    /** @return list<Server> */
+    /** @return list<ServerDescription> */
     public function getServers(): array
     {
         return $this->servers;
@@ -42,5 +44,13 @@ final class TopologyDescription
     public function hasWritableServer(): bool
     {
         return $this->servers !== [];
+    }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'servers' => $this->servers,
+            'type'    => $this->type,
+        ];
     }
 }

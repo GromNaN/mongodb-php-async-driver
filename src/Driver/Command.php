@@ -6,6 +6,9 @@ namespace MongoDB\Driver;
 use MongoDB\BSON\Document;
 use MongoDB\BSON\PackedArray;
 use MongoDB\Driver\Exception\UnexpectedValueException;
+use stdClass;
+
+use function is_array;
 
 final class Command
 {
@@ -37,6 +40,12 @@ final class Command
         $doc = $this->document;
         if ($doc instanceof Document) {
             $doc = $doc->toPHP();
+        } elseif (is_array($doc)) {
+            $obj = new stdClass();
+            foreach ($doc as $k => $v) {
+                $obj->$k = $v;
+            }
+            $doc = $obj;
         }
 
         return ['command' => $doc];
