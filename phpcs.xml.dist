@@ -37,7 +37,8 @@
         <!-- **************************************** -->
         <exclude name="Generic.Formatting.MultipleStatementAlignment" />
         <exclude name="Squiz.Commenting.FunctionComment.ThrowsNoFullStop" />
-        <exclude name="SlevomatCodingStandard.TypeHints.UnionTypeHintFormat.DisallowedShortNullable" />
+        <exclude name="SlevomatCodingStandard.TypeHints.UnionTypeHintFormat" />
+        <exclude name="Squiz.WhiteSpace.LanguageConstructSpacing" />
 
         <!-- Keep long typehints (for now) -->
         <exclude name="PSR12.Keywords.ShortFormTypeKeywords" />

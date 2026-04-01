@@ -54,7 +54,7 @@ src/Internal/Protocol/       OP_MSG MessageHeader, OpMsgEncoder, OpMsgDecoder
 src/Internal/Session/        SessionPool
 src/Internal/Topology/       TopologyManager, ServerMonitor, SdamStateMachine, ServerSelector
 src/Internal/Uri/            ConnectionString, UriOptions
-src/bootstrap.php            Global Monitoring functions (not autoloadable)
+src/functions.php            Global Monitoring functions (not autoloadable)
 ```
 
 ## Key invariants
