@@ -217,7 +217,11 @@ function extractFromFile(string $path, array &$entries): void
             // Also skip if we're in an internal class
             $classInternal = !empty($classStack) && $classStack[count($classStack) - 1][1];
 
-            if (!$internal && !$classInternal) {
+            // Inside a class, skip private/protected constants
+            $inClass = !empty($classStack);
+            $publicConst = !$inClass || precedingModifierIsPublic($tokens, $i) || !precedingModifierIsNonPublic($tokens, $i);
+
+            if (!$internal && !$classInternal && $publicConst) {
                 // Skip optional type tokens after `const` to find the actual name
                 // e.g. `const string FOO = ` or `const int BAR = `
                 $j = $i + 1;
@@ -249,6 +253,20 @@ function extractFromFile(string $path, array &$entries): void
                 if ($constName !== '') {
                     $context = currentContext($classStack, $namespace);
                     $entries[] = 'const ' . $context . $constName;
+                }
+            }
+            $i++;
+            continue;
+        }
+
+        // ── property ──────────────────────────────────────────────────────
+        if ($tokType === T_VARIABLE && !empty($classStack)) {
+            $classInternal = $classStack[count($classStack) - 1][1];
+            if (!$classInternal && precedingModifierIsPublic($tokens, $i)) {
+                $docblock = collectPrecedingDocblock($tokens, $i);
+                if (!isInternal($docblock)) {
+                    $context = currentContext($classStack, $namespace);
+                    $entries[] = 'property ' . $context . $tokVal;
                 }
             }
             $i++;
@@ -374,36 +392,74 @@ function isInternal(string $docblock): bool
 }
 
 /**
- * Walk backwards from $pos to find the preceding visibility modifiers.
- * Returns true only if T_PUBLIC is present (and not T_PRIVATE/T_PROTECTED).
+ * Walk backwards skipping whitespace, type tokens (for typed properties/consts),
+ * and modifier keywords. Returns [foundPublic, foundNonPublic].
  */
-function precedingModifierIsPublic(array $tokens, int $pos): bool
+function scanPrecedingModifiers(array $tokens, int $pos): array
 {
     $modifiers = [
         T_PUBLIC, T_PROTECTED, T_PRIVATE, T_STATIC, T_ABSTRACT,
         T_FINAL, T_READONLY,
     ];
+    // Tokens that can appear as part of a type between modifiers and the name/variable
+    $typeTokens = [
+        T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_NS_SEPARATOR,
+        T_ARRAY, T_CALLABLE, T_STATIC,
+    ];
 
-    $foundPublic = false;
+    $foundPublic    = false;
+    $foundNonPublic = false;
     $i = $pos - 1;
     while ($i >= 0) {
-        $t = $tokens[$i];
-        if (is_array($t) && $t[0] === T_WHITESPACE) {
+        $t  = $tokens[$i];
+        $tt = is_array($t) ? $t[0] : null;
+        $tv = is_array($t) ? $t[1] : $t;
+
+        if ($tt === T_WHITESPACE) {
             $i--;
             continue;
         }
-        if (is_array($t) && in_array($t[0], $modifiers, true)) {
-            if ($t[0] === T_PUBLIC) {
+        // Skip type tokens (typed property/const: `public string $x`, `public const int FOO`)
+        if ($tt !== null && in_array($tt, $typeTokens, true)) {
+            $i--;
+            continue;
+        }
+        // `?` for nullable types, `|` and `&` for union/intersection types
+        if ($tv === '?' || $tv === '|' || $tv === '&') {
+            $i--;
+            continue;
+        }
+        if ($tt !== null && in_array($tt, $modifiers, true)) {
+            if ($tt === T_PUBLIC) {
                 $foundPublic = true;
-            } elseif ($t[0] === T_PROTECTED || $t[0] === T_PRIVATE) {
-                return false;
+            } elseif ($tt === T_PROTECTED || $tt === T_PRIVATE) {
+                $foundNonPublic = true;
             }
             $i--;
             continue;
         }
         break;
     }
-    return $foundPublic;
+    return [$foundPublic, $foundNonPublic];
+}
+
+/**
+ * Returns true if T_PRIVATE or T_PROTECTED precedes the token at $pos.
+ */
+function precedingModifierIsNonPublic(array $tokens, int $pos): bool
+{
+    [, $nonPublic] = scanPrecedingModifiers($tokens, $pos);
+    return $nonPublic;
+}
+
+/**
+ * Walk backwards from $pos to find the preceding visibility modifiers.
+ * Returns true only if T_PUBLIC is present (and not T_PRIVATE/T_PROTECTED).
+ */
+function precedingModifierIsPublic(array $tokens, int $pos): bool
+{
+    [$public, $nonPublic] = scanPrecedingModifiers($tokens, $pos);
+    return $public && !$nonPublic;
 }
 
 /**
