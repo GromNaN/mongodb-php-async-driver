@@ -84,9 +84,11 @@ final class Manager
 
     public function __destruct()
     {
-        if ($this->topologyManager->isStarted()) {
-            $this->topologyManager->stop();
+        if (! $this->topologyManager->isStarted()) {
+            return;
         }
+
+        $this->topologyManager->stop();
     }
 
     public function addSubscriber(Subscriber $subscriber): void
@@ -122,6 +124,18 @@ final class Manager
         $session = $this->extractSession($options);
 
         return SyncRunner::run(fn () => $this->executor->executeBulkWrite($namespace, $bulk, $writeConcern, $session));
+    }
+
+    public function executeBulkWriteCommand(
+        BulkWriteCommand $bulkWriteCommand,
+        ?array $options = null,
+    ): BulkWriteCommandResult {
+        $writeConcern = $this->extractWriteConcern($options) ?? $this->writeConcern;
+        $session      = $this->extractSession($options);
+
+        return SyncRunner::run(
+            fn () => $this->executor->executeBulkWriteCommand($bulkWriteCommand, $writeConcern, $session),
+        );
     }
 
     public function executeCommand(

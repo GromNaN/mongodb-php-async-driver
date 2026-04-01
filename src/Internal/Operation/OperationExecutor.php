@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Operation;
 
+use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
 use MongoDB\Driver\BulkWrite;
+use MongoDB\Driver\BulkWriteCommand;
+use MongoDB\Driver\BulkWriteCommandResult;
 use MongoDB\Driver\Command;
 use MongoDB\Driver\CursorInterface;
+use MongoDB\Driver\Exception\BulkWriteCommandException;
 use MongoDB\Driver\Exception\BulkWriteException;
+use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
 use MongoDB\Driver\Exception\ServerException;
-use MongoDB\Internal\Connection\SyncRunner;
-use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Driver\Monitoring\CommandFailedEvent;
 use MongoDB\Driver\Monitoring\CommandStartedEvent;
 use MongoDB\Driver\Monitoring\CommandSubscriber;
@@ -28,7 +31,8 @@ use MongoDB\Driver\WriteConcernError;
 use MongoDB\Driver\WriteError;
 use MongoDB\Driver\WriteResult;
 use MongoDB\Internal\Connection\ConnectionPool;
-use MongoDB\Driver\Exception\CommandException;
+use MongoDB\Internal\Connection\SyncRunner;
+use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
 use MongoDB\Internal\Protocol\RequestIdGenerator;
@@ -42,13 +46,14 @@ use function array_merge;
 use function array_search;
 use function array_slice;
 use function array_values;
-use function in_array;
 use function count;
 use function explode;
+use function in_array;
 use function is_array;
 use function is_object;
 use function iterator_to_array;
 use function microtime;
+use function reset;
 use function strpos;
 use function substr;
 
@@ -451,6 +456,7 @@ final class OperationExecutor
 
         if ($writeErrors !== []) {
             $firstError = $writeErrors[0];
+
             throw new BulkWriteException(
                 message:        $firstError->getMessage(),
                 code:           $firstError->getCode(),
@@ -461,25 +467,192 @@ final class OperationExecutor
         return $writeResult;
     }
 
+    /**
+     * Execute a bulkWrite command (MongoDB 8.0+) and return an aggregated BulkWriteCommandResult.
+     *
+     * The `bulkWrite` command is sent to the "admin" database.  Unlike the legacy per-collection
+     * bulk write, operations may span multiple namespaces.
+     *
+     * @throws BulkWriteCommandException when individual write errors or write concern errors occur.
+     */
+    public function executeBulkWriteCommand(
+        BulkWriteCommand $bulk,
+        ?WriteConcern $writeConcern = null,
+        ?Session $session = null,
+    ): BulkWriteCommandResult {
+        $this->ensureStarted();
+
+        if ($bulk->count() === 0) {
+            throw new DriverRuntimeException('BulkWriteCommand cannot be empty');
+        }
+
+        $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
+        $pool   = $this->getOrCreatePool($server->host, $server->port);
+
+        $options        = $bulk->getOptions();
+        $ordered        = (bool) ($options['ordered'] ?? true);
+        $verboseResults = (bool) ($options['verboseResults'] ?? false);
+
+        $command = [
+            'bulkWrite' => 1,
+            'ops'       => $bulk->getOps(),
+            'nsInfo'    => $bulk->getNsInfo(),
+            'ordered'   => $ordered,
+            'errorsOnly' => ! $verboseResults,
+        ];
+
+        foreach (['bypassDocumentValidation', 'comment', 'let'] as $opt) {
+            if (! isset($options[$opt])) {
+                continue;
+            }
+
+            $command[$opt] = $options[$opt];
+        }
+
+        $prepared = CommandHelper::prepareCommand(
+            command:      $command,
+            db:           'admin',
+            writeConcern: $writeConcern,
+            session:      $session,
+        );
+
+        $acknowledged = $writeConcern === null || $writeConcern->getW() !== 0;
+
+        // Send command and capture raw body for the summary counts.
+        try {
+            $body = $this->doSendCommand($pool, 'admin', 'bulkWrite', $prepared, $server);
+        } catch (CommandException $e) {
+            throw BulkWriteCommandException::create(
+                message:      $e->getMessage(),
+                code:         $e->getCode(),
+                resultDocument: $e->getResultDocument(),
+                errorReply:   Document::fromPHP($e->getResultDocument()),
+            );
+        }
+
+        // Summary counts live in the top-level response body.
+        $nInserted = (int) ($body['nInserted'] ?? 0);
+        $nUpserted = (int) ($body['nUpserted'] ?? 0);
+        $nMatched  = (int) ($body['nMatched']  ?? 0);
+        $nModified = (int) ($body['nModified'] ?? 0);
+        $nDeleted  = (int) ($body['nDeleted']  ?? 0);
+
+        // Per-operation results / errors come from the results cursor.
+        $resultsCursor = $this->buildCursor($body, 'admin', 'bulkWrite', $pool, $server);
+
+        $ops         = $bulk->getOps();
+        $insertedIds = $bulk->getInsertedIds();
+
+        $writeErrors        = [];
+        $writeConcernErrors = [];
+        $insertResultsMap   = [];
+        $updateResultsMap   = [];
+        $deleteResultsMap   = [];
+
+        foreach ($resultsCursor as $doc) {
+            $doc = is_array($doc) ? $doc : (array) $doc;
+            $ok  = (int) ($doc['ok'] ?? 1);
+            $idx = (int) ($doc['idx'] ?? 0);
+
+            if ($ok === 0) {
+                $writeErrors[$idx] = new WriteError(
+                    code:    (int) ($doc['code']   ?? 0),
+                    index:   $idx,
+                    message: (string) ($doc['errmsg'] ?? ''),
+                    info:    isset($doc['errInfo']) ? (object) $doc['errInfo'] : null,
+                );
+                continue;
+            }
+
+            if (! $verboseResults) {
+                continue;
+            }
+
+            $op = $ops[$idx] ?? [];
+
+            if (isset($op['insert'])) {
+                if (isset($insertedIds[$idx])) {
+                    $insertResultsMap[(string) $idx] = (object) ['insertedId' => $insertedIds[$idx]];
+                }
+            } elseif (isset($op['update'])) {
+                $res = (object) [
+                    'matchedCount'  => (int) ($doc['n'] ?? 0),
+                    'modifiedCount' => (int) ($doc['nModified'] ?? 0),
+                ];
+                if (isset($doc['upserted']['_id'])) {
+                    $res->upsertedId = $doc['upserted']['_id'];
+                }
+
+                $updateResultsMap[(string) $idx] = $res;
+            } elseif (isset($op['delete'])) {
+                $deleteResultsMap[(string) $idx] = (object) ['deletedCount' => (int) ($doc['n'] ?? 0)];
+            }
+        }
+
+        // Write concern error from top-level response body.
+        if (isset($body['writeConcernError'])) {
+            $wce = (array) $body['writeConcernError'];
+            $writeConcernErrors[] = new WriteConcernError(
+                code:    (int) ($wce['code']   ?? 0),
+                message: (string) ($wce['errmsg'] ?? ''),
+            );
+        }
+
+        $insertResultsDoc = $verboseResults && $insertResultsMap !== []
+            ? Document::fromPHP((object) $insertResultsMap) : null;
+        $updateResultsDoc = $verboseResults && $updateResultsMap !== []
+            ? Document::fromPHP((object) $updateResultsMap) : null;
+        $deleteResultsDoc = $verboseResults && $deleteResultsMap !== []
+            ? Document::fromPHP((object) $deleteResultsMap) : null;
+
+        $result = BulkWriteCommandResult::createFromInternal(
+            insertedCount: $nInserted,
+            matchedCount:  $nMatched,
+            modifiedCount: $nModified,
+            upsertedCount: $nUpserted,
+            deletedCount:  $nDeleted,
+            acknowledged:  $acknowledged,
+            insertResults: $insertResultsDoc,
+            updateResults: $updateResultsDoc,
+            deleteResults: $deleteResultsDoc,
+        );
+
+        if ($writeErrors !== [] || $writeConcernErrors !== []) {
+            $firstError = reset($writeErrors);
+
+            throw BulkWriteCommandException::create(
+                message:            $firstError !== false ? $firstError->getMessage() : 'Write concern error occurred',
+                code:               $firstError !== false ? $firstError->getCode()    : 0,
+                partialResult:      $result,
+                writeErrors:        array_values($writeErrors),
+                writeConcernErrors: $writeConcernErrors,
+            );
+        }
+
+        return $result;
+    }
+
     // -------------------------------------------------------------------------
     // Private — core send/receive
     // -------------------------------------------------------------------------
 
     /**
-     * Send a prepared command document over a connection from $pool and return
-     * a CursorInterface over the decoded results.
+     * Send a prepared command and return the decoded response body.
      *
      * Fires CommandStarted / CommandSucceeded / CommandFailed events.
+     * Throws CommandException when the server returns ok:0.
      *
      * @param array $prepared Fully-decorated command array (output of CommandHelper::prepareCommand).
+     *
+     * @return array Decoded response body.
      */
-    private function sendCommand(
+    private function doSendCommand(
         ConnectionPool $pool,
         string $db,
         string $cmdName,
         array $prepared,
         InternalServerDescription $server,
-    ): CursorInterface {
+    ): array {
         $conn      = $pool->acquire();
         $requestId = RequestIdGenerator::next();
         $startUs   = (int) (microtime(true) * 1_000_000);
@@ -508,22 +681,22 @@ final class OperationExecutor
 
             if ($ok !== 1) {
                 $errmsg = (string) ($body['errmsg'] ?? 'Unknown error');
-                $code   = (int)   ($body['code']   ?? 0);
-                $cmdErr = new CommandException($errmsg, $code);
+                $code   = (int) ($body['code']   ?? 0);
 
                 // Per PHPC-1990: CommandFailedEvent stores a ServerException (not CommandException).
                 $eventErr = new ServerException($errmsg, $code, (object) $body);
                 $this->fireCommandFailed($cmdName, $eventErr, $db, $requestId, $durationUs, $server->host, $server->port, (object) $body, $serverConnId);
 
                 $pool->release($conn);
-                throw $cmdErr;
+
+                throw new CommandException($errmsg, $code, (object) $body);
             }
 
             $this->fireCommandSucceeded($cmdName, (object) $body, $db, $requestId, $durationUs, $server->host, $server->port, $serverConnId);
 
             $pool->release($conn);
 
-            return $this->buildCursor($body, $db, $cmdName, $pool, $server);
+            return $body;
         } catch (CommandException $e) {
             throw $e;
         } catch (Throwable $e) {
@@ -534,6 +707,21 @@ final class OperationExecutor
 
             throw $e;
         }
+    }
+
+    /**
+     * Send a prepared command and return a CursorInterface over the results.
+     */
+    private function sendCommand(
+        ConnectionPool $pool,
+        string $db,
+        string $cmdName,
+        array $prepared,
+        InternalServerDescription $server,
+    ): CursorInterface {
+        $body = $this->doSendCommand($pool, $db, $cmdName, $prepared, $server);
+
+        return $this->buildCursor($body, $db, $cmdName, $pool, $server);
     }
 
     // -------------------------------------------------------------------------

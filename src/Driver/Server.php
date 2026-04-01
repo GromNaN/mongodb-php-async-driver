@@ -158,4 +158,14 @@ final class Server
 
         return $this->executor->executeBulkWrite($namespace, $bulk, $writeConcern, $session);
     }
+
+    public function executeBulkWriteCommand(
+        BulkWriteCommand $bulkWriteCommand,
+        ?array $options = null,
+    ): BulkWriteCommandResult {
+        $writeConcern = $options['writeConcern'] ?? null;
+        $session      = $options['session'] ?? null;
+
+        return $this->executor->executeBulkWriteCommand($bulkWriteCommand, $writeConcern, $session);
+    }
 }
