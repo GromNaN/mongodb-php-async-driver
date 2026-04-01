@@ -5,6 +5,7 @@
     "license": "Apache-2.0",
     "require": {
         "php": "^8.4",
+        "ext-ctype": "*",
         "revolt/event-loop": "^1.0",
         "amphp/socket": "^2.0",
         "amphp/amp": "^3.0"
@@ -17,7 +18,7 @@
     },
     "autoload": {
         "files": [
-            "src/bootstrap.php"
+            "src/Driver/Monitoring/functions.php"
         ],
         "psr-4": {
             "MongoDB\\BSON\\": "src/BSON/",

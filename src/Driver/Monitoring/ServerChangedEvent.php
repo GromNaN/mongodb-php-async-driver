@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver\Monitoring;
 
+use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\ServerDescription;
 
 final class ServerChangedEvent
@@ -10,7 +11,7 @@ final class ServerChangedEvent
     public function __construct(
         private readonly string $host,
         private readonly int $port,
-        private readonly string $topologyId,
+        private readonly ObjectId $topologyId,
         private readonly ServerDescription $previousDescription,
         private readonly ServerDescription $newDescription,
     ) {
@@ -26,7 +27,7 @@ final class ServerChangedEvent
         return $this->port;
     }
 
-    public function getTopologyId(): string
+    public function getTopologyId(): ObjectId
     {
         return $this->topologyId;
     }

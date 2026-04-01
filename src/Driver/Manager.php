@@ -78,10 +78,15 @@ final class Manager
             $this->subscribers,
         );
 
-        // Start server monitoring
-        SyncRunner::run(function (): void {
-            $this->topologyManager->start();
-        });
+        // Topology start is deferred until first operation so that subscribers
+        // registered via addSubscriber() receive the initial SDAM events.
+    }
+
+    public function __destruct()
+    {
+        if ($this->topologyManager->isStarted()) {
+            $this->topologyManager->stop();
+        }
     }
 
     public function addSubscriber(Subscriber $subscriber): void
@@ -92,6 +97,7 @@ final class Manager
 
         $this->subscribers[] = $subscriber;
         $this->executor->addSubscriber($subscriber);
+        $this->topologyManager->addSubscriber($subscriber);
     }
 
     public function removeSubscriber(Subscriber $subscriber): void
@@ -104,6 +110,7 @@ final class Manager
         unset($this->subscribers[$key]);
         $this->subscribers = array_values($this->subscribers);
         $this->executor->removeSubscriber($subscriber);
+        $this->topologyManager->removeSubscriber($subscriber);
     }
 
     public function executeBulkWrite(

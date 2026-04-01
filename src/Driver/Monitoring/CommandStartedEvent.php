@@ -13,7 +13,10 @@ final class CommandStartedEvent
         private readonly string $databaseName,
         private readonly int $requestId,
         private readonly int $operationId,
+        private readonly string $host = '',
+        private readonly int $port = 27017,
         private readonly ?ObjectId $serviceId = null,
+        private readonly ?int $serverConnectionId = null,
     ) {
     }
 
@@ -32,14 +35,24 @@ final class CommandStartedEvent
         return $this->databaseName;
     }
 
-    public function getRequestId(): int
+    public function getHost(): string
     {
-        return $this->requestId;
+        return $this->host;
     }
 
-    public function getOperationId(): int
+    public function getPort(): int
     {
-        return $this->operationId;
+        return $this->port;
+    }
+
+    public function getRequestId(): string
+    {
+        return (string) $this->requestId;
+    }
+
+    public function getOperationId(): string
+    {
+        return (string) $this->operationId;
     }
 
     public function getServiceId(): ?ObjectId
@@ -47,15 +60,23 @@ final class CommandStartedEvent
         return $this->serviceId;
     }
 
+    public function getServerConnectionId(): ?int
+    {
+        return $this->serverConnectionId;
+    }
+
     public function __debugInfo(): array
     {
         return [
-            'commandName'  => $this->commandName,
-            'databaseName' => $this->databaseName,
-            'command'      => $this->command,
-            'operationId'  => $this->operationId,
-            'requestId'    => $this->requestId,
-            'serviceId'    => $this->serviceId,
+            'host'              => $this->host,
+            'port'              => $this->port,
+            'commandName'       => $this->commandName,
+            'databaseName'      => $this->databaseName,
+            'command'           => $this->command,
+            'operationId'       => (string) $this->operationId,
+            'requestId'         => (string) $this->requestId,
+            'serviceId'         => $this->serviceId,
+            'serverConnectionId' => $this->serverConnectionId,
         ];
     }
 }

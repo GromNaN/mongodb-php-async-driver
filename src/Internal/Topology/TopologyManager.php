@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Topology;
 
+use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
 use MongoDB\Driver\Monitoring\SDAMSubscriber;
+use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Driver\Monitoring\ServerChangedEvent;
 use MongoDB\Driver\Monitoring\ServerClosedEvent;
 use MongoDB\Driver\Monitoring\ServerOpeningEvent;
@@ -21,14 +23,13 @@ use Throwable;
 use function Amp\delay;
 use function array_filter;
 use function array_keys;
+use function array_merge;
 use function array_rand;
 use function array_values;
-use function bin2hex;
 use function count;
 use function implode;
 use function method_exists;
 use function microtime;
-use function random_bytes;
 use function sprintf;
 
 /**
@@ -54,10 +55,12 @@ final class TopologyManager
     private ?string $setName;
 
     /** Unique identifier for this topology instance (for monitoring events). */
-    private string $topologyId;
+    private ObjectId $topologyId;
 
     /** @var list<Subscriber> */
     private array $subscribers = [];
+
+    private bool $started = false;
 
     /**
      * @param array<array{host: string, port: int}> $seeds   Seed server list.
@@ -69,7 +72,7 @@ final class TopologyManager
     ) {
         $this->topologyType = TopologyType::Unknown;
         $this->setName      = $options->replicaSet ?? null;
-        $this->topologyId   = bin2hex(random_bytes(8));
+        $this->topologyId   = new ObjectId();
     }
 
     // -------------------------------------------------------------------------
@@ -79,8 +82,18 @@ final class TopologyManager
     /**
      * Spawn a {@see ServerMonitor} for every seed address and start them.
      */
+    public function isStarted(): bool
+    {
+        return $this->started;
+    }
+
     public function start(): void
     {
+        if ($this->started) {
+            return;
+        }
+
+        $this->started = true;
         $this->fireSdamEvent('topologyOpening', new TopologyOpeningEvent($this->topologyId));
 
         foreach ($this->seeds as $seed) {
@@ -98,11 +111,12 @@ final class TopologyManager
             $this->fireSdamEvent('serverOpening', new ServerOpeningEvent($host, $port, $this->topologyId));
 
             $monitor = new ServerMonitor(
-                host:                   $host,
-                port:                   $port,
-                onUpdate:               fn (InternalServerDescription $sd) => $this->onServerUpdate($sd),
-                heartbeatFrequencyMs:   $this->options->heartbeatFrequencyMS,
+                host:                    $host,
+                port:                    $port,
+                onUpdate:                fn (InternalServerDescription $sd) => $this->onServerUpdate($sd),
+                heartbeatFrequencyMs:    $this->options->heartbeatFrequencyMS,
                 minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
+                onHeartbeat:             fn (string $method, object $event) => $this->fireSdamEvent($method, $event),
             );
 
             $this->monitors[$address] = $monitor;
@@ -146,6 +160,8 @@ final class TopologyManager
         ReadPreference $readPreference,
         ?int $timeoutMs = null,
     ): InternalServerDescription {
+        $this->start();
+
         $timeoutMs ??= $this->options->serverSelectionTimeoutMS;
 
         // Fast path: a suitable server is already known.
@@ -262,11 +278,12 @@ final class TopologyManager
             ));
 
             $monitor = new ServerMonitor(
-                host:                   $knownSd->host,
-                port:                   $knownSd->port,
-                onUpdate:               fn (InternalServerDescription $s) => $this->onServerUpdate($s),
-                heartbeatFrequencyMs:   $this->options->heartbeatFrequencyMS,
+                host:                    $knownSd->host,
+                port:                    $knownSd->port,
+                onUpdate:                fn (InternalServerDescription $s) => $this->onServerUpdate($s),
+                heartbeatFrequencyMs:    $this->options->heartbeatFrequencyMS,
                 minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
+                onHeartbeat:             fn (string $method, object $event) => $this->fireSdamEvent($method, $event),
             );
 
             $this->monitors[$addr] = $monitor;
@@ -371,7 +388,8 @@ final class TopologyManager
      */
     private function fireSdamEvent(string $method, object $event): void
     {
-        foreach ($this->subscribers as $subscriber) {
+        $allSubscribers = array_merge($this->subscribers, GlobalSubscriberRegistry::getAll());
+        foreach ($allSubscribers as $subscriber) {
             if (! ($subscriber instanceof SDAMSubscriber) || ! method_exists($subscriber, $method)) {
                 continue;
             }

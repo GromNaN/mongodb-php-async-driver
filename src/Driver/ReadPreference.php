@@ -3,16 +3,22 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
+use AllowDynamicProperties;
 use MongoDB\BSON\PackedArray;
 use MongoDB\BSON\Serializable;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Exception\UnexpectedValueException;
 use stdClass;
 
+use function array_map;
+use function in_array;
 use function is_array;
-use function is_int;
 use function is_object;
 use function is_string;
+use function strtolower;
+use function trigger_error;
+
+use const E_USER_DEPRECATED;
 
 /**
  * Dynamic-property approach: only non-default properties are set, so
@@ -23,7 +29,7 @@ use function is_string;
  *   $this->maxStalenessSeconds — int (only when != -1)
  *   $this->hedge               — stdClass (only when set)
  */
-#[\AllowDynamicProperties]
+#[AllowDynamicProperties]
 final class ReadPreference implements Serializable
 {
     public const string PRIMARY = 'primary';
@@ -45,10 +51,11 @@ final class ReadPreference implements Serializable
 
     public function __construct(string $mode, ?array $tagSets = null, ?array $options = null)
     {
-        $canonicalMode = self::MODE_MAP[\strtolower($mode)] ?? null;
+        $canonicalMode = self::MODE_MAP[strtolower($mode)] ?? null;
         if ($canonicalMode === null) {
             throw new InvalidArgumentException("Invalid mode: '" . $mode . "'");
         }
+
         $mode = $canonicalMode;
 
         // Validate and convert tagSets
@@ -82,16 +89,19 @@ final class ReadPreference implements Serializable
             if ($mode === self::PRIMARY) {
                 throw new InvalidArgumentException('maxStalenessSeconds may not be used with primary mode');
             }
+
             if ($ms > 2147483647) {
                 throw new InvalidArgumentException(
                     'Expected maxStalenessSeconds to be <= 2147483647, ' . $ms . ' given',
                 );
             }
+
             if ($ms !== self::NO_MAX_STALENESS && $ms < self::SMALLEST_MAX_STALENESS_SECONDS) {
                 throw new InvalidArgumentException(
                     'Expected maxStalenessSeconds to be >= 90, ' . $ms . ' given',
                 );
             }
+
             $maxStalenessSeconds = $ms;
         }
 
@@ -99,9 +109,9 @@ final class ReadPreference implements Serializable
         $hedge = null;
         if (isset($options['hedge'])) {
             $hedgeVal = $options['hedge'];
-            \trigger_error(
+            trigger_error(
                 'MongoDB\Driver\ReadPreference::__construct(): The "hedge" option is deprecated as of MongoDB 8.0 and will be removed in a future release',
-                \E_USER_DEPRECATED,
+                E_USER_DEPRECATED,
             );
 
             if ($hedgeVal instanceof PackedArray) {
@@ -153,7 +163,7 @@ final class ReadPreference implements Serializable
             return [];
         }
 
-        return \array_map(static fn (object $t) => (array) $t, $this->tags);
+        return array_map(static fn (object $t) => (array) $t, $this->tags);
     }
 
     public function getMaxStalenessSeconds(): int
@@ -163,9 +173,9 @@ final class ReadPreference implements Serializable
 
     public function getHedge(): ?object
     {
-        \trigger_error(
+        trigger_error(
             'Method MongoDB\Driver\ReadPreference::getHedge() is deprecated',
-            \E_USER_DEPRECATED,
+            E_USER_DEPRECATED,
         );
 
         return $this->hedge ?? null;
@@ -220,7 +230,7 @@ final class ReadPreference implements Serializable
             );
         }
 
-        if (! \in_array($mode, self::MODE_MAP, true)) {
+        if (! in_array($mode, self::MODE_MAP, true)) {
             throw new InvalidArgumentException(
                 'MongoDB\Driver\ReadPreference initialization requires specific values for "mode" string field',
             );
@@ -231,9 +241,9 @@ final class ReadPreference implements Serializable
         $hedge              = $data['hedge'] ?? null;
 
         if ($hedge !== null) {
-            \trigger_error(
+            trigger_error(
                 'MongoDB\Driver\ReadPreference::__unserialize(): The "hedge" option is deprecated as of MongoDB 8.0 and will be removed in a future release',
-                \E_USER_DEPRECATED,
+                E_USER_DEPRECATED,
             );
         }
 
@@ -252,7 +262,7 @@ final class ReadPreference implements Serializable
         }
 
         // Validate mode value
-        if (! \in_array($mode, self::MODE_MAP, true)) {
+        if (! in_array($mode, self::MODE_MAP, true)) {
             throw new InvalidArgumentException(
                 'MongoDB\Driver\ReadPreference initialization requires specific values for "mode" string field',
             );
@@ -266,6 +276,7 @@ final class ReadPreference implements Serializable
                     'MongoDB\Driver\ReadPreference initialization requires "tags" field to be array',
                 );
             }
+
             foreach ($properties['tags'] as $tagSet) {
                 if (! is_array($tagSet) && ! is_object($tagSet)) {
                     throw new InvalidArgumentException(
@@ -273,16 +284,19 @@ final class ReadPreference implements Serializable
                     );
                 }
             }
+
             if ($properties['tags'] !== [] && $mode === self::PRIMARY) {
                 throw new InvalidArgumentException(
                     'MongoDB\Driver\ReadPreference initialization requires "tags" array field to not be present with "primary" mode',
                 );
             }
+
             // Convert arrays to stdClass
             $normalizedTags = [];
             foreach ($properties['tags'] as $tagSet) {
                 $normalizedTags[] = is_array($tagSet) ? (object) $tagSet : $tagSet;
             }
+
             $tags = $normalizedTags !== [] ? $normalizedTags : null;
         }
 
@@ -295,16 +309,19 @@ final class ReadPreference implements Serializable
                     'MongoDB\Driver\ReadPreference initialization requires "maxStalenessSeconds" field to not be present with "primary" mode',
                 );
             }
+
             if ($ms > 2147483647) {
                 throw new InvalidArgumentException(
                     'MongoDB\Driver\ReadPreference initialization requires "maxStalenessSeconds" integer field to be <= 2147483647',
                 );
             }
+
             if ($ms < self::SMALLEST_MAX_STALENESS_SECONDS && $ms !== self::NO_MAX_STALENESS) {
                 throw new InvalidArgumentException(
                     'MongoDB\Driver\ReadPreference initialization requires "maxStalenessSeconds" integer field to be >= 90',
                 );
             }
+
             $maxStalenessSeconds = $ms;
         }
 
@@ -319,9 +336,9 @@ final class ReadPreference implements Serializable
                 );
             }
 
-            \trigger_error(
+            trigger_error(
                 'MongoDB\Driver\ReadPreference::__set_state(): The "hedge" option is deprecated as of MongoDB 8.0 and will be removed in a future release',
-                \E_USER_DEPRECATED,
+                E_USER_DEPRECATED,
             );
 
             if ($hedgeVal instanceof PackedArray) {
@@ -358,8 +375,10 @@ final class ReadPreference implements Serializable
             $this->maxStalenessSeconds = $maxStalenessSeconds;
         }
 
-        if ($hedge !== null) {
-            $this->hedge = $hedge;
+        if ($hedge === null) {
+            return;
         }
+
+        $this->hedge = $hedge;
     }
 }

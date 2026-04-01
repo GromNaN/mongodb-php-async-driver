@@ -14,7 +14,10 @@ final class CommandSucceededEvent
         private readonly int $requestId,
         private readonly int $operationId,
         private readonly int $durationMicros,
+        private readonly string $host = '',
+        private readonly int $port = 27017,
         private readonly ?ObjectId $serviceId = null,
+        private readonly ?int $serverConnectionId = null,
     ) {
     }
 
@@ -33,14 +36,24 @@ final class CommandSucceededEvent
         return $this->databaseName;
     }
 
-    public function getRequestId(): int
+    public function getHost(): string
     {
-        return $this->requestId;
+        return $this->host;
     }
 
-    public function getOperationId(): int
+    public function getPort(): int
     {
-        return $this->operationId;
+        return $this->port;
+    }
+
+    public function getRequestId(): string
+    {
+        return (string) $this->requestId;
+    }
+
+    public function getOperationId(): string
+    {
+        return (string) $this->operationId;
     }
 
     public function getDurationMicros(): int
@@ -53,16 +66,23 @@ final class CommandSucceededEvent
         return $this->serviceId;
     }
 
+    public function getServerConnectionId(): ?int
+    {
+        return $this->serverConnectionId;
+    }
+
     public function __debugInfo(): array
     {
         return [
-            'commandName'   => $this->commandName,
-            'databaseName'  => $this->databaseName,
-            'reply'         => $this->reply,
-            'operationId'   => $this->operationId,
-            'requestId'     => $this->requestId,
-            'serviceId'     => $this->serviceId,
-            'durationMicros' => $this->durationMicros,
+            'host'               => $this->host,
+            'port'               => $this->port,
+            'commandName'        => $this->commandName,
+            'durationMicros'     => $this->durationMicros,
+            'reply'              => $this->reply,
+            'operationId'        => (string) $this->operationId,
+            'requestId'          => (string) $this->requestId,
+            'serviceId'          => $this->serviceId,
+            'serverConnectionId' => $this->serverConnectionId,
         ];
     }
 }

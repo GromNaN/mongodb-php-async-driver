@@ -3,12 +3,14 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver\Monitoring;
 
+use MongoDB\BSON\ObjectId;
+
 final class ServerClosedEvent
 {
     public function __construct(
         private readonly string $host,
         private readonly int $port,
-        private readonly string $topologyId,
+        private readonly ObjectId $topologyId,
     ) {
     }
 
@@ -22,7 +24,7 @@ final class ServerClosedEvent
         return $this->port;
     }
 
-    public function getTopologyId(): string
+    public function getTopologyId(): ObjectId
     {
         return $this->topologyId;
     }

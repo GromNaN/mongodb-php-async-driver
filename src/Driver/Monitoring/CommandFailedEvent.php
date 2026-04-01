@@ -15,7 +15,11 @@ final class CommandFailedEvent
         private readonly int $requestId,
         private readonly int $operationId,
         private readonly int $durationMicros,
+        private readonly string $host = '',
+        private readonly int $port = 27017,
         private readonly ?ObjectId $serviceId = null,
+        private readonly ?int $serverConnectionId = null,
+        private readonly ?object $reply = null,
     ) {
     }
 
@@ -34,14 +38,24 @@ final class CommandFailedEvent
         return $this->error;
     }
 
-    public function getRequestId(): int
+    public function getHost(): string
     {
-        return $this->requestId;
+        return $this->host;
     }
 
-    public function getOperationId(): int
+    public function getPort(): int
     {
-        return $this->operationId;
+        return $this->port;
+    }
+
+    public function getRequestId(): string
+    {
+        return (string) $this->requestId;
+    }
+
+    public function getOperationId(): string
+    {
+        return (string) $this->operationId;
     }
 
     public function getDurationMicros(): int
@@ -49,21 +63,34 @@ final class CommandFailedEvent
         return $this->durationMicros;
     }
 
+    public function getReply(): object
+    {
+        return $this->reply ?? (object) [];
+    }
+
     public function getServiceId(): ?ObjectId
     {
         return $this->serviceId;
     }
 
+    public function getServerConnectionId(): ?int
+    {
+        return $this->serverConnectionId;
+    }
+
     public function __debugInfo(): array
     {
         return [
-            'commandName'    => $this->commandName,
-            'databaseName'   => $this->databaseName,
-            'error'          => $this->error,
-            'operationId'    => $this->operationId,
-            'requestId'      => $this->requestId,
-            'serviceId'      => $this->serviceId,
-            'durationMicros' => $this->durationMicros,
+            'host'               => $this->host,
+            'port'               => $this->port,
+            'commandName'        => $this->commandName,
+            'durationMicros'     => $this->durationMicros,
+            'error'              => $this->error,
+            'reply'              => $this->reply ?? (object) [],
+            'operationId'        => (string) $this->operationId,
+            'requestId'          => (string) $this->requestId,
+            'serviceId'          => $this->serviceId,
+            'serverConnectionId' => $this->serverConnectionId,
         ];
     }
 }

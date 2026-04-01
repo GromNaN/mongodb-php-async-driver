@@ -10,6 +10,8 @@ use MongoDB\Driver\Command;
 use MongoDB\Driver\CursorInterface;
 use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
+use MongoDB\Driver\Exception\ServerException;
+use MongoDB\Internal\Connection\SyncRunner;
 use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Driver\Monitoring\CommandFailedEvent;
 use MongoDB\Driver\Monitoring\CommandStartedEvent;
@@ -26,6 +28,7 @@ use MongoDB\Driver\WriteConcernError;
 use MongoDB\Driver\WriteError;
 use MongoDB\Driver\WriteResult;
 use MongoDB\Internal\Connection\ConnectionPool;
+use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
 use MongoDB\Internal\Protocol\RequestIdGenerator;
@@ -36,8 +39,10 @@ use Throwable;
 
 use function array_map;
 use function array_merge;
+use function array_search;
 use function array_slice;
 use function array_values;
+use function in_array;
 use function count;
 use function explode;
 use function is_array;
@@ -77,9 +82,43 @@ final class OperationExecutor
     ) {
     }
 
+    public function addSubscriber(Subscriber $subscriber): void
+    {
+        if (in_array($subscriber, $this->subscribers, true)) {
+            return;
+        }
+
+        $this->subscribers[] = $subscriber;
+    }
+
+    public function removeSubscriber(Subscriber $subscriber): void
+    {
+        $key = array_search($subscriber, $this->subscribers, true);
+        if ($key === false) {
+            return;
+        }
+
+        unset($this->subscribers[$key]);
+        $this->subscribers = array_values($this->subscribers);
+    }
+
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
+
+    /**
+     * Start the topology if it has not been started yet.
+     */
+    private function ensureStarted(): void
+    {
+        if ($this->topology->isStarted()) {
+            return;
+        }
+
+        SyncRunner::run(function (): void {
+            $this->topology->start();
+        });
+    }
 
     /**
      * Execute a command and return a cursor over the result set.
@@ -90,6 +129,8 @@ final class OperationExecutor
         ?ReadPreference $readPreference = null,
         ?Session $session = null,
     ): CursorInterface {
+        $this->ensureStarted();
+
         $readPreference ??= new ReadPreference(ReadPreference::PRIMARY);
 
         $server = $this->topology->selectServer($readPreference);
@@ -117,12 +158,16 @@ final class OperationExecutor
         ?ReadPreference $readPreference = null,
         ?Session $session = null,
     ): CursorInterface {
+        $this->ensureStarted();
+
         [$db, $collection] = $this->splitNamespace($namespace);
 
         $readPreference ??= new ReadPreference(ReadPreference::PRIMARY);
 
         // Build a find command from the Query object.
-        $findCmd = ['find' => $collection, 'filter' => $query->getFilter()];
+        // Ensure filter is always a document (object), never a BSON array.
+        $filter  = $query->getFilter();
+        $findCmd = ['find' => $collection, 'filter' => is_array($filter) ? (object) $filter : $filter];
 
         $opts = $query->getOptions();
 
@@ -164,6 +209,8 @@ final class OperationExecutor
         ?WriteConcern $writeConcern = null,
         ?Session $session = null,
     ): WriteResult {
+        $this->ensureStarted();
+
         [$db, $collection] = $this->splitNamespace($namespace);
 
         $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
@@ -437,7 +484,12 @@ final class OperationExecutor
         $requestId = RequestIdGenerator::next();
         $startUs   = (int) (microtime(true) * 1_000_000);
 
-        $this->fireCommandStarted($cmdName, (object) $prepared, $db, $requestId);
+        // Use the server's hello-response connectionId as the serverConnectionId for monitoring events.
+        $serverConnId = isset($server->helloResponse['connectionId'])
+            ? (int) $server->helloResponse['connectionId']
+            : null;
+
+        $this->fireCommandStarted($cmdName, (object) $prepared, $db, $requestId, $server->host, $server->port, $serverConnId);
 
         try {
             [$bytes] = OpMsgEncoder::encodeWithRequestId($prepared);
@@ -445,19 +497,38 @@ final class OperationExecutor
             $responseBytes = $conn->sendMessage($bytes);
             $durationUs    = (int) (microtime(true) * 1_000_000) - $startUs;
 
-            $decoded = OpMsgDecoder::decodeAndCheck($responseBytes);
+            // Decode without automatic error checking so we can capture the
+            // reply body for CommandFailedEvent even when ok != 1.
+            $decoded = OpMsgDecoder::decode($responseBytes);
+            $rawBody = $decoded['body'];
 
             // Normalise body to array for uniform handling.
-            $body = is_array($decoded) ? $decoded : (array) $decoded;
+            $body = is_array($rawBody) ? $rawBody : (array) $rawBody;
+            $ok   = (int) ($body['ok'] ?? 0);
 
-            $this->fireCommandSucceeded($cmdName, (object) $body, $db, $requestId, $durationUs);
+            if ($ok !== 1) {
+                $errmsg = (string) ($body['errmsg'] ?? 'Unknown error');
+                $code   = (int)   ($body['code']   ?? 0);
+                $cmdErr = new CommandException($errmsg, $code);
+
+                // Per PHPC-1990: CommandFailedEvent stores a ServerException (not CommandException).
+                $eventErr = new ServerException($errmsg, $code, (object) $body);
+                $this->fireCommandFailed($cmdName, $eventErr, $db, $requestId, $durationUs, $server->host, $server->port, (object) $body, $serverConnId);
+
+                $pool->release($conn);
+                throw $cmdErr;
+            }
+
+            $this->fireCommandSucceeded($cmdName, (object) $body, $db, $requestId, $durationUs, $server->host, $server->port, $serverConnId);
 
             $pool->release($conn);
 
             return $this->buildCursor($body, $db, $cmdName, $pool, $server);
+        } catch (CommandException $e) {
+            throw $e;
         } catch (Throwable $e) {
             $durationUs = (int) (microtime(true) * 1_000_000) - $startUs;
-            $this->fireCommandFailed($cmdName, $e, $db, $requestId, $durationUs);
+            $this->fireCommandFailed($cmdName, $e, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId);
 
             $pool->release($conn);
 
@@ -671,13 +742,19 @@ final class OperationExecutor
         object $cmd,
         string $db,
         int $requestId,
+        string $host = '',
+        int $port = 27017,
+        ?int $serverConnectionId = null,
     ): void {
         $event = new CommandStartedEvent(
-            commandName: $cmdName,
-            command:     $cmd,
-            databaseName: $db,
-            requestId:   $requestId,
-            operationId: $requestId,
+            commandName:         $cmdName,
+            command:             $cmd,
+            databaseName:        $db,
+            requestId:           $requestId,
+            operationId:         $requestId,
+            host:                $host,
+            port:                $port,
+            serverConnectionId:  $serverConnectionId,
         );
 
         $allSubscribers = array_merge($this->subscribers, GlobalSubscriberRegistry::getAll());
@@ -700,14 +777,20 @@ final class OperationExecutor
         string $db,
         int $requestId,
         int $durationMicros,
+        string $host = '',
+        int $port = 27017,
+        ?int $serverConnectionId = null,
     ): void {
         $event = new CommandSucceededEvent(
-            commandName:  $cmdName,
-            reply:        $reply,
-            databaseName: $db,
-            requestId:    $requestId,
-            operationId:  $requestId,
-            durationMicros: $durationMicros,
+            commandName:         $cmdName,
+            reply:               $reply,
+            databaseName:        $db,
+            requestId:           $requestId,
+            operationId:         $requestId,
+            durationMicros:      $durationMicros,
+            host:                $host,
+            port:                $port,
+            serverConnectionId:  $serverConnectionId,
         );
 
         $allSubscribers = array_merge($this->subscribers, GlobalSubscriberRegistry::getAll());
@@ -730,14 +813,22 @@ final class OperationExecutor
         string $db,
         int $requestId,
         int $durationMicros,
+        string $host = '',
+        int $port = 27017,
+        ?object $reply = null,
+        ?int $serverConnectionId = null,
     ): void {
         $event = new CommandFailedEvent(
-            commandName:  $cmdName,
-            databaseName: $db,
-            error:        $e,
-            requestId:    $requestId,
-            operationId:  $requestId,
-            durationMicros: $durationMicros,
+            commandName:         $cmdName,
+            databaseName:        $db,
+            error:               $e,
+            requestId:           $requestId,
+            operationId:         $requestId,
+            durationMicros:      $durationMicros,
+            host:                $host,
+            port:                $port,
+            serverConnectionId:  $serverConnectionId,
+            reply:               $reply,
         );
 
         $allSubscribers = array_merge($this->subscribers, GlobalSubscriberRegistry::getAll());

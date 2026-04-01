@@ -4,23 +4,33 @@
 
 A pure userland PHP 8.4+ MongoDB driver that replicates the `MongoDB\Driver\*` and `MongoDB\BSON\*` namespaces normally provided by `ext-mongodb`. Async I/O is handled by RevoltPHP (`revolt/event-loop`) and `amphp/socket`.
 
+## Coding standards
+
+The coding style is enforced by PHP_CodeSniffer with the PSR-12 standard.
+Run `./vendor/bin/phpcbf` to automatically fix style issues, then `./vendor/bin/phpcs`
+to identify any remaining issues. All code must pass `phpcs` before committing.
+
+Don't try to follow the CS manually, especially `use` and `use function` statements
+will be written automatically by `phpcbf` in the correct order. If you have to
+manually edit a file, run `phpcbf` on it before committing to ensure the style is correct.
+
 ## Running tests
 
-`ext-mongodb` must not be active. Always prefix commands with `PHP_INI_SCAN_DIR=""`:
+`ext-mongodb` must not be active. Check using `php --ri mongodb`
 
 ```bash
 # Unit tests (no database needed)
-PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox --testsuite unit
+./vendor/bin/phpunit --testdox --testsuite unit
 
 # Integration tests (MongoDB on localhost:27017)
-PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox --testsuite integration
+./vendor/bin/phpunit --testdox --testsuite integration
 
 # ext-mongodb phpt compatibility tests (all)
-PHP_INI_SCAN_DIR="" bash tests/run-phpt.sh
+tests/run-phpt.sh
 
 # phpt — subset via glob(s) relative to tests/references/mongo-php-driver/tests/
-PHP_INI_SCAN_DIR="" bash tests/run-phpt.sh 'bson/bson-objectid-*.phpt'
-PHP_INI_SCAN_DIR="" bash tests/run-phpt.sh 'bson/bson-utcdatetime-*.phpt' 'bson/bson-binary-*.phpt'
+tests/run-phpt.sh 'bson/bson-objectid-*.phpt'
+tests/run-phpt.sh 'bson/bson-utcdatetime-*.phpt' 'bson/bson-binary-*.phpt'
 ```
 
 Run tests after every non-trivial change. Commit only when all tests pass.

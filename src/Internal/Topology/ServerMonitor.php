@@ -6,6 +6,9 @@ namespace MongoDB\Internal\Topology;
 
 use Closure;
 use MongoDB\Driver\Exception\ConnectionException;
+use MongoDB\Driver\Monitoring\ServerHeartbeatFailedEvent;
+use MongoDB\Driver\Monitoring\ServerHeartbeatStartedEvent;
+use MongoDB\Driver\Monitoring\ServerHeartbeatSucceededEvent;
 use MongoDB\Internal\Connection\Connection;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
@@ -35,11 +38,12 @@ final class ServerMonitor
     private ?Connection $connection = null;
 
     /**
-     * @param string  $host                    Hostname or IP of the target server.
-     * @param int     $port                    TCP port.
-     * @param Closure $onUpdate                Called with {@see InternalServerDescription} after each check.
-     * @param int     $heartbeatFrequencyMs    Interval between successive checks (default 10 s).
-     * @param int     $minHeartbeatFrequencyMs Minimum wait between checks after a failure (default 500 ms).
+     * @param string       $host                    Hostname or IP of the target server.
+     * @param int          $port                    TCP port.
+     * @param Closure      $onUpdate                Called with {@see InternalServerDescription} after each check.
+     * @param int          $heartbeatFrequencyMs    Interval between successive checks (default 10 s).
+     * @param int          $minHeartbeatFrequencyMs Minimum wait between checks after a failure (default 500 ms).
+     * @param Closure|null $onHeartbeat             Called with (string $method, object $event) for heartbeat events.
      */
     public function __construct(
         private string $host,
@@ -47,6 +51,7 @@ final class ServerMonitor
         private Closure $onUpdate,
         private int $heartbeatFrequencyMs = 10_000,
         private int $minHeartbeatFrequencyMs = 500,
+        private ?Closure $onHeartbeat = null,
     ) {
     }
 
@@ -146,6 +151,12 @@ final class ServerMonitor
     {
         $startUs = (int) (microtime(true) * 1_000_000);
 
+        $this->fireHeartbeat('serverHeartbeatStarted', new ServerHeartbeatStartedEvent(
+            host:    $this->host,
+            port:    $this->port,
+            awaited: false,
+        ));
+
         try {
             $conn = $this->getConnection();
 
@@ -155,13 +166,33 @@ final class ServerMonitor
             $responseBytes = $conn->sendMessage($bytes);
             $endUs         = (int) (microtime(true) * 1_000_000);
             $rttMs         = (int) (($endUs - $startUs) / 1_000);
+            $durationUs    = $endUs - $startUs;
 
             $decoded  = OpMsgDecoder::decode($responseBytes);
             $body     = $decoded['body'];
             $response = is_array($body) ? $body : (array) $body;
 
+            $this->fireHeartbeat('serverHeartbeatSucceeded', new ServerHeartbeatSucceededEvent(
+                host:           $this->host,
+                port:           $this->port,
+                durationMicros: $durationUs,
+                reply:          (object) $response,
+                awaited:        false,
+            ));
+
             return InternalServerDescription::fromHello($this->host, $this->port, $response, $rttMs);
         } catch (Throwable $e) {
+            $endUs      = (int) (microtime(true) * 1_000_000);
+            $durationUs = $endUs - $startUs;
+
+            $this->fireHeartbeat('serverHeartbeatFailed', new ServerHeartbeatFailedEvent(
+                host:           $this->host,
+                port:           $this->port,
+                durationMicros: $durationUs,
+                error:          $e,
+                awaited:        false,
+            ));
+
             // Discard the broken connection so the next check opens a fresh one.
             $this->closeConnection();
 
@@ -172,6 +203,13 @@ final class ServerMonitor
                 host: $this->host,
                 port: $this->port,
             ))->withError($e);
+        }
+    }
+
+    private function fireHeartbeat(string $method, object $event): void
+    {
+        if ($this->onHeartbeat !== null) {
+            ($this->onHeartbeat)($method, $event);
         }
     }
 
