@@ -47,10 +47,16 @@ final class Manager
             throw new InvalidArgumentException($e->getMessage(), 0, $e);
         }
 
+        // Normalize user-provided URI option keys to camelCase before merging
+        $normalizedUriOptions = [];
+        foreach ($uriOptions ?? [] as $key => $value) {
+            $normalizedUriOptions[ConnectionString::normalizeOptionKey((string) $key)] = $value;
+        }
+
         // Merge URI options from connection string with overrides
         $mergedOptions = array_merge(
             $this->connectionString->getOptions(),
-            $uriOptions ?? [],
+            $normalizedUriOptions,
         );
         $this->uriOptions = UriOptions::fromArray($mergedOptions);
 
@@ -272,15 +278,16 @@ final class Manager
 
     private function buildWriteConcern(array $options): WriteConcern
     {
-        if (! isset($options['w']) && ! isset($options['wTimeoutMS']) && ! isset($options['journal'])) {
-            return new WriteConcern(1); // default: w=1
+        $w        = $options['w'] ?? null;
+        $wtimeout = isset($options['wTimeoutMS']) ? (int) $options['wTimeoutMS'] : null;
+        $journal  = $options['journal'] ?? null;
+
+        // Empty string w or no w/wtimeout/journal at all → driver default
+        if ($w === '' || ($w === null && $wtimeout === null && $journal === null)) {
+            return WriteConcern::createDefault();
         }
 
-        $w = $options['w'] ?? 1;
-        $wtimeout = isset($options['wTimeoutMS']) ? (int) $options['wTimeoutMS'] : 0;
-        $journal = $options['journal'] ?? null;
-
-        return new WriteConcern($w, $wtimeout, $journal);
+        return new WriteConcern($w ?? -2, $wtimeout ?? 0, $journal);
     }
 
     private function buildReadConcern(array $options): ReadConcern

@@ -91,6 +91,7 @@ final class ConnectionString
         'journal'                    => 'journal',
         'readpreference'             => 'readPreference',
         'readpreferencetags'         => 'readPreferenceTags',
+        'readconcernlevel'           => 'readConcernLevel',
         'ssl'                        => 'ssl',
         'tls'                        => 'tls',
         'tlscafile'                  => 'tlsCAFile',
@@ -420,9 +421,9 @@ final class ConnectionString
     }
 
     /**
-     * Map a raw (possibly differently-cased) option key to its canonical form.
+     * Map a raw (possibly differently-cased) option key to its canonical camelCase form.
      */
-    private function normalizeOptionKey(string $rawKey): string
+    public static function normalizeOptionKey(string $rawKey): string
     {
         $lower = strtolower($rawKey);
 

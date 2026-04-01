@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Operation;
 
+use MongoDB\BSON\Int64;
 use MongoDB\Driver\BulkWrite;
 use MongoDB\Driver\Command;
 use MongoDB\Driver\CursorInterface;
+use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
 use MongoDB\Driver\Monitoring\CommandFailedEvent;
 use MongoDB\Driver\Monitoring\CommandStartedEvent;
@@ -30,9 +32,6 @@ use MongoDB\Internal\Topology\InternalServerDescription;
 use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\UriOptions;
 use Throwable;
-
-use MongoDB\BSON\Int64;
-use stdClass;
 
 use function array_map;
 use function array_slice;
@@ -180,25 +179,31 @@ final class OperationExecutor
         $upsertedIds    = [];
         $writeErrors    = [];
         $wcError        = null;
-        $acknowledged   = true;
+        $acknowledged   = $writeConcern === null || $writeConcern->getW() !== 0;
 
         // Group operations into insert / update / delete batches to minimise
         // round-trips.  For ordered bulk writes we send each type sequentially
         // to preserve ordering semantics; for unordered we collect into three
         // separate commands.
-        $inserts = [];
-        $updates = [];
-        $deletes = [];
+        $inserts              = [];
+        $updates              = [];
+        $deletes              = [];
+        $insertGlobalIndices  = [];
+        $updateGlobalIndices  = [];
+        $deleteGlobalIndices  = [];
 
-        foreach ($operations as $op) {
+        foreach ($operations as $globalIdx => $op) {
             [$type] = $op;
 
             if ($type === 'insert') {
-                $inserts[] = $op;
+                $inserts[]             = $op;
+                $insertGlobalIndices[] = $globalIdx;
             } elseif ($type === 'update') {
-                $updates[] = $op;
+                $updates[]             = $op;
+                $updateGlobalIndices[] = $globalIdx;
             } elseif ($type === 'delete') {
-                $deletes[] = $op;
+                $deletes[]             = $op;
+                $deleteGlobalIndices[] = $globalIdx;
             }
         }
 
@@ -215,21 +220,24 @@ final class OperationExecutor
 
             try {
                 $cursor = $this->sendCommand($pool, $db, 'insert', $insertCmd, $server);
-                $result = iterator_to_array($cursor)[0] ?? [];
+                $result = (array) (iterator_to_array($cursor)[0] ?? []);
 
                 $totalInserted += (int) ($result['n'] ?? count($docs));
                 $acknowledged   = ! ($result['acknowledged'] ?? true) ? false : $acknowledged;
 
                 foreach ((array) ($result['writeErrors'] ?? []) as $e) {
+                    $e         = (array) $e;
+                    $localIdx  = (int) ($e['index'] ?? 0);
+                    $globalIdx = $insertGlobalIndices[$localIdx] ?? $localIdx;
                     $writeErrors[] = new WriteError(
-                        code:    (int) ($e['code']    ?? 0),
-                        index:   (int) ($e['index']   ?? 0),
-                        message: (string) ($e['errmsg']  ?? ''),
+                        code:    (int) ($e['code']   ?? 0),
+                        index:   $globalIdx,
+                        message: (string) ($e['errmsg'] ?? ''),
                     );
                 }
 
                 if (isset($result['writeConcernError'])) {
-                    $wce     = $result['writeConcernError'];
+                    $wce     = (array) $result['writeConcernError'];
                     $wcError = new WriteConcernError(
                         code:    (int) ($wce['code']   ?? 0),
                         message: (string) ($wce['errmsg'] ?? ''),
@@ -280,27 +288,33 @@ final class OperationExecutor
 
             try {
                 $cursor = $this->sendCommand($pool, $db, 'update', $updateCmd, $server);
-                $result = iterator_to_array($cursor)[0] ?? [];
+                $result = (array) (iterator_to_array($cursor)[0] ?? []);
 
-                $totalMatched  += (int) ($result['n']        ?? 0);
+                $upsertedInBatch = (array) ($result['upserted'] ?? []);
+                $totalMatched  += (int) ($result['n'] ?? 0) - count($upsertedInBatch);
                 $totalModified += (int) ($result['nModified'] ?? 0);
 
-                foreach ((array) ($result['upserted'] ?? []) as $upserted) {
-                    $idx                = (int) $upserted['index'];
-                    $upsertedIds[$idx]  = $upserted['_id'];
+                foreach ($upsertedInBatch as $upserted) {
+                    $upserted  = (array) $upserted;
+                    $localIdx  = (int) $upserted['index'];
+                    $globalIdx = $updateGlobalIndices[$localIdx] ?? $localIdx;
+                    $upsertedIds[$globalIdx] = $upserted['_id'];
                     ++$totalUpserted;
                 }
 
                 foreach ((array) ($result['writeErrors'] ?? []) as $e) {
+                    $e         = (array) $e;
+                    $localIdx  = (int) ($e['index'] ?? 0);
+                    $globalIdx = $updateGlobalIndices[$localIdx] ?? $localIdx;
                     $writeErrors[] = new WriteError(
                         code:    (int) ($e['code']   ?? 0),
-                        index:   (int) ($e['index']  ?? 0),
+                        index:   $globalIdx,
                         message: (string) ($e['errmsg'] ?? ''),
                     );
                 }
 
                 if (isset($result['writeConcernError']) && $wcError === null) {
-                    $wce     = $result['writeConcernError'];
+                    $wce     = (array) $result['writeConcernError'];
                     $wcError = new WriteConcernError(
                         code:    (int) ($wce['code']   ?? 0),
                         message: (string) ($wce['errmsg'] ?? ''),
@@ -340,20 +354,23 @@ final class OperationExecutor
 
             try {
                 $cursor = $this->sendCommand($pool, $db, 'delete', $deleteCmd, $server);
-                $result = iterator_to_array($cursor)[0] ?? [];
+                $result = (array) (iterator_to_array($cursor)[0] ?? []);
 
                 $totalDeleted += (int) ($result['n'] ?? 0);
 
                 foreach ((array) ($result['writeErrors'] ?? []) as $e) {
+                    $e         = (array) $e;
+                    $localIdx  = (int) ($e['index'] ?? 0);
+                    $globalIdx = $deleteGlobalIndices[$localIdx] ?? $localIdx;
                     $writeErrors[] = new WriteError(
                         code:    (int) ($e['code']   ?? 0),
-                        index:   (int) ($e['index']  ?? 0),
+                        index:   $globalIdx,
                         message: (string) ($e['errmsg'] ?? ''),
                     );
                 }
 
                 if (isset($result['writeConcernError']) && $wcError === null) {
-                    $wce     = $result['writeConcernError'];
+                    $wce     = (array) $result['writeConcernError'];
                     $wcError = new WriteConcernError(
                         code:    (int) ($wce['code']   ?? 0),
                         message: (string) ($wce['errmsg'] ?? ''),
@@ -369,7 +386,7 @@ final class OperationExecutor
         // Build the public Server object for WriteResult.
         $publicServer = $this->buildPublicServer($server);
 
-        return WriteResult::createFromInternal(
+        $writeResult = WriteResult::createFromInternal(
             insertedCount:   $totalInserted,
             matchedCount:    $totalMatched,
             modifiedCount:   $totalModified,
@@ -380,7 +397,19 @@ final class OperationExecutor
             writeConcernError: $wcError,
             writeErrors:     $writeErrors,
             acknowledged:    $acknowledged,
+            writeConcern:    $writeConcern,
         );
+
+        if ($writeErrors !== []) {
+            $firstError = $writeErrors[0];
+            throw new BulkWriteException(
+                message:        $firstError->getMessage(),
+                code:           $firstError->getCode(),
+                writeResult:    $writeResult,
+            );
+        }
+
+        return $writeResult;
     }
 
     // -------------------------------------------------------------------------
@@ -519,6 +548,18 @@ final class OperationExecutor
                     return isset($this->buffer[$this->position]);
                 }
 
+                public function toArray(): array
+                {
+                    $this->rewind();
+                    $result = [];
+                    while ($this->valid()) {
+                        $result[] = $this->current();
+                        $this->next();
+                    }
+
+                    return $result;
+                }
+
                 private function fetchNextBatch(): void
                 {
                     $conn = $this->pool->acquire();
@@ -554,7 +595,8 @@ final class OperationExecutor
         }
 
         // Non-cursor commands: return the single response document as a one-element cursor.
-        return new class ([$body]) implements CursorInterface {
+        // Wrap as stdClass so cursor->toArray()[0] returns an object, matching ext-mongodb behaviour.
+        return new class ([(object) $body]) implements CursorInterface {
             private int $position = 0;
 
             public function __construct(private readonly array $items)
@@ -584,6 +626,11 @@ final class OperationExecutor
             public function valid(): bool
             {
                 return isset($this->items[$this->position]);
+            }
+
+            public function toArray(): array
+            {
+                return $this->items;
             }
         };
     }

@@ -6,6 +6,7 @@ namespace MongoDB\BSON;
 
 use ArrayAccess;
 use IteratorAggregate;
+use JsonException;
 use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
 use MongoDB\Driver\Exception\LogicException as DriverLogicException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
@@ -41,9 +42,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     /** Base64-encoded raw BSON bytes — public for get_object_vars() / var_export() compat. */
     public readonly string $data;
 
-    /**
-     * @var WeakMap<static, array<int, mixed>>|null
-     */
+    /** @var WeakMap<static, array<int, mixed>>|null */
     private static ?WeakMap $decodedCache = null;
 
     // ------------------------------------------------------------------
@@ -65,13 +64,16 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
         if ($len < 4) {
             throw new DriverUnexpectedValueException('Could not read document from BSON reader');
         }
+
         $claimed = unpack('V', substr($bson, 0, 4))[1];
         if ($claimed < 5) {
             throw new DriverUnexpectedValueException('Could not read document from BSON reader');
         }
+
         if ($claimed > $len) {
             throw new DriverUnexpectedValueException('Could not read document from BSON reader');
         }
+
         if ($claimed < $len) {
             throw new DriverUnexpectedValueException('Reading document did not exhaust input buffer');
         }
@@ -83,7 +85,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     {
         try {
             $phpValue = json_decode($json, associative: true, flags: JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
+        } catch (JsonException $e) {
             throw new DriverUnexpectedValueException(
                 sprintf('Got parse error at "%s", position 1: "SPECIAL_EXPECTED"', substr($json, 0, 1)),
                 previous: $e,

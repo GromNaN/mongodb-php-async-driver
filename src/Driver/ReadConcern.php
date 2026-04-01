@@ -3,9 +3,19 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
+use AllowDynamicProperties;
 use MongoDB\BSON\Serializable;
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use stdClass;
 
+use function is_string;
+
+/**
+ * Dynamic-property approach: the public "level" property is only set when
+ * the level is non-null, so var_dump / var_export both produce an empty
+ * object when no level is given.
+ */
+#[AllowDynamicProperties]
 final class ReadConcern implements Serializable
 {
     public const string LINEARIZABLE = 'linearizable';
@@ -14,25 +24,30 @@ final class ReadConcern implements Serializable
     public const string AVAILABLE = 'available';
     public const string SNAPSHOT = 'snapshot';
 
-    public function __construct(private ?string $level = null)
+    public function __construct(?string $level = null)
     {
+        if ($level === null) {
+            return;
+        }
+
+        $this->level = $level;
     }
 
     public function getLevel(): ?string
     {
-        return $this->level;
+        return $this->level ?? null;
     }
 
     public function isDefault(): bool
     {
-        return $this->level === null;
+        return ! isset($this->level);
     }
 
     public function bsonSerialize(): stdClass
     {
         $doc = new stdClass();
 
-        if ($this->level !== null) {
+        if (isset($this->level)) {
             $doc->level = $this->level;
         }
 
@@ -41,21 +56,36 @@ final class ReadConcern implements Serializable
 
     public function __serialize(): array
     {
+        if (! isset($this->level)) {
+            return [];
+        }
+
         return ['level' => $this->level];
     }
 
     public function __unserialize(array $data): void
     {
-        $this->level = $data['level'] ?? null;
+        if (! isset($data['level'])) {
+            return;
+        }
+
+        if (! is_string($data['level'])) {
+            throw new InvalidArgumentException('MongoDB\Driver\ReadConcern initialization requires "level" string field');
+        }
+
+        $this->level = $data['level'];
     }
 
     public static function __set_state(array $properties): static
     {
-        return new static($properties['level'] ?? null);
-    }
+        if (isset($properties['level'])) {
+            if (! is_string($properties['level'])) {
+                throw new InvalidArgumentException('MongoDB\Driver\ReadConcern initialization requires "level" string field');
+            }
 
-    public function __debugInfo(): array
-    {
-        return ['level' => $this->level];
+            return new static($properties['level']);
+        }
+
+        return new static(null);
     }
 }

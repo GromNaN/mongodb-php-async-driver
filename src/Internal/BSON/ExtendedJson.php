@@ -42,6 +42,7 @@ use function sprintf;
 use function str_contains;
 
 use const INF;
+use const JSON_PRESERVE_ZERO_FRACTION;
 use const JSON_THROW_ON_ERROR;
 use const JSON_UNESCAPED_SLASHES;
 use const JSON_UNESCAPED_UNICODE;
@@ -433,7 +434,7 @@ final class ExtendedJson
 
             // Relaxed: use ISO-8601 date string; omit milliseconds when zero
             $dt = $v->toDateTime();
-            $fmt = ((int) $dt->format('v') === 0) ? 'Y-m-d\TH:i:s\Z' : 'Y-m-d\TH:i:s.v\Z';
+            $fmt = (int) $dt->format('v') === 0 ? 'Y-m-d\TH:i:s\Z' : 'Y-m-d\TH:i:s.v\Z';
 
             return ['$date' => $dt->format($fmt)];
         }

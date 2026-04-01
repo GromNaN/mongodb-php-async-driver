@@ -7,4 +7,5 @@ use Iterator;
 
 interface CursorInterface extends Iterator
 {
+    public function toArray(): array;
 }

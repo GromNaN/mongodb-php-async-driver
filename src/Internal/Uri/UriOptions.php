@@ -24,6 +24,8 @@ use function mb_check_encoding;
 use function sprintf;
 use function trigger_error;
 
+use const E_USER_WARNING;
+
 /**
  * Validated, strongly-typed DTO for MongoDB URI options.
  *

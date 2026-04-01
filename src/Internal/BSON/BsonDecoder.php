@@ -24,9 +24,11 @@ use MongoDB\BSON\UTCDateTime;
 use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
 use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueException;
 use ReflectionClass;
+use ReflectionException;
 use RuntimeException;
 use stdClass;
 
+use function array_key_exists;
 use function array_merge;
 use function bin2hex;
 use function class_exists;
@@ -96,9 +98,11 @@ final class BsonDecoder
     ): array|object {
         // Resolve null type map values to defaults
         foreach ($typeMap as $k => $v) {
-            if ($v === null) {
-                unset($typeMap[$k]);
+            if ($v !== null) {
+                continue;
             }
+
+            unset($typeMap[$k]);
         }
 
         // Compute Persistable-suppression flags from the filtered typeMap BEFORE merging with
@@ -196,7 +200,7 @@ final class BsonDecoder
 
         // Resolve 'bson' shorthand based on context (root is handled in callers)
         if ($targetType === 'bson' && $context !== 'root') {
-            $targetType = ($context === 'array') ? 'bsonArray' : 'bsonDocument';
+            $targetType = $context === 'array' ? 'bsonArray' : 'bsonDocument';
         }
 
         // Short-circuit for array/BSON-typed targets: no Persistable detection
@@ -217,7 +221,7 @@ final class BsonDecoder
         // 0x80) whose class name implements Persistable, use that class regardless of type map.
         if (
             $handlePersistable
-            && !$persistableDisabled
+            && ! $persistableDisabled
             && isset($fields['__pclass'])
             && $fields['__pclass'] instanceof Binary
             && $fields['__pclass']->getType() === Binary::TYPE_USER_DEFINED
@@ -228,6 +232,7 @@ final class BsonDecoder
                 if ($rc->isInstantiable() && $rc->implementsInterface(Persistable::class)) {
                     $obj = $rc->newInstanceWithoutConstructor();
                     $obj->bsonUnserialize($fields); // pass ALL fields including __pclass
+
                     return $obj;
                 }
             }
@@ -598,7 +603,7 @@ final class BsonDecoder
     {
         try {
             $rc = new ReflectionClass($className);
-        } catch (\ReflectionException) {
+        } catch (ReflectionException) {
             throw new DriverInvalidArgumentException(
                 sprintf('Class %s does not exist', $className),
             );
@@ -606,6 +611,7 @@ final class BsonDecoder
 
         if (! $rc->isInstantiable()) {
             $kind = $rc->isInterface() ? 'Interface' : 'Abstract class';
+
             throw new DriverInvalidArgumentException(
                 sprintf('%s %s is not instantiatable', $kind, $className),
             );
