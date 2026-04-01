@@ -7,6 +7,14 @@ use MongoDB\Driver\Exception\RuntimeException;
 
 final class ClientEncryption
 {
+    public const string AEAD_AES_256_CBC_HMAC_SHA_512_DETERMINISTIC = 'AEAD_AES_256_CBC_HMAC_SHA_512-Deterministic';
+    public const string AEAD_AES_256_CBC_HMAC_SHA_512_RANDOM        = 'AEAD_AES_256_CBC_HMAC_SHA_512-Random';
+    public const string ALGORITHM_INDEXED                           = 'Indexed';
+    public const string ALGORITHM_UNINDEXED                         = 'Unindexed';
+    public const string ALGORITHM_RANGE                             = 'Range';
+    public const string QUERY_TYPE_EQUALITY                         = 'equality';
+    public const string QUERY_TYPE_RANGE                            = 'range';
+
     private function __construct()
     {
     }
