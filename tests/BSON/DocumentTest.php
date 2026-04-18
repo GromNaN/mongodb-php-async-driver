@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace MongoDB\Tests\BSON;
 
-use BadMethodCallException;
 use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
+use MongoDB\Driver\Exception\LogicException;
 use MongoDB\Internal\BSON\BsonEncoder;
 use PHPUnit\Framework\TestCase;
 
@@ -87,7 +87,7 @@ class DocumentTest extends TestCase
 
     public function testOffsetSetThrows(): void
     {
-        $this->expectException(BadMethodCallException::class);
+        $this->expectException(LogicException::class);
 
         $doc         = Document::fromPHP(['key' => 'val']);
         $doc['key']  = 'new_value';
