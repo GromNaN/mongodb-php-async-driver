@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace MongoDB\Tests\BSON;
 
-use Generator;
 use MongoDB\BSON\Document;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Throwable;
 
@@ -17,6 +17,7 @@ use function array_keys;
 use function array_map;
 use function array_merge;
 use function basename;
+use function dirname;
 use function file_get_contents;
 use function glob;
 use function hex2bin;
@@ -44,7 +45,7 @@ final class CorpusTest extends TestCase
         $this->markTestSkipped(self::$skippedTests[$this->dataName()]);
     }
 
-    /** @dataProvider provideValidTests */
+    #[DataProvider('provideValidTests')]
     public function testCanonicalBsonToCanonicalExtendedJson(
         string $canonicalBson,
         string $canonicalExtJson,
@@ -64,7 +65,7 @@ final class CorpusTest extends TestCase
         );
     }
 
-    /** @dataProvider provideValidTestsWithRelaxedExtendedJson */
+    #[DataProvider('provideValidTestsWithRelaxedExtendedJson')]
     public function testCanonicalBsonToRelaxedExtendedJson(
         string $canonicalBson,
         string $canonicalExtJson,
@@ -72,7 +73,7 @@ final class CorpusTest extends TestCase
         string $degenerateBson,
         string $degenerateExtJson,
         string $convertedBson,
-        string $convertedExtjson,
+        string $convertedExtJson,
         bool $lossy,
     ): void {
         $document = Document::fromBSON(hex2bin($canonicalBson));
@@ -84,7 +85,7 @@ final class CorpusTest extends TestCase
         );
     }
 
-    /** @dataProvider provideDegenerateBsonTests */
+    #[DataProvider('provideDegenerateBsonTests')]
     public function testDegenerateBsonToCanonicalExtendedJson(
         string $canonicalBson,
         string $canonicalExtJson,
@@ -103,7 +104,7 @@ final class CorpusTest extends TestCase
         );
     }
 
-    /** @dataProvider provideValidTests */
+    #[DataProvider('provideValidTests')]
     public function testCanonicalExtendedJsonToCanonicalBson(
         string $canonicalBson,
         string $canonicalExtJson,
@@ -126,7 +127,7 @@ final class CorpusTest extends TestCase
         self::assertSame(hex2bin($canonicalBson), (string) $document);
     }
 
-    /** @dataProvider provideValidTestsWithDegenerateExtJson */
+    #[DataProvider('provideValidTestsWithDegenerateExtJson')]
     public function testDegenerateExtendedJsonToCanonicalBson(
         string $canonicalBson,
         string $canonicalExtJson,
@@ -145,7 +146,7 @@ final class CorpusTest extends TestCase
         self::assertSame(hex2bin($canonicalBson), (string) $document);
     }
 
-    /** @dataProvider provideValidTestsWithRelaxedExtendedJson */
+    #[DataProvider('provideValidTestsWithRelaxedExtendedJson')]
     public function testRelaxedExtendedJsonRoundTripping(
         string $canonicalBson,
         string $canonicalExtJson,
@@ -164,7 +165,7 @@ final class CorpusTest extends TestCase
         );
     }
 
-    /** @dataProvider provideParseErrorTests */
+    #[DataProvider('provideParseErrorTests')]
     public function testParseErrors(string $bsonType, string $string): void
     {
         if ($bsonType === '0x13') {
@@ -182,23 +183,30 @@ final class CorpusTest extends TestCase
         Document::fromJSON($string);
     }
 
-    public static function provideDegenerateBsonTests(): array
+    #[DataProvider('provideDecodeErrorTests')]
+    public function testDecodeErrors(string $bson): void
+    {
+        $this->expectException(Throwable::class);
+        Document::fromBSON($bson);
+    }
+
+    public static function provideDegenerateBsonTests(): iterable
     {
         return array_filter(
             self::provideValidTests(),
-            static fn (array $test): bool => $test['degenerate_bson'] !== '',
+            static fn (array $test): bool => $test['degenerateBson'] !== '',
         );
     }
 
-    public static function provideValidTestsWithDegenerateExtJson(): array
+    public static function provideValidTestsWithDegenerateExtJson(): iterable
     {
         return array_filter(
             self::provideValidTests(),
-            static fn (array $test): bool => $test['degenerate_extjson'] !== '',
+            static fn (array $test): bool => $test['degenerateExtJson'] !== '',
         );
     }
 
-    public static function provideParseErrorTests(): array
+    public static function provideParseErrorTests(): iterable
     {
         $tests = [];
 
@@ -218,45 +226,50 @@ final class CorpusTest extends TestCase
         return $tests;
     }
 
-    public static function provideValidTests(): array
+    public static function provideValidTests(): iterable
     {
         $emptyTest = [
-            'canonical_bson'    => '',
-            'canonical_extjson' => '',
-            'relaxed_extjson'   => '',
-            'degenerate_bson'   => '',
-            'degenerate_extjson' => '',
-            'converted_bson'    => '',
-            'converted_extjson' => '',
-            'lossy'             => false,
+            'canonicalBson'    => '',
+            'canonicalExtJson' => '',
+            'relaxedExtJson'   => '',
+            'degenerateBson'   => '',
+            'degenerateExtJson' => '',
+            'convertedBson'    => '',
+            'convertedExtJson' => '',
+            'lossy'            => false,
         ];
 
         return array_map(
-            static fn (array $test) => array_intersect_key(array_merge($emptyTest, $test), $emptyTest),
+            static fn (array $test) => array_intersect_key(
+                array_merge($emptyTest, [
+                    'canonicalBson'    => $test['canonical_bson'] ?? '',
+                    'canonicalExtJson' => $test['canonical_extjson'] ?? '',
+                    'relaxedExtJson'   => $test['relaxed_extjson'] ?? '',
+                    'degenerateBson'   => $test['degenerate_bson'] ?? '',
+                    'degenerateExtJson' => $test['degenerate_extjson'] ?? '',
+                    'convertedBson'    => $test['converted_bson'] ?? '',
+                    'convertedExtJson' => $test['converted_extjson'] ?? '',
+                    'lossy'            => $test['lossy'] ?? false,
+                ]),
+                $emptyTest,
+            ),
             self::provideTests('valid'),
         );
     }
 
-    public function provideValidTestsWithRelaxedExtendedJson(): array
+    public static function provideValidTestsWithRelaxedExtendedJson(): iterable
     {
         return array_filter(
             self::provideValidTests(),
-            static fn (array $test): bool => ($test['relaxed_extjson'] ?? '') !== '',
+            static fn (array $test): bool => ($test['relaxedExtJson'] ?? '') !== '',
         );
     }
 
-    /** @dataProvider provideDecodeErrorTests */
-    public function testDecodeErrors(string $bson): void
-    {
-        $this->expectException(Throwable::class);
-        Document::fromBSON($bson);
-    }
-
-    public static function provideDecodeErrorTests(): Generator
+    public static function provideDecodeErrorTests(): iterable
     {
         $emptyTest = ['bson' => ''];
 
-        yield from array_map(
+        return array_map(
             static fn (array $test) => array_intersect_key(array_merge($emptyTest, $test), $emptyTest),
             self::provideTests('decodeErrors'),
         );
