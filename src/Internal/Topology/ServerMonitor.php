@@ -208,9 +208,11 @@ final class ServerMonitor
 
     private function fireHeartbeat(string $method, object $event): void
     {
-        if ($this->onHeartbeat !== null) {
-            ($this->onHeartbeat)($method, $event);
+        if ($this->onHeartbeat === null) {
+            return;
         }
+
+        ($this->onHeartbeat)($method, $event);
     }
 
     // -------------------------------------------------------------------------

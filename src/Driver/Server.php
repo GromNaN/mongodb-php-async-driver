@@ -230,7 +230,7 @@ final class Server
     /**
      * Validate a subset of options, throwing InvalidArgumentException for type mismatches.
      *
-     * @param list<string> $keys  Options to validate.
+     * @param list<string> $keys Options to validate.
      */
     private static function validateOptions(array $options, array $keys): void
     {

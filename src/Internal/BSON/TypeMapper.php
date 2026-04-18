@@ -56,7 +56,7 @@ final class TypeMapper
 
         // Resolve 'bson' shorthand to concrete BSON type based on context.
         if ($targetType === 'bson') {
-            $targetType = ($context === 'array') ? 'bsonArray' : 'bsonDocument';
+            $targetType = $context === 'array' ? 'bsonArray' : 'bsonDocument';
         }
 
         // Recursively apply typeMap to children before converting the container

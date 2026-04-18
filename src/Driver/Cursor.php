@@ -14,6 +14,7 @@ use ReflectionClass;
 use Throwable;
 
 use function array_is_list;
+use function array_key_exists;
 use function class_exists;
 use function count;
 use function interface_exists;
@@ -252,6 +253,7 @@ final class Cursor implements CursorInterface
             $this->exhausted = ($newCursorId === 0);
         } catch (Throwable $e) {
             $this->exhausted = true;
+
             throw $e;
         }
     }
@@ -265,14 +267,18 @@ final class Cursor implements CursorInterface
     private function validateTypeMap(array $typemap): void
     {
         foreach (['root', 'document', 'array'] as $key) {
-            if (isset($typemap[$key])) {
-                $this->validateTypeMapValue($typemap[$key]);
+            if (! isset($typemap[$key])) {
+                continue;
             }
+
+            $this->validateTypeMapValue($typemap[$key]);
         }
 
-        if (array_key_exists('fieldPaths', $typemap)) {
-            $this->validateFieldPaths($typemap['fieldPaths']);
+        if (! array_key_exists('fieldPaths', $typemap)) {
+            return;
         }
+
+        $this->validateFieldPaths($typemap['fieldPaths']);
     }
 
     private function validateTypeMapValue(mixed $value): void
@@ -294,6 +300,7 @@ final class Cursor implements CursorInterface
 
         if (! $rc->isInstantiable()) {
             $prefix = $rc->isInterface() ? 'Interface' : 'Class';
+
             throw new InvalidArgumentException($prefix . ' ' . $value . ' is not instantiatable');
         }
 

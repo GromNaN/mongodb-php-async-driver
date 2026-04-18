@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
+use AllowDynamicProperties;
 use MongoDB\BSON\Serializable;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use stdClass;
@@ -14,7 +15,7 @@ use function is_string;
  * produce an empty array for the default (no-level) case.  __debugInfo()
  * provides the same view for var_dump.
  */
-#[\AllowDynamicProperties]
+#[AllowDynamicProperties]
 final class ReadConcern implements Serializable
 {
     public const string LINEARIZABLE = 'linearizable';
@@ -25,9 +26,11 @@ final class ReadConcern implements Serializable
 
     public function __construct(?string $level = null)
     {
-        if ($level !== null) {
-            $this->level = $level;
+        if ($level === null) {
+            return;
         }
+
+        $this->level = $level;
     }
 
     public function getLevel(): ?string

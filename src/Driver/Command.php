@@ -45,6 +45,7 @@ final class Command
             foreach ($doc as $k => $v) {
                 $obj->$k = $v;
             }
+
             $doc = $obj;
         }
 
