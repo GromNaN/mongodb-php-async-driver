@@ -7,6 +7,8 @@ namespace MongoDB\BSON;
 use ArrayAccess;
 use IteratorAggregate;
 use JsonException;
+use MongoDB\BSON\Internal\Index\PackedArrayIndex;
+use MongoDB\BSON\Internal\Indexer;
 use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
 use MongoDB\Driver\Exception\LogicException as DriverLogicException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
@@ -14,12 +16,10 @@ use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueEx
 use MongoDB\Internal\BSON\BsonDecoder;
 use MongoDB\Internal\BSON\BsonEncoder;
 use MongoDB\Internal\BSON\ExtendedJson;
+use OutOfBoundsException;
 use Stringable;
-use WeakMap;
 
 use function array_is_list;
-use function array_key_exists;
-use function array_values;
 use function base64_decode;
 use function base64_encode;
 use function get_debug_type;
@@ -42,8 +42,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     /** Base64-encoded raw BSON bytes — public for get_object_vars() / var_export() compat. */
     public readonly string $data;
 
-    /** @var WeakMap<static, array<int, mixed>>|null */
-    private static ?WeakMap $decodedCache = null;
+    private ?PackedArrayIndex $index = null;
 
     // ------------------------------------------------------------------
     // Private constructor
@@ -131,18 +130,16 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
 
     public function has(int $index): bool
     {
-        return array_key_exists($index, $this->decode());
+        return $this->getIndex()->hasField($index);
     }
 
     public function get(int $index): mixed
     {
-        $decoded = $this->decode();
-
-        if (! array_key_exists($index, $decoded)) {
+        try {
+            return $this->getIndex()->getFieldValue($index);
+        } catch (OutOfBoundsException) {
             throw new DriverRuntimeException(sprintf('Could not find index "%d" in BSON array', $index));
         }
-
-        return $decoded[$index];
     }
 
     // ------------------------------------------------------------------
@@ -189,7 +186,12 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
 
     public function getIterator(): Iterator
     {
-        return Iterator::createFromDecodedData($this->decode());
+        $data = [];
+        foreach ($this->getIndex()->fields as $i => $field) {
+            $data[$i] = $field->getValue();
+        }
+
+        return Iterator::createFromDecodedData($data);
     }
 
     // ------------------------------------------------------------------
@@ -263,20 +265,9 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
         ];
     }
 
-    private function decode(): array
+    private function getIndex(): PackedArrayIndex
     {
-        $cache = self::$decodedCache ??= new WeakMap();
-        if (! isset($cache[$this])) {
-            // ignoreRootKeys=true handles degenerate BSON with non-sequential or duplicate keys
-            $raw           = BsonDecoder::decode(base64_decode($this->data), [
-                'root'     => 'array',
-                'document' => 'bsonDocument',
-                'array'    => 'bsonArray',
-            ], ignoreRootKeys: true);
-            $cache[$this]  = array_values((array) $raw);
-        }
-
-        return $cache[$this];
+        return $this->index ??= new PackedArrayIndex($this, (new Indexer())->getIndex((string) $this));
     }
 
     private static function assertValidBson(string $bson, string $className): void

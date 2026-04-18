@@ -7,6 +7,8 @@ namespace MongoDB\BSON;
 use ArrayAccess;
 use IteratorAggregate;
 use JsonException;
+use MongoDB\BSON\Internal\Index\DocumentIndex;
+use MongoDB\BSON\Internal\Indexer;
 use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
 use MongoDB\Driver\Exception\LogicException as DriverLogicException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
@@ -14,10 +16,9 @@ use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueEx
 use MongoDB\Internal\BSON\BsonDecoder;
 use MongoDB\Internal\BSON\BsonEncoder;
 use MongoDB\Internal\BSON\ExtendedJson;
+use OutOfBoundsException;
 use Stringable;
-use WeakMap;
 
-use function array_key_exists;
 use function base64_decode;
 use function base64_encode;
 use function get_debug_type;
@@ -46,12 +47,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     /** Base64-encoded raw BSON bytes — public for get_object_vars() / var_export() compat. */
     public readonly string $data;
 
-    /**
-     * Cache for decoded PHP arrays: keyed by $this to avoid var_export pollution.
-     *
-     * @var WeakMap<static, array<string, mixed>>|null
-     */
-    private static ?WeakMap $decodedCache = null;
+    private ?DocumentIndex $index = null;
 
     // ------------------------------------------------------------------
     // Private constructor
@@ -130,18 +126,16 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
 
     public function has(string $key): bool
     {
-        return array_key_exists($key, $this->decode());
+        return $this->getIndex()->hasField($key);
     }
 
     public function get(string $key): mixed
     {
-        $decoded = $this->decode();
-
-        if (! array_key_exists($key, $decoded)) {
+        try {
+            return $this->getIndex()->getFieldValue($key);
+        } catch (OutOfBoundsException) {
             throw new DriverRuntimeException(sprintf('Could not find key "%s" in BSON document', $key));
         }
-
-        return $decoded[$key];
     }
 
     // ------------------------------------------------------------------
@@ -200,7 +194,12 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
 
     public function getIterator(): Iterator
     {
-        return Iterator::createFromDecodedData($this->decode());
+        $data = [];
+        foreach ($this->getIndex()->fields as $field) {
+            $data[$field->key] = $field->getValue();
+        }
+
+        return Iterator::createFromDecodedData($data);
     }
 
     // ------------------------------------------------------------------
@@ -294,23 +293,9 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
         ];
     }
 
-    /**
-     * Return the decoded PHP array (with nested Document/PackedArray), decoding from raw BSON if needed.
-     *
-     * @return array<string, mixed>
-     */
-    private function decode(): array
+    private function getIndex(): DocumentIndex
     {
-        $cache = self::$decodedCache ??= new WeakMap();
-        if (! isset($cache[$this])) {
-            $cache[$this] = (array) BsonDecoder::decode(base64_decode($this->data), [
-                'root'     => 'array',
-                'document' => 'bsonDocument',
-                'array'    => 'bsonArray',
-            ]);
-        }
-
-        return $cache[$this];
+        return $this->index ??= new DocumentIndex($this, (new Indexer())->getIndex((string) $this));
     }
 
     private static function assertValidBson(string $bson, string $className): void
