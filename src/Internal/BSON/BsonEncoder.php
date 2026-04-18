@@ -50,29 +50,6 @@ use function substr;
  */
 final class BsonEncoder
 {
-    // BSON type constants
-    private const TYPE_DOUBLE               = "\x01";
-    private const TYPE_STRING               = "\x02";
-    private const TYPE_DOCUMENT             = "\x03";
-    private const TYPE_ARRAY                = "\x04";
-    private const TYPE_BINARY               = "\x05";
-    private const TYPE_UNDEFINED            = "\x06";
-    private const TYPE_OBJECTID             = "\x07";
-    private const TYPE_BOOLEAN              = "\x08";
-    private const TYPE_UTCDATETIME          = "\x09";
-    private const TYPE_NULL                 = "\x0A";
-    private const TYPE_REGEX                = "\x0B";
-    private const TYPE_DBPOINTER           = "\x0C";
-    private const TYPE_JAVASCRIPT           = "\x0D";
-    private const TYPE_SYMBOL               = "\x0E";
-    private const TYPE_JAVASCRIPT_WITH_SCOPE = "\x0F";
-    private const TYPE_INT32                = "\x10";
-    private const TYPE_TIMESTAMP            = "\x11";
-    private const TYPE_INT64                = "\x12";
-    private const TYPE_DECIMAL128           = "\x13";
-    private const TYPE_MAXKEY               = "\x7F";
-    private const TYPE_MINKEY               = "\xFF";
-
     private const MAX_NESTING_DEPTH = 100;
 
     /**
@@ -179,56 +156,56 @@ final class BsonEncoder
 
         $ckey = $key . "\x00";
 
-        [$typeByte, $encoded] = self::encodeValue($value, $depth);
+        [$bsonType, $encoded] = self::encodeValue($value, $depth);
 
-        return $typeByte . $ckey . $encoded;
+        return chr($bsonType->value) . $ckey . $encoded;
     }
 
     /**
-     * Determine the BSON type for a value and return [type_byte, value_bytes].
+     * Determine the BSON type for a value and return [BsonType, value_bytes].
      *
-     * @return array{string, string}
+     * @return array{BsonType, string}
      */
     private static function encodeValue(mixed $value, int $depth = 0): array
     {
         // --- null ---
         if ($value === null) {
-            return [self::TYPE_NULL, ''];
+            return [BsonType::Null, ''];
         }
 
         // --- bool ---
         if (is_bool($value)) {
-            return [self::TYPE_BOOLEAN, $value ? "\x01" : "\x00"];
+            return [BsonType::Boolean, $value ? "\x01" : "\x00"];
         }
 
         // --- int ---
         if (is_int($value)) {
             if ($value >= -2147483648 && $value <= 2147483647) {
-                return [self::TYPE_INT32, pack('V', $value & 0xFFFFFFFF)];
+                return [BsonType::Int32, pack('V', $value & 0xFFFFFFFF)];
             }
 
-            return [self::TYPE_INT64, pack('P', $value)];
+            return [BsonType::Int64, pack('P', $value)];
         }
 
         // --- float ---
         if (is_float($value)) {
-            return [self::TYPE_DOUBLE, pack('e', $value)];
+            return [BsonType::Double, pack('e', $value)];
         }
 
         // --- string ---
         if (is_string($value)) {
             $len = strlen($value);
 
-            return [self::TYPE_STRING, pack('V', $len + 1) . $value . "\x00"];
+            return [BsonType::String, pack('V', $len + 1) . $value . "\x00"];
         }
 
         // --- array ---
         if (is_array($value)) {
             if (array_is_list($value)) {
-                return [self::TYPE_ARRAY, self::encodeArray($value, $depth + 1)];
+                return [BsonType::Array, self::encodeArray($value, $depth + 1)];
             }
 
-            return [self::TYPE_DOCUMENT, self::encodeDocument($value, $depth + 1)];
+            return [BsonType::Document, self::encodeDocument($value, $depth + 1)];
         }
 
         // --- BSON extension types ---
@@ -238,13 +215,13 @@ final class BsonEncoder
             $subtype = $value->getType();
 
             return [
-                self::TYPE_BINARY,
+                BsonType::Binary,
                 pack('V', strlen($data)) . chr($subtype) . $data,
             ];
         }
 
         if ($value instanceof ObjectId) {
-            return [self::TYPE_OBJECTID, hex2bin($value->__toString())];
+            return [BsonType::ObjectId, hex2bin($value->__toString())];
         }
 
         if ($value instanceof UTCDateTime) {
@@ -254,12 +231,12 @@ final class BsonEncoder
                 $ms = (int) (string) $ms;
             }
 
-            return [self::TYPE_UTCDATETIME, pack('P', $ms)];
+            return [BsonType::Date, pack('P', $ms)];
         }
 
         if ($value instanceof Regex) {
             return [
-                self::TYPE_REGEX,
+                BsonType::Regex,
                 $value->getPattern() . "\x00" . $value->getFlags() . "\x00",
             ];
         }
@@ -276,21 +253,21 @@ final class BsonEncoder
                 $totalLen   = 4 + strlen($inner); // includes the leading int32 itself
 
                 return [
-                    self::TYPE_JAVASCRIPT_WITH_SCOPE,
+                    BsonType::JavaScriptWithScope,
                     pack('V', $totalLen) . $inner,
                 ];
             }
 
             // plain javascript (0x0D)
             return [
-                self::TYPE_JAVASCRIPT,
+                BsonType::JavaScript,
                 pack('V', strlen($code) + 1) . $code . "\x00",
             ];
         }
 
         if ($value instanceof Timestamp) {
             return [
-                self::TYPE_TIMESTAMP,
+                BsonType::Timestamp,
                 pack('V', $value->getIncrement()) . pack('V', $value->getTimestamp()),
             ];
         }
@@ -298,7 +275,7 @@ final class BsonEncoder
         if ($value instanceof Int64) {
             $v = (int) (string) $value;
 
-            return [self::TYPE_INT64, pack('P', $v)];
+            return [BsonType::Int64, pack('P', $v)];
         }
 
         if ($value instanceof Decimal128) {
@@ -308,42 +285,42 @@ final class BsonEncoder
             // string), otherwise we zero-pad to 16 bytes.
             $raw = $value->__toString();
             // If the string happens to be exactly 16 bytes it came from our decoder.
-            $bytes = strlen($raw) === 16 ? $raw : str_pad(substr($raw, 0, 16), 16, "\x00");
+            $bytes = strlen($raw) === 16 ? $raw : substr(str_pad($raw, 16, "\x00"), 0, 16);
 
-            return [self::TYPE_DECIMAL128, $bytes];
+            return [BsonType::Decimal128, $bytes];
         }
 
         if ($value instanceof MaxKey) {
-            return [self::TYPE_MAXKEY, ''];
+            return [BsonType::MaxKey, ''];
         }
 
         if ($value instanceof MinKey) {
-            return [self::TYPE_MINKEY, ''];
+            return [BsonType::MinKey, ''];
         }
 
         if ($value instanceof BsonUndefined) {
-            return [self::TYPE_UNDEFINED, ''];
+            return [BsonType::Undefined, ''];
         }
 
         if ($value instanceof DBPointer) {
-            $ref     = $value->getRef();
+            $ref      = $value->getRef();
             $refBytes = pack('V', strlen($ref) + 1) . $ref . "\x00";
 
-            return [self::TYPE_DBPOINTER, $refBytes . hex2bin($value->getId())];
+            return [BsonType::DBPointer, $refBytes . hex2bin($value->getId())];
         }
 
         if ($value instanceof Symbol) {
             $sym = (string) $value;
 
-            return [self::TYPE_SYMBOL, pack('V', strlen($sym) + 1) . $sym . "\x00"];
+            return [BsonType::Symbol, pack('V', strlen($sym) + 1) . $sym . "\x00"];
         }
 
         if ($value instanceof Document) {
-            return [self::TYPE_DOCUMENT, (string) $value];
+            return [BsonType::Document, (string) $value];
         }
 
         if ($value instanceof PackedArray) {
-            return [self::TYPE_ARRAY, (string) $value];
+            return [BsonType::Array, (string) $value];
         }
 
         // --- Persistable / Serializable objects ---
@@ -352,22 +329,22 @@ final class BsonEncoder
             $data             = ['__pclass' => new Binary($value::class, Binary::TYPE_USER_DEFINED)];
             $data            += is_array($serialized) ? $serialized : (array) $serialized;
 
-            return [self::TYPE_DOCUMENT, self::encodeDocument($data, $depth + 1)];
+            return [BsonType::Document, self::encodeDocument($data, $depth + 1)];
         }
 
         if ($value instanceof Serializable) {
             $serialized = $value->bsonSerialize();
             // If bsonSerialize returns a list, encode as BSON array
             if (is_array($serialized) && array_is_list($serialized)) {
-                return [self::TYPE_ARRAY, self::encodeArray($serialized, $depth + 1)];
+                return [BsonType::Array, self::encodeArray($serialized, $depth + 1)];
             }
 
-            return [self::TYPE_DOCUMENT, self::encodeDocument($serialized, $depth + 1)];
+            return [BsonType::Document, self::encodeDocument($serialized, $depth + 1)];
         }
 
         // --- Generic object (stdClass, etc.) ---
         if (is_object($value)) {
-            return [self::TYPE_DOCUMENT, self::encodeDocument(get_object_vars($value), $depth + 1)];
+            return [BsonType::Document, self::encodeDocument(get_object_vars($value), $depth + 1)];
         }
 
         throw new InvalidArgumentException(

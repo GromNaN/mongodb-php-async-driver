@@ -18,16 +18,14 @@ use MongoDB\BSON\PackedArray;
 use MongoDB\BSON\Regex;
 use MongoDB\BSON\Symbol;
 use MongoDB\BSON\Timestamp;
-use MongoDB\BSON\Type;
 use MongoDB\BSON\Undefined;
 use MongoDB\BSON\UTCDateTime;
+use MongoDB\Internal\BSON\BsonType;
 use OutOfBoundsException;
 use Stringable;
 use WeakReference;
 
 use function bin2hex;
-use function ctype_print;
-use function rtrim;
 use function strlen;
 use function substr;
 use function unpack;
@@ -43,17 +41,17 @@ final class Field
     public function __construct(
         Stringable $source,
         public readonly string $key,
-        public readonly int $bsonType,
+        public readonly BsonType $bsonType,
         public readonly int $keyOffset,
         public readonly int $keyLength,
         public readonly int|null $dataOffset = null,
         public readonly int|null $dataLength = null,
     ) {
         if (
-            $this->bsonType === Type::UNDEFINED
-            || $this->bsonType === Type::NULL
-            || $this->bsonType === Type::MINKEY
-            || $this->bsonType === Type::MAXKEY
+            $this->bsonType === BsonType::Undefined
+            || $this->bsonType === BsonType::Null
+            || $this->bsonType === BsonType::MinKey
+            || $this->bsonType === BsonType::MaxKey
         ) {
             if ($this->dataLength !== 0 || $this->dataOffset !== null) {
                 throw new InvalidArgumentException('Invalid data offset or length');
@@ -90,20 +88,20 @@ final class Field
         $bson = (string) $source;
 
         switch ($this->bsonType) {
-            case Type::DOUBLE:
+            case BsonType::Double:
                 $this->value = (float) $this->unpackWithChecks('edata', $bson, $this->dataOffset, 'data');
                 break;
 
-            case Type::STRING:
+            case BsonType::String:
                 $this->value = $this->unpackWithChecks('a' . $this->dataLength . 'data', $bson, $this->dataOffset, 'data');
                 break;
 
-            case Type::CODE:
+            case BsonType::JavaScript:
                 $code        = $this->unpackWithChecks('a' . $this->dataLength . 'data', $bson, $this->dataOffset, 'data');
                 $this->value = new Javascript($code);
                 break;
 
-            case Type::CODEWITHSCOPE:
+            case BsonType::JavaScriptWithScope:
                 $codeLength = (int) $this->unpackWithChecks('Vlength', $bson, $this->dataOffset, 'length');
 
                 // $codeLength includes the trailing NUL byte — exclude it when reading code
@@ -112,19 +110,19 @@ final class Field
                 $this->value = new Javascript($code, $scope);
                 break;
 
-            case Type::SYMBOL:
+            case BsonType::Symbol:
                 $this->value = new Symbol(substr($bson, $this->dataOffset, $this->dataLength));
                 break;
 
-            case Type::DOCUMENT:
+            case BsonType::Document:
                 $this->value = Document::fromBSON(substr($bson, $this->dataOffset, $this->dataLength));
                 break;
 
-            case Type::ARRAY:
+            case BsonType::Array:
                 $this->value = PackedArray::fromBSON(substr($bson, $this->dataOffset, $this->dataLength));
                 break;
 
-            case Type::BINARY:
+            case BsonType::Binary:
                 $data = $this->unpackWithChecks('Csubtype/a' . ($this->dataLength - 1) . 'data', $bson, $this->dataOffset);
 
                 /* subtype 2 has a redundant length header in the data */
@@ -135,71 +133,67 @@ final class Field
                 $this->value = new Binary($data['data'], (int) $data['subtype']);
                 break;
 
-            case Type::UNDEFINED:
+            case BsonType::Undefined:
                 $this->value = new Undefined();
                 break;
 
-            case Type::NULL:
+            case BsonType::Null:
                 $this->value = null;
                 break;
 
-            case Type::MINKEY:
+            case BsonType::MinKey:
                 $this->value = new MinKey();
                 break;
 
-            case Type::MAXKEY:
+            case BsonType::MaxKey:
                 $this->value = new MaxKey();
                 break;
 
-            case Type::OBJECTID:
+            case BsonType::ObjectId:
                 $this->value = new ObjectId(bin2hex(substr($bson, $this->dataOffset, $this->dataLength)));
                 break;
 
-            case Type::BOOLEAN:
+            case BsonType::Boolean:
                 $this->value = (bool) $this->unpackWithChecks('Cdata', $bson, $this->dataOffset, 'data');
                 break;
 
-            case Type::UTCDATETIME:
+            case BsonType::Date:
                 $timestamp   = $this->unpackWithChecks('qdata', $bson, $this->dataOffset, 'data');
                 $this->value = new UTCDateTime($timestamp);
                 break;
 
-            case Type::TIMESTAMP:
+            case BsonType::Timestamp:
                 $data        = $this->unpackWithChecks('Vincrement/Vtimestamp', $bson, $this->dataOffset);
                 $this->value = new Timestamp((int) $data['increment'], (int) $data['timestamp']);
                 break;
 
-            case Type::INT64:
+            case BsonType::Int64:
                 $value       = $this->unpackWithChecks('qdata', $bson, $this->dataOffset, 'data');
                 $this->value = new Int64($value);
                 break;
 
-            case Type::REGEX:
+            case BsonType::Regex:
                 $pattern     = $this->unpackWithChecks('Z*pattern', $bson, $this->dataOffset, 'pattern');
                 $flags       = $this->unpackWithChecks('Z*flags', $bson, $this->dataOffset + strlen($pattern) + 1, 'flags');
                 $this->value = new Regex($pattern, $flags);
                 break;
 
-            case Type::DBPOINTER:
+            case BsonType::DBPointer:
                 $refLength   = (int) $this->unpackWithChecks('Vlength', $bson, $this->dataOffset, 'length');
                 $data        = $this->unpackWithChecks('Z' . $refLength . 'ref/Z12id', $bson, $this->dataOffset + 4);
                 $this->value = new DBPointer($data['ref'], bin2hex($data['id']));
                 break;
 
-            case Type::INT32:
+            case BsonType::Int32:
                 $this->value = (int) $this->unpackWithChecks('ldata', $bson, $this->dataOffset, 'data');
                 break;
 
-            case Type::DECIMAL128:
-                // If it looks like a null-padded ASCII decimal string (our own encoder), restore it;
-                // otherwise keep raw IEEE 754 bytes for round-trip fidelity.
-                $bytes       = substr($bson, $this->dataOffset, $this->dataLength);
-                $trimmed     = rtrim($bytes, "\0");
-                $this->value = new Decimal128($trimmed !== '' && ctype_print($trimmed) ? $trimmed : $bytes);
+            case BsonType::Decimal128:
+                $this->value = Decimal128::fromBinaryBytes(substr($bson, $this->dataOffset, $this->dataLength));
                 break;
 
             default:
-                throw new InvalidArgumentException('Invalid BSON type ' . $this->bsonType);
+                throw new InvalidArgumentException('Invalid BSON type ' . $this->bsonType->name);
         }
 
         $this->isInitialized = true;

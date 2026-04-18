@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON\Internal\Index;
 
+use MongoDB\Internal\BSON\BsonType;
 use OutOfBoundsException;
 use Stringable;
 
@@ -17,7 +18,7 @@ abstract class Index
 
     public function __construct(
         Stringable $structure,
-        /** @param list<array{key: string, bsonType: int, keyOffset: int, keyLength: int, dataOffset?: int|null, dataLength?: int|null}> $fields */
+        /** @param list<array{key: string, bsonType: BsonType, keyOffset: int, keyLength: int, dataOffset?: int|null, dataLength?: int|null}> $fields */
         array $fields,
     ) {
         $this->fields = array_map(

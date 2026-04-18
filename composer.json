@@ -6,6 +6,7 @@
     "require": {
         "php": "^8.4",
         "ext-ctype": "*",
+        "ext-gmp": "*",
         "ext-mbstring": "*",
         "revolt/event-loop": "^1.0",
         "amphp/socket": "^2.0",

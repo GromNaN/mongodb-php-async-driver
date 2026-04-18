@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace MongoDB\BSON\Internal;
 
 use InvalidArgumentException;
-use MongoDB\BSON\Type;
+use MongoDB\Internal\BSON\BsonType;
 
 use function preg_match;
 use function strlen;
@@ -21,7 +21,7 @@ use function unpack;
  */
 final class Indexer
 {
-    /** @return list<array{key: string, bsonType: int, keyOffset: int, keyLength: int, dataOffset: int|null, dataLength: int|null}> */
+    /** @return list<array{key: string, bsonType: BsonType, keyOffset: int, keyLength: int, dataOffset: int|null, dataLength: int|null}> */
     public function getIndex(string $bson): array
     {
         $fields = [];
@@ -67,25 +67,30 @@ final class Indexer
             throw new InvalidArgumentException('Invalid BSON data');
         }
 
-        ['type' => $bsonType, 'key' => $key] = $data;
+        ['type' => $typeInt, 'key' => $key] = $data;
 
         if (! preg_match('//u', $key)) {
             throw new InvalidArgumentException('Invalid UTF-8 data in BSON key');
+        }
+
+        $bsonType = BsonType::tryFrom($typeInt);
+        if ($bsonType === null) {
+            throw new InvalidArgumentException('Invalid BSON type ' . $typeInt);
         }
 
         // Shift offset by 1 byte for type, key length and a null byte
         $newOffset = $offset + 1 + strlen($key) + 1;
 
         switch ($bsonType) {
-            case Type::DOUBLE:
+            case BsonType::Double:
                 $dataOffset = $newOffset;
                 $dataLength = 8;
                 $newOffset += 8;
                 break;
 
-            case Type::STRING:
-            case Type::CODE:
-            case Type::SYMBOL:
+            case BsonType::String:
+            case BsonType::JavaScript:
+            case BsonType::Symbol:
                 $data = @unpack('Vlength', $bson, $newOffset);
                 if ($data === false) {
                     throw new InvalidArgumentException('Invalid BSON data');
@@ -108,8 +113,8 @@ final class Indexer
                 $dataLength--;
                 break;
 
-            case Type::DOCUMENT:
-            case Type::ARRAY:
+            case BsonType::Document:
+            case BsonType::Array:
                 $data = @unpack('Vlength', $bson, $newOffset);
                 if ($data === false) {
                     throw new InvalidArgumentException('Invalid BSON data');
@@ -120,7 +125,7 @@ final class Indexer
                 $newOffset += $dataLength;
                 break;
 
-            case Type::BINARY:
+            case BsonType::Binary:
                 $data = @unpack('Vlength', $bson, $newOffset);
                 if ($data === false) {
                     throw new InvalidArgumentException('Invalid BSON data');
@@ -132,36 +137,36 @@ final class Indexer
                 $newOffset  = $dataOffset + $dataLength;
                 break;
 
-            case Type::UNDEFINED:
-            case Type::NULL:
-            case Type::MINKEY:
-            case Type::MAXKEY:
+            case BsonType::Undefined:
+            case BsonType::Null:
+            case BsonType::MinKey:
+            case BsonType::MaxKey:
                 $dataLength = 0;
                 $dataOffset = null;
                 break;
 
-            case Type::OBJECTID:
+            case BsonType::ObjectId:
                 // An ObjectId is always 12 bytes long
                 $dataLength = 12;
                 $dataOffset = $newOffset;
                 $newOffset += $dataLength;
                 break;
 
-            case Type::BOOLEAN:
+            case BsonType::Boolean:
                 $dataLength = 1;
                 $dataOffset = $newOffset;
                 $newOffset += $dataLength;
                 break;
 
-            case Type::UTCDATETIME:
-            case Type::TIMESTAMP:
-            case Type::INT64:
+            case BsonType::Date:
+            case BsonType::Timestamp:
+            case BsonType::Int64:
                 $dataLength = 8;
                 $dataOffset = $newOffset;
                 $newOffset += $dataLength;
                 break;
 
-            case Type::REGEX:
+            case BsonType::Regex:
                 $data = @unpack('Z*pattern', $bson, $newOffset);
                 if ($data === false) {
                     throw new InvalidArgumentException('Invalid BSON data');
@@ -181,7 +186,7 @@ final class Indexer
                 $newOffset   = $dataOffset + $dataLength;
                 break;
 
-            case Type::DBPOINTER:
+            case BsonType::DBPointer:
                 // string (byte*12)
                 $data = @unpack('Vlength', $bson, $newOffset);
                 if ($data === false) {
@@ -194,7 +199,7 @@ final class Indexer
                 $newOffset += $dataLength;
                 break;
 
-            case Type::CODEWITHSCOPE:
+            case BsonType::JavaScriptWithScope:
                 // int32 string document
                 // The int32 contains the total number of bytes in the code_w_scope (including itself)
                 $data = @unpack('Vlength', $bson, $newOffset);
@@ -208,20 +213,17 @@ final class Indexer
                 $newOffset  = $dataOffset + $dataLength;
                 break;
 
-            case Type::INT32:
+            case BsonType::Int32:
                 $dataLength = 4;
                 $dataOffset = $newOffset;
                 $newOffset += $dataLength;
                 break;
 
-            case Type::DECIMAL128:
+            case BsonType::Decimal128:
                 $dataLength = 16;
                 $dataOffset = $newOffset;
                 $newOffset += $dataLength;
                 break;
-
-            default:
-                throw new InvalidArgumentException('Invalid BSON type ' . $bsonType);
         }
 
         return [

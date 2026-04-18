@@ -38,13 +38,13 @@ use function sprintf;
  */
 final class TypeMapper
 {
-/**
- * Apply typeMap rules to a decoded value.
- *
- * @param mixed  $value   The decoded PHP value (array or object)
- * @param array  $typeMap Type map configuration
- * @param string $context 'root' | 'document' | 'array'
- */
+    /**
+     * Apply typeMap rules to a decoded value.
+     *
+     * @param mixed  $value   The decoded PHP value (array or object)
+     * @param array  $typeMap Type map configuration
+     * @param string $context 'root' | 'document' | 'array'
+     */
     public static function apply(mixed $value, array $typeMap, string $context = 'root'): mixed
     {
         if (! is_array($value) && ! is_object($value)) {
@@ -65,13 +65,13 @@ final class TypeMapper
         return self::convertToType($value, $targetType);
     }
 
-// -------------------------------------------------------------------------
-// Private helpers
-// -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
 
-/**
- * Determine the target type string for the given context.
- */
+    /**
+     * Determine the target type string for the given context.
+     */
     private static function resolveContextType(array $typeMap, string $context): string
     {
         return match ($context) {
@@ -81,9 +81,9 @@ final class TypeMapper
         };
     }
 
-/**
- * Recursively apply typeMap to child documents/arrays within $value.
- */
+    /**
+     * Recursively apply typeMap to child documents/arrays within $value.
+     */
     private static function applyToChildren(array|object $value, array $typeMap): array|object
     {
         $isArray = is_array($value);
@@ -120,10 +120,10 @@ final class TypeMapper
         return $obj;
     }
 
-/**
- * Look up a field-level type override from 'fieldPaths'.
- * Returns null when no override is defined for $fieldName.
- */
+    /**
+     * Look up a field-level type override from 'fieldPaths'.
+     * Returns null when no override is defined for $fieldName.
+     */
     private static function resolveFieldPath(array $typeMap, string $fieldName): ?string
     {
         $fieldPaths = $typeMap['fieldPaths'] ?? [];
@@ -131,9 +131,9 @@ final class TypeMapper
         return $fieldPaths[$fieldName] ?? null;
     }
 
-/**
- * Convert $value to the target type.
- */
+    /**
+     * Convert $value to the target type.
+     */
     private static function convertToType(array|object $value, string $targetType): array|object
     {
         // Normalise to array for manipulation
@@ -152,11 +152,11 @@ final class TypeMapper
         };
     }
 
-/**
- * Shallow conversion of an array to stdClass.
- *
- * @param array<string, mixed> $fields
- */
+    /**
+     * Shallow conversion of an array to stdClass.
+     *
+     * @param array<string, mixed> $fields
+     */
     private static function fieldsToStdClass(array $fields): stdClass
     {
         $obj = new stdClass();
@@ -167,12 +167,12 @@ final class TypeMapper
         return $obj;
     }
 
-/**
- * Instantiate a user class and populate it.
- *
- * @param class-string         $className
- * @param array<string, mixed> $fields
- */
+    /**
+     * Instantiate a user class and populate it.
+     *
+     * @param class-string         $className
+     * @param array<string, mixed> $fields
+     */
     private static function instantiateClass(string $className, array $fields): object
     {
         if (! class_exists($className)) {
