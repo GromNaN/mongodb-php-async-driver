@@ -292,6 +292,11 @@ final class Cursor implements CursorInterface
             return;
         }
 
+        // stdClass is accepted as an alias for 'object'.
+        if ($value === stdClass::class) {
+            return;
+        }
+
         if (! class_exists($value) && ! interface_exists($value)) {
             throw new InvalidArgumentException('Class ' . $value . ' does not exist');
         }

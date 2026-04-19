@@ -17,6 +17,9 @@ use function class_exists;
 use function is_array;
 use function is_object;
 use function sprintf;
+use function str_starts_with;
+use function strlen;
+use function substr;
 
 /**
  * Applies a BSON type map to an already-decoded PHP value.
@@ -91,19 +94,29 @@ final class TypeMapper
 
         $result = [];
         foreach ($items as $key => $child) {
-            if (is_array($child)) {
-                // Determine whether this child was a BSON array (list) or document
-                $childContext = array_is_list($child) ? 'array' : 'document';
+            $strKey = (string) $key;
 
-                // Check field-path override
-                $childType = self::resolveFieldPath($typeMap, (string) $key)
-                ?? self::resolveContextType($typeMap, $childContext);
-
-                $result[$key] = self::apply($child, $typeMap, $childContext);
-            } elseif ($child instanceof stdClass) {
-                $result[$key] = self::apply((array) $child, $typeMap, 'document');
-            } else {
+            if (! is_array($child) && ! ($child instanceof stdClass)) {
                 $result[$key] = $child;
+                continue;
+            }
+
+            // Normalize child to array (stdClass → array)
+            $childArr         = is_array($child) ? $child : (array) $child;
+            $childDataContext = is_array($child) && array_is_list($child) ? 'array' : 'document';
+
+            // fieldPath override for this key; '$' wildcard applies to array elements
+            $fieldPathType = self::resolveFieldPath($typeMap, $strKey)
+                ?? ($isArray ? self::resolveFieldPath($typeMap, '$') : null);
+
+            // Narrow fieldPaths for recursion: strip current key prefix
+            $childTypeMap = self::narrowTypeMap($typeMap, $strKey, $isArray);
+
+            if ($fieldPathType !== null) {
+                $childTypeMap['root'] = $fieldPathType;
+                $result[$key]         = self::apply($childArr, $childTypeMap, 'root');
+            } else {
+                $result[$key] = self::apply($childArr, $childTypeMap, $childDataContext);
             }
         }
 
@@ -132,6 +145,40 @@ final class TypeMapper
     }
 
     /**
+     * Produce a typeMap narrowed to the subtree rooted at $key.
+     *
+     * Strips the "$key." prefix from all fieldPaths entries.
+     * When $isArrayParent is true, also strips the "$." prefix (wildcard).
+     */
+    private static function narrowTypeMap(array $typeMap, string $key, bool $isArrayParent): array
+    {
+        $fieldPaths = $typeMap['fieldPaths'] ?? [];
+        if ($fieldPaths === []) {
+            return $typeMap;
+        }
+
+        $prefix         = $key . '.';
+        $wildcardPrefix = '$' . '.';
+        $narrowed       = [];
+
+        foreach ($fieldPaths as $path => $type) {
+            if (str_starts_with($path, $prefix)) {
+                $narrowed[substr($path, strlen($prefix))] = $type;
+            }
+
+            if (! $isArrayParent || ! str_starts_with($path, $wildcardPrefix)) {
+                continue;
+            }
+
+            $narrowed[substr($path, strlen($wildcardPrefix))] = $type;
+        }
+
+        $typeMap['fieldPaths'] = $narrowed;
+
+        return $typeMap;
+    }
+
+    /**
      * Convert $value to the target type.
      */
     private static function convertToType(array|object $value, string $targetType): array|object
@@ -140,15 +187,11 @@ final class TypeMapper
         $fields = is_array($value) ? $value : (array) $value;
 
         return match ($targetType) {
-            'array' => $fields,
-
-            'object' => self::fieldsToStdClass($fields),
-
-            'bsonDocument' => Document::fromPHP($fields),
-
-            'bsonArray' => PackedArray::fromPHP(array_values($fields)),
-
-            default => self::instantiateClass($targetType, $fields),
+            'array'               => $fields,
+            'object', 'stdClass'  => self::fieldsToStdClass($fields),
+            'bsonDocument'        => Document::fromPHP($fields),
+            'bsonArray'           => PackedArray::fromPHP(array_values($fields)),
+            default               => self::instantiateClass($targetType, $fields),
         };
     }
 

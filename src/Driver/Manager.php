@@ -12,6 +12,7 @@ use MongoDB\Driver\Monitoring\Subscriber;
 use MongoDB\Internal\Connection\ConnectionPool;
 use MongoDB\Internal\Connection\SyncRunner;
 use MongoDB\Internal\Operation\OperationExecutor;
+use MongoDB\Internal\Session\SessionPool;
 use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\ConnectionString;
 use MongoDB\Internal\Uri\UriOptions;
@@ -43,6 +44,7 @@ final class Manager
     private array $pools = [];
     /** @var list<Subscriber> */
     private array $subscribers = [];
+    private SessionPool $sessionPool;
 
     public function __construct(
         ?string $uri = null,
@@ -116,6 +118,8 @@ final class Manager
             $this->uriOptions,
             $this->subscribers,
         );
+
+        $this->sessionPool = new SessionPool();
 
         // Topology start is deferred until first operation so that subscribers
         // registered via addSubscriber() receive the initial SDAM events.
@@ -323,7 +327,9 @@ final class Manager
 
     public function startSession(?array $options = null): Session
     {
-        return Session::createFromManager($this, $options ?? []);
+        $lsid = $this->sessionPool->acquire();
+
+        return Session::createFromInternal($lsid);
     }
 
     public function getEncryptedFieldsMap(): array|object|null
