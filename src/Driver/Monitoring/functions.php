@@ -12,12 +12,16 @@ namespace MongoDB\Driver\Monitoring;
 
 use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 
-function addSubscriber(Subscriber $subscriber): void
-{
-    GlobalSubscriberRegistry::add($subscriber);
-}
+use function function_exists;
 
-function removeSubscriber(Subscriber $subscriber): void
-{
-    GlobalSubscriberRegistry::remove($subscriber);
+if (! function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
+    function addSubscriber(Subscriber $subscriber): void
+    {
+        GlobalSubscriberRegistry::add($subscriber);
+    }
+
+    function removeSubscriber(Subscriber $subscriber): void
+    {
+        GlobalSubscriberRegistry::remove($subscriber);
+    }
 }
