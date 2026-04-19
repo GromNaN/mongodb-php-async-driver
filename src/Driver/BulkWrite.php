@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace MongoDB\Driver;
 
 use Countable;
+use MongoDB\BSON\Binary;
 use MongoDB\BSON\Document;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\PackedArray;
@@ -92,7 +93,8 @@ final class BulkWrite implements Countable
         self::checkEmptyKeys($docArr, 'invalid document for insert: Element key cannot be an empty string');
         self::checkUtf8($docArr, '');
 
-        // Extract or generate _id without dynamic property assignment
+        // Extract or generate _id, and ensure the stored document includes it so
+        // the _id returned by insert() always matches the one sent to the server.
         if (is_array($document)) {
             if (! isset($document['_id'])) {
                 $document['_id'] = new ObjectId();
@@ -101,11 +103,37 @@ final class BulkWrite implements Countable
             $id = self::normalizeId($document['_id']);
         } elseif ($document instanceof Document) {
             $data = (array) $document->toPHP(['root' => 'array', 'document' => 'array']);
-            $id   = isset($data['_id']) ? self::normalizeId($data['_id']) : new ObjectId();
-        } elseif ($document instanceof Persistable || $document instanceof BsonSerializable) {
+            if (isset($data['_id'])) {
+                $id = self::normalizeId($data['_id']);
+            } else {
+                $generatedId = new ObjectId();
+                $id          = self::normalizeId($generatedId);
+                $document    = Document::fromPHP(['_id' => $generatedId] + $data);
+            }
+        } elseif ($document instanceof Persistable) {
             $serialized = $document->bsonSerialize();
             $serialized = is_array($serialized) ? $serialized : (array) $serialized;
-            $id         = isset($serialized['_id']) ? self::normalizeId($serialized['_id']) : new ObjectId();
+            if (isset($serialized['_id'])) {
+                $id = self::normalizeId($serialized['_id']);
+            } else {
+                $generatedId = new ObjectId();
+                $id          = self::normalizeId($generatedId);
+                // Expand to array: __pclass first (mirrors BsonEncoder), then _id, then fields.
+                $document = [
+                    '__pclass' => new Binary($document::class, Binary::TYPE_USER_DEFINED),
+                    '_id'      => $generatedId,
+                ] + $serialized;
+            }
+        } elseif ($document instanceof BsonSerializable) {
+            $serialized = $document->bsonSerialize();
+            $serialized = is_array($serialized) ? $serialized : (array) $serialized;
+            if (isset($serialized['_id'])) {
+                $id = self::normalizeId($serialized['_id']);
+            } else {
+                $generatedId = new ObjectId();
+                $id          = self::normalizeId($generatedId);
+                $document    = ['_id' => $generatedId] + $serialized;
+            }
         } else {
             $vars = get_object_vars($document);
             if (array_key_exists('_id', $vars)) {
@@ -114,7 +142,11 @@ final class BulkWrite implements Countable
                 $document->_id = new ObjectId();
                 $id            = $document->_id;
             } else {
-                $id = new ObjectId();
+                // Cannot safely set dynamic properties on arbitrary objects;
+                // convert to array so _id is included in the encoded document.
+                $generatedId = new ObjectId();
+                $id          = self::normalizeId($generatedId);
+                $document    = ['_id' => $generatedId] + $vars;
             }
         }
 
