@@ -206,6 +206,17 @@ class BsonEncoderDecoderTest extends TestCase
         $this->assertSame(1, $result->a);
     }
 
+    public function testDecodeStdClassAliasInDocumentTypeMap(): void
+    {
+        // 'stdClass' is a valid alias for 'object' in the document typeMap key
+        $bson   = BsonEncoder::encode(['sub' => ['x' => 1]]);
+        $result = BsonDecoder::decode($bson, ['root' => 'array', 'document' => stdClass::class]);
+
+        $this->assertIsArray($result);
+        $this->assertInstanceOf(stdClass::class, $result['sub']);
+        $this->assertSame(1, $result['sub']->x);
+    }
+
     // -------------------------------------------------------------------------
     // Round-trip idempotency
     // -------------------------------------------------------------------------
