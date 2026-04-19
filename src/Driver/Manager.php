@@ -26,8 +26,11 @@ use function in_array;
 use function is_bool;
 use function is_int;
 use function is_string;
+use function MongoDB\Driver\Monitoring\mongoc_log;
 use function sprintf;
+use function str_ends_with;
 use function strlen;
+use function strtolower;
 
 final class Manager
 {
@@ -133,6 +136,8 @@ final class Manager
 
         // Topology start is deferred until first operation so that subscribers
         // registered via addSubscriber() receive the initial SDAM events.
+
+        $this->warnNonGenuineHosts($this->connectionString->getHosts());
     }
 
     public function __sleep(): array
@@ -619,6 +624,43 @@ final class Manager
         throw new InvalidArgumentException(
             'Expected "session" option to be ' . Session::class . ', ' . get_debug_type($session) . ' given',
         );
+    }
+
+    /**
+     * Emit a log warning if any host in the URI looks like a non-genuine MongoDB provider
+     * (CosmosDB or DocumentDB), mirroring the behaviour of libmongoc.
+     *
+     * @param array<array{host: string, port: int}> $hosts
+     */
+    private function warnNonGenuineHosts(array $hosts): void
+    {
+        $cosmosDbSuffix   = '.mongo.cosmos.azure.com';
+        $documentDbSuffix = '.docdb.amazonaws.com';
+        $documentDbElasticSuffix = '.docdb-elastic.amazonaws.com';
+
+        foreach ($hosts as $hostInfo) {
+            $host = strtolower($hostInfo['host']);
+
+            if (str_ends_with($host, $cosmosDbSuffix)) {
+                mongoc_log(
+                    LogSubscriber::LEVEL_INFO,
+                    'mongoc',
+                    'You appear to be connected to a CosmosDB cluster. For more information regarding feature compatibility and support please visit https://www.mongodb.com/supportability/cosmosdb',
+                );
+
+                return;
+            }
+
+            if (str_ends_with($host, $documentDbSuffix) || str_ends_with($host, $documentDbElasticSuffix)) {
+                mongoc_log(
+                    LogSubscriber::LEVEL_INFO,
+                    'mongoc',
+                    'You appear to be connected to a DocumentDB cluster. For more information regarding feature compatibility and support please visit https://www.mongodb.com/supportability/documentdb',
+                );
+
+                return;
+            }
+        }
     }
 
     private static function mapInternalServerType(string $type): int

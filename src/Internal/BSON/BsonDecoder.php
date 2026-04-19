@@ -21,8 +21,8 @@ use MongoDB\BSON\Timestamp;
 use MongoDB\BSON\Undefined as BsonUndefined;
 use MongoDB\BSON\Unserializable;
 use MongoDB\BSON\UTCDateTime;
-use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
-use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueException;
+use MongoDB\Driver\Exception\InvalidArgumentException;
+use MongoDB\Driver\Exception\UnexpectedValueException;
 use ReflectionClass;
 use ReflectionException;
 use RuntimeException;
@@ -41,7 +41,6 @@ use function gmp_strval;
 use function ord;
 use function sprintf;
 use function str_repeat;
-use function str_starts_with;
 use function strlen;
 use function strpos;
 use function strrev;
@@ -108,7 +107,7 @@ final class BsonDecoder
         try {
             return self::decodeDocument($bson, $offset, $typeMap, 'root', $handlePersistable, $ignoreRootKeys, $noRootPersistable, $noDocumentPersistable);
         } catch (RuntimeException $e) {
-            throw new DriverUnexpectedValueException($e->getMessage(), previous: $e);
+            throw new UnexpectedValueException($e->getMessage(), previous: $e);
         }
     }
 
@@ -150,7 +149,7 @@ final class BsonDecoder
             BsonType::Document    => self::readSubDocumentAsBson($bson, $o),
             BsonType::Array       => self::readSubArrayAsBson($bson, $o),
             BsonType::CodeWithScope => self::readJavascriptWithScopeAsBson($bson, $o),
-            default => throw new DriverUnexpectedValueException(
+            default => throw new UnexpectedValueException(
                 sprintf('Detected unknown BSON type 0x%02X', $type & 0xFF),
             ),
         };
@@ -279,16 +278,14 @@ final class BsonDecoder
         bool $noRootPersistable = false,
         bool $noDocumentPersistable = false,
     ): mixed {
-        $fieldPathOverride = ($typeMap['fieldPaths'] ?? [])[$fieldPath] ?? null;
-
         return match ($type) {
             BsonType::Double      => self::readDouble($bson, $offset),
             BsonType::String      => self::readString($bson, $offset),
             // When a fieldPaths entry exists for the current path, use 'root' as context so
             // that typeMap['root'] (set by typeMapForFieldPath) is used as the target type.
             // This keeps typeMap['document'] intact for sub-documents within that field.
-            BsonType::Document    => self::decodeDocument($bson, $offset, self::typeMapForFieldPath($typeMap, $fieldPath), $fieldPathOverride !== null ? 'root' : 'document', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
-            BsonType::Array       => self::decodeDocument($bson, $offset, self::typeMapForFieldPath($typeMap, $fieldPath), $fieldPathOverride !== null ? 'root' : 'array', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
+            BsonType::Document    => self::decodeDocument($bson, $offset, self::typeMapForFieldPath($typeMap, $fieldPath), isset($typeMap['fieldPaths'][$fieldPath]) ? 'root' : 'document', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
+            BsonType::Array       => self::decodeDocument($bson, $offset, self::typeMapForFieldPath($typeMap, $fieldPath), isset($typeMap['fieldPaths'][$fieldPath]) ? 'root' : 'array', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
             BsonType::Binary      => self::readBinary($bson, $offset),
             BsonType::Undefined   => BsonUndefined::create(),
             BsonType::ObjectId    => self::readObjectId($bson, $offset),
@@ -308,7 +305,7 @@ final class BsonDecoder
             BsonType::Decimal128  => self::readDecimal128($bson, $offset),
             BsonType::MaxKey      => new MaxKey(),
             BsonType::MinKey      => new MinKey(),
-            default => throw new DriverUnexpectedValueException(
+            default => throw new UnexpectedValueException(
                 sprintf('Detected unknown BSON type 0x%02X for field path "%s". Are you using the latest driver?', $type & 0xFF, $fieldPath),
             ),
         };
@@ -619,34 +616,14 @@ final class BsonDecoder
     /**
      * Return a typeMap for a child document/array, applying any fieldPaths override for $fieldPath.
      *
-     * If fieldPaths[$fieldPath] is set, override 'root' with that type and narrow fieldPaths
-     * so that deeper paths are relative to this child.
+     * fieldPaths uses absolute paths from the root, so they are kept unchanged.
+     * Only 'root' is overridden when a direct match exists, so that 'document' and 'array'
+     * from the parent typeMap are always inherited by sub-documents.
      */
     private static function typeMapForFieldPath(array $typeMap, string $fieldPath): array
     {
-        $fieldPaths = $typeMap['fieldPaths'] ?? [];
-
-        if ($fieldPaths === []) {
-            return $typeMap;
-        }
-
-        // Narrow fieldPaths: keep only entries that start with "$fieldPath." and strip the prefix
-        $prefix   = $fieldPath . '.';
-        $narrowed = [];
-
-        foreach ($fieldPaths as $path => $pathType) {
-            if (! str_starts_with($path, $prefix)) {
-                continue;
-            }
-
-            $narrowed[substr($path, strlen($prefix))] = $pathType;
-        }
-
-        $typeMap['fieldPaths'] = $narrowed;
-
-        // If there is a direct override for the current field path, use it as root
-        if (isset($fieldPaths[$fieldPath])) {
-            $typeMap['root'] = $fieldPaths[$fieldPath];
+        if (isset($typeMap['fieldPaths'][$fieldPath])) {
+            $typeMap['root'] = $typeMap['fieldPaths'][$fieldPath];
         }
 
         return $typeMap;
@@ -661,7 +638,7 @@ final class BsonDecoder
         try {
             $rc = new ReflectionClass($className);
         } catch (ReflectionException) {
-            throw new DriverInvalidArgumentException(
+            throw new InvalidArgumentException(
                 sprintf('Class %s does not exist', $className),
             );
         }
@@ -669,13 +646,13 @@ final class BsonDecoder
         if (! $rc->isInstantiable()) {
             $kind = $rc->isInterface() ? 'Interface' : 'Abstract class';
 
-            throw new DriverInvalidArgumentException(
+            throw new InvalidArgumentException(
                 sprintf('%s %s is not instantiatable', $kind, $className),
             );
         }
 
         if (! $rc->implementsInterface(Unserializable::class)) {
-            throw new DriverInvalidArgumentException(
+            throw new InvalidArgumentException(
                 sprintf('Class %s does not implement MongoDB\BSON\Unserializable', $className),
             );
         }
