@@ -19,6 +19,12 @@ final class ClientEncryption
     {
     }
 
+    /** @internal */
+    public static function create(): self
+    {
+        return new self();
+    }
+
     public function addKeyAltName(Binary $keyId, string $keyAltName): ?object
     {
         throw new RuntimeException('Client-side encryption is not supported in this driver');

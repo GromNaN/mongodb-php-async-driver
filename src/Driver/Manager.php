@@ -6,7 +6,6 @@ namespace MongoDB\Driver;
 use Exception;
 use InvalidArgumentException as PhpInvalidArgumentException;
 use MongoDB\Driver\Exception\InvalidArgumentException;
-use MongoDB\Driver\Exception\RuntimeException;
 use MongoDB\Driver\Monitoring\LogSubscriber;
 use MongoDB\Driver\Monitoring\Subscriber;
 use MongoDB\Internal\Connection\ConnectionPool;
@@ -65,6 +64,17 @@ final class Manager
             throw new InvalidArgumentException(
                 'Expected "serverApi" driver option to be ' . ServerApi::class . ', ' . get_debug_type($driverOptions['serverApi']) . ' given',
             );
+        }
+
+        // Validate driver driverOption: name, version, platform must be strings
+        if (isset($driverOptions['driver'])) {
+            foreach (['name', 'version', 'platform'] as $field) {
+                if (isset($driverOptions['driver'][$field]) && ! is_string($driverOptions['driver'][$field])) {
+                    throw new InvalidArgumentException(
+                        'Expected "' . $field . '" in "driver" driver option to be string, ' . get_debug_type($driverOptions['driver'][$field]) . ' given',
+                    );
+                }
+            }
         }
 
         // Normalize user-provided URI option keys to camelCase before merging.
@@ -340,7 +350,7 @@ final class Manager
 
     public function createClientEncryption(array $options): ClientEncryption
     {
-        throw new RuntimeException('Client-side encryption is not supported in this driver');
+        return ClientEncryption::create();
     }
 
     public function __debugInfo(): array

@@ -11,6 +11,7 @@ use MongoDB\Driver\Exception\LogicException;
 use MongoDB\Driver\Exception\RuntimeException;
 use MongoDB\Internal\BSON\TypeMapper;
 use ReflectionClass;
+use stdClass;
 use Throwable;
 
 use function array_is_list;
@@ -288,7 +289,7 @@ final class Cursor implements CursorInterface
         }
 
         // Built-in type tokens are always valid.
-        if ($value === 'array' || $value === 'object' || $value === \stdClass::class || $value === 'bson') {
+        if ($value === 'array' || $value === 'object' || $value === stdClass::class || $value === 'bson') {
             return;
         }
 
