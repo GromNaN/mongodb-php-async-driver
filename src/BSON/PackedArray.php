@@ -160,12 +160,20 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
 
     public function toCanonicalExtendedJSON(): string
     {
-        return ExtendedJson::toCanonical(BsonDecoder::decode(base64_decode($this->data), ['root' => 'array']));
+        BsonDecoder::$preserveInt64 = true;
+        $result = ExtendedJson::toCanonical(BsonDecoder::decode(base64_decode($this->data), ['root' => 'array']));
+        BsonDecoder::$preserveInt64 = false;
+
+        return $result;
     }
 
     public function toRelaxedExtendedJSON(): string
     {
-        return ExtendedJson::toRelaxed(BsonDecoder::decode(base64_decode($this->data), ['root' => 'array']));
+        BsonDecoder::$preserveInt64 = true;
+        $result = ExtendedJson::toRelaxed(BsonDecoder::decode(base64_decode($this->data), ['root' => 'array']));
+        BsonDecoder::$preserveInt64 = false;
+
+        return $result;
     }
 
     // ------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace MongoDB\Tests\Driver\Monitoring;
+namespace MongoDB\Tests\Integration\Monitoring;
 
 use MongoDB\BSON\Serializable;
 use MongoDB\Driver\Command;
@@ -13,8 +13,8 @@ use MongoDB\Driver\Monitoring\CommandSubscriber;
 use MongoDB\Driver\Monitoring\CommandSucceededEvent;
 use PHPUnit\Framework\TestCase;
 use stdClass;
-use Throwable;
 
+use function getenv;
 use function MongoDB\Driver\Monitoring\addSubscriber;
 use function MongoDB\Driver\Monitoring\removeSubscriber;
 
@@ -61,17 +61,17 @@ class CommandStartedEventCommandTest extends TestCase implements CommandSubscrib
         $this->capturedEvent = null;
     }
 
+    private function createManager(): Manager
+    {
+        return new Manager(getenv('MONGODB_URI') ?: 'mongodb://127.0.0.1:27017');
+    }
+
     public function testCommandDocumentIsStdClass(): void
     {
-        $manager = new Manager('mongodb://127.0.0.1:27017/?serverSelectionTimeoutMS=1');
+        $manager = $this->createManager();
 
         addSubscriber($this);
-
-        try {
-            $manager->executeCommand('test', new Command(['ping' => 1]));
-        } catch (Throwable) {
-        }
-
+        $manager->executeCommand('test', new Command(['ping' => 1]));
         removeSubscriber($this);
 
         $this->assertNotNull($this->capturedEvent);
@@ -82,18 +82,13 @@ class CommandStartedEventCommandTest extends TestCase implements CommandSubscrib
 
     public function testSerializableObjectInCommandBecomesStdClass(): void
     {
-        $manager = new Manager('mongodb://127.0.0.1:27017/?serverSelectionTimeoutMS=1');
+        $manager = $this->createManager();
 
         $indexDoc   = new SerializableDocument(['key' => ['x' => 1], 'name' => 'x_1', 'sparse' => true]);
         $commandArr = ['createIndexes' => 'test', 'indexes' => [$indexDoc]];
 
         addSubscriber($this);
-
-        try {
-            $manager->executeCommand('test', new Command($commandArr));
-        } catch (Throwable) {
-        }
-
+        $manager->executeCommand('test', new Command($commandArr));
         removeSubscriber($this);
 
         $this->assertNotNull($this->capturedEvent);

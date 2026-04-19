@@ -47,6 +47,8 @@ use function strrev;
 use function substr;
 use function unpack;
 
+use const PHP_INT_SIZE;
+
 /**
  * Pure-userland BSON decoder.
  *
@@ -62,6 +64,13 @@ final class BsonDecoder
         'document' => 'object',
         'array'    => 'array',
     ];
+
+    /**
+     * When true, BSON int64 values decode as Int64 objects instead of native PHP int.
+     * Set to true before decoding for Extended JSON output; reset to false afterwards.
+     * On 32-bit PHP (PHP_INT_SIZE < 8), int64 is always returned as Int64 regardless.
+     */
+    public static bool $preserveInt64 = false;
 
     // -------------------------------------------------------------------------
     // Public API
@@ -132,7 +141,9 @@ final class BsonDecoder
             BsonType::Symbol      => self::readSymbol($bson, $o),
             BsonType::Int32       => self::readInt32($bson, $o),
             BsonType::Timestamp   => self::readTimestamp($bson, $o),
-            BsonType::Int64       => new Int64(self::readInt64($bson, $o)),
+            BsonType::Int64       => PHP_INT_SIZE < 8
+                ? new Int64(self::readInt64($bson, $o))
+                : self::readInt64($bson, $o),
             BsonType::Decimal128  => self::readDecimal128($bson, $o),
             BsonType::Binary      => self::readBinary($bson, $o),
             BsonType::Document    => self::readSubDocumentAsBson($bson, $o),
@@ -285,7 +296,9 @@ final class BsonDecoder
             BsonType::CodeWithScope => self::readJavascriptWithScope($bson, $offset, $typeMap, $noRootPersistable, $noDocumentPersistable),
             BsonType::Int32       => self::readInt32($bson, $offset),
             BsonType::Timestamp   => self::readTimestamp($bson, $offset),
-            BsonType::Int64       => new Int64(self::readInt64($bson, $offset)),
+            BsonType::Int64       => self::$preserveInt64 || PHP_INT_SIZE < 8
+                ? new Int64(self::readInt64($bson, $offset))
+                : self::readInt64($bson, $offset),
             BsonType::Decimal128  => self::readDecimal128($bson, $offset),
             BsonType::MaxKey      => new MaxKey(),
             BsonType::MinKey      => new MinKey(),

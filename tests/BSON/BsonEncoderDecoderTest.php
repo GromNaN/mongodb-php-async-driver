@@ -57,13 +57,12 @@ class BsonEncoderDecoderTest extends TestCase
 
     public function testEncodeDecodeInt64(): void
     {
-        // 2147483648 is larger than INT32_MAX so it must be encoded as BSON int64,
-        // which decodes back as an Int64 object to preserve type fidelity.
+        // 2147483648 is larger than INT32_MAX so it must be encoded as BSON int64.
+        // On 64-bit PHP (matching ext-mongodb), it decodes back as a native PHP int.
         $doc    = ['n' => 2147483648];
         $result = $this->roundTrip($doc);
 
-        $this->assertInstanceOf(Int64::class, $result['n']);
-        $this->assertSame('2147483648', (string) $result['n']);
+        $this->assertSame(2147483648, $result['n']);
     }
 
     public function testEncodeDecodeFloat(): void
@@ -133,9 +132,8 @@ class BsonEncoderDecoderTest extends TestCase
         $doc    = ['n' => $n];
         $result = $this->roundTrip($doc);
 
-        // BSON int64 decodes as Int64 to preserve type fidelity
-        $this->assertInstanceOf(Int64::class, $result['n']);
-        $this->assertSame((string) PHP_INT_MAX, (string) $result['n']);
+        // On 64-bit PHP, BSON int64 decodes as native PHP int (matching ext-mongodb)
+        $this->assertSame(PHP_INT_MAX, $result['n']);
     }
 
     public function testEncodeDecodeRegex(): void

@@ -61,7 +61,7 @@ src/functions.php            Global Monitoring functions (not autoloadable)
 
 - **PSR-4 autoloading**: `MongoDB\BSON\` → `src/BSON/`, `MongoDB\Driver\` → `src/Driver/`, `MongoDB\Internal\` → `src/Internal/`. No manual `require` chains.
 - **No `uniqid()`**: use `bin2hex(random_bytes(N))` for all random identifiers.
-- **BSON int64 decodes as `Int64`**: `BsonDecoder` returns `MongoDB\BSON\Int64` objects for BSON type `0x12`, preserving type fidelity for canonical Extended JSON.
+- **BSON int64 decodes as PHP int**: `BsonDecoder` returns native PHP `int` for BSON type `0x12`, matching ext-mongodb behavior on 64-bit systems. `MongoDB\BSON\Int64` is only used when explicitly constructing BSON values or encoding.
 - **`WriteConcern::isDefault()`**: returns `true` only for driver-internal defaults, never for user-constructed instances. Use `WriteConcern::createDefault()` internally.
 - **`SyncRunner::run()`**: wraps async operations so they block when called from non-fiber context (plain PHP scripts) and suspend-only when called from inside a Revolt fiber.
 - **No class_exists guards**: classes are plain PSR-4 files. The Composer autoloader won't load a file for an already-defined class, so no guards are needed.
