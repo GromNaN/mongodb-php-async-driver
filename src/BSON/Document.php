@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace MongoDB\BSON;
 
 use ArrayAccess;
+use InvalidArgumentException;
 use IteratorAggregate;
 use JsonException;
-use MongoDB\BSON\Internal\Index\DocumentIndex;
-use MongoDB\BSON\Internal\Indexer;
 use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
 use MongoDB\Driver\Exception\LogicException as DriverLogicException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
@@ -16,6 +15,8 @@ use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueEx
 use MongoDB\Internal\BSON\BsonDecoder;
 use MongoDB\Internal\BSON\BsonEncoder;
 use MongoDB\Internal\BSON\ExtendedJson;
+use MongoDB\Internal\BSON\Index\DocumentIndex;
+use MongoDB\Internal\BSON\Index\Indexer;
 use OutOfBoundsException;
 use Stringable;
 
@@ -94,7 +95,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     public static function fromJSON(string $json): static
     {
         try {
-            $phpValue = json_decode($json, associative: true, flags: JSON_THROW_ON_ERROR);
+            $phpValue = json_decode($json, associative: false, flags: JSON_THROW_ON_ERROR);
         } catch (JsonException $e) {
             throw new DriverUnexpectedValueException(
                 sprintf('Got parse error at "%s", position 1: "SPECIAL_EXPECTED"', substr($json, 0, 1)),
@@ -106,8 +107,12 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
             throw new DriverUnexpectedValueException('Invalid Extended JSON string');
         }
 
-        $decoded = ExtendedJson::fromValue((array) $phpValue);
-        $bson    = BsonEncoder::encode((array) $decoded);
+        try {
+            $decoded = ExtendedJson::fromValue(ExtendedJson::normalizeJson($phpValue));
+            $bson    = BsonEncoder::encode((array) $decoded);
+        } catch (InvalidArgumentException $e) {
+            throw new DriverUnexpectedValueException($e->getMessage(), previous: $e);
+        }
 
         return new static($bson);
     }

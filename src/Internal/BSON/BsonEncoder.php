@@ -28,6 +28,14 @@ use function array_is_list;
 use function chr;
 use function get_debug_type;
 use function get_object_vars;
+use function gmp_and;
+use function gmp_cmp;
+use function gmp_div_q;
+use function gmp_init;
+use function gmp_mul;
+use function gmp_or;
+use function gmp_pow;
+use function gmp_strval;
 use function hex2bin;
 use function is_array;
 use function is_bool;
@@ -36,12 +44,21 @@ use function is_int;
 use function is_object;
 use function is_string;
 use function json_encode;
+use function ltrim;
 use function pack;
+use function preg_match;
 use function sprintf;
 use function str_contains;
 use function str_pad;
+use function str_replace;
+use function str_starts_with;
 use function strlen;
+use function strpos;
+use function strrev;
+use function strtolower;
 use function substr;
+
+use const STR_PAD_LEFT;
 
 /**
  * Pure-userland BSON encoder.
@@ -287,15 +304,7 @@ final class BsonEncoder
         }
 
         if ($value instanceof Decimal128) {
-            // Decimal128 stores its value as a string; for proper encoding we need
-            // the 16-byte IEEE 754 representation.  As a safe fallback we store the
-            // raw bytes if the value was originally decoded from BSON (16-char binary
-            // string), otherwise we zero-pad to 16 bytes.
-            $raw = $value->__toString();
-            // If the string happens to be exactly 16 bytes it came from our decoder.
-            $bytes = strlen($raw) === 16 ? $raw : substr(str_pad($raw, 16, "\x00"), 0, 16);
-
-            return [BsonType::Decimal128, $bytes];
+            return [BsonType::Decimal128, self::encodeDecimal128($value)];
         }
 
         if ($value instanceof MaxKey) {
@@ -358,5 +367,110 @@ final class BsonEncoder
         throw new InvalidArgumentException(
             sprintf('Unsupported value type for BSON encoding: %s', get_debug_type($value)),
         );
+    }
+
+    /**
+     * Encode a Decimal128 value to 16 IEEE 754-2008 BID little-endian bytes.
+     */
+    private static function encodeDecimal128(Decimal128 $value): string
+    {
+        $str   = (string) $value;
+        $lower = strtolower($str);
+
+        if ($lower === 'nan') {
+            return "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x7C";
+        }
+
+        $sign = str_starts_with($str, '-') ? 1 : 0;
+
+        if ($lower === 'infinity' || $lower === '-infinity') {
+            return "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00" . ($sign ? "\xF8" : "\x78");
+        }
+
+        // Strip leading sign
+        if ($sign || str_starts_with($str, '+')) {
+            $str = substr($str, 1);
+        }
+
+        // Extract exponent suffix
+        $exp = 0;
+        if (preg_match('/[eE]([+-]?\d+)$/', $str, $m)) {
+            $exp = (int) $m[1];
+            $str = substr($str, 0, -strlen($m[0]));
+        }
+
+        // Remove decimal point, adjust exponent by number of fractional digits
+        $dotPos = strpos($str, '.');
+        if ($dotPos !== false) {
+            $exp -= strlen($str) - $dotPos - 1;
+            $str  = str_replace('.', '', $str);
+        }
+
+        // Remove leading zeros, keep at least '0'
+        $str = ltrim($str, '0') ?: '0';
+
+        // Truncate to 34 significant digits (Decimal128 precision limit)
+        $digits = strlen($str);
+        if ($digits > 34) {
+            $exp += $digits - 34;
+            $str  = substr($str, 0, 34);
+        }
+
+        $two64   = gmp_init('0x10000000000000000');
+        $mask64  = gmp_init('0xFFFFFFFFFFFFFFFF');
+        $coeff   = gmp_init($str);
+        $maxCoeff = gmp_pow(gmp_init(10), 34);
+
+        // Clamp exponent to valid range [-6176, 6111] (biasedExp [0, 12287])
+        $biasedExp   = $exp + 6176;
+        $coeffIsZero = gmp_cmp($coeff, 0) === 0;
+        if ($biasedExp > 12287) {
+            if ($coeffIsZero) {
+                $biasedExp = 12287;
+            } else {
+                $excess = $biasedExp - 12287;
+                if ($excess >= 34) {
+                    // Any non-zero coefficient scaled by 10^34+ always overflows → infinity
+                    return "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00" . ($sign ? "\xF8" : "\x78");
+                }
+
+                $scaled = gmp_mul($coeff, gmp_pow(gmp_init(10), $excess));
+                if (gmp_cmp($scaled, $maxCoeff) >= 0) {
+                    return "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00" . ($sign ? "\xF8" : "\x78");
+                }
+
+                $coeff     = $scaled;
+                $biasedExp = 12287;
+            }
+        } elseif ($biasedExp < 0) {
+            if ($coeffIsZero) {
+                $biasedExp = 0;
+            } else {
+                $excess = -$biasedExp;
+                if ($excess > 34) {
+                    // Dividing any ≤34-digit number by 10^35+ gives 0
+                    $coeff = gmp_init(0);
+                } else {
+                    $coeff = gmp_div_q($coeff, gmp_pow(gmp_init(10), $excess));
+                }
+
+                $biasedExp = 0;
+            }
+        }
+
+        $low64  = gmp_and($coeff, $mask64);
+        $high49 = gmp_div_q($coeff, $two64);
+
+        // High 64-bit word: sign(bit 63) | biasedExp(bits 62-49) | high49(bits 48-0)
+        $highWord = gmp_or(
+            gmp_or(
+                $sign ? gmp_init('0x8000000000000000') : gmp_init(0),
+                gmp_mul(gmp_init($biasedExp), gmp_init('0x0002000000000000')),
+            ),
+            $high49,
+        );
+
+        return strrev(hex2bin(str_pad(gmp_strval($low64, 16), 16, '0', STR_PAD_LEFT)))
+            . strrev(hex2bin(str_pad(gmp_strval($highWord, 16), 16, '0', STR_PAD_LEFT)));
     }
 }
