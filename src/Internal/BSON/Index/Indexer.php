@@ -2,12 +2,13 @@
 
 declare(strict_types=1);
 
-namespace MongoDB\BSON\Internal;
+namespace MongoDB\Internal\BSON\Index;
 
 use InvalidArgumentException;
 use MongoDB\Internal\BSON\BsonType;
 
 use function preg_match;
+use function sprintf;
 use function strlen;
 use function substr;
 use function unpack;
@@ -21,7 +22,7 @@ use function unpack;
  */
 final class Indexer
 {
-    /** @return list<array{key: string, bsonType: BsonType, keyOffset: int, keyLength: int, dataOffset: int|null, dataLength: int|null}> */
+    /** @return list<array{key: string, bsonType: int, keyOffset: int, keyLength: int, dataOffset: int|null, dataLength: int|null}> */
     public function getIndex(string $bson): array
     {
         $fields = [];
@@ -67,15 +68,10 @@ final class Indexer
             throw new InvalidArgumentException('Invalid BSON data');
         }
 
-        ['type' => $typeInt, 'key' => $key] = $data;
+        ['type' => $bsonType, 'key' => $key] = $data;
 
         if (! preg_match('//u', $key)) {
             throw new InvalidArgumentException('Invalid UTF-8 data in BSON key');
-        }
-
-        $bsonType = BsonType::tryFrom($typeInt);
-        if ($bsonType === null) {
-            throw new InvalidArgumentException('Invalid BSON type ' . $typeInt);
         }
 
         // Shift offset by 1 byte for type, key length and a null byte
@@ -89,28 +85,17 @@ final class Indexer
                 break;
 
             case BsonType::String:
-            case BsonType::JavaScript:
+            case BsonType::Code:
             case BsonType::Symbol:
                 $data = @unpack('Vlength', $bson, $newOffset);
                 if ($data === false) {
                     throw new InvalidArgumentException('Invalid BSON data');
                 }
 
-                $dataLength = (int) $data['length'];
-
-                // Skip over the string length
-                $dataOffset = $newOffset + 4;
-
-                $data = @unpack('a' . $dataLength, $bson, $dataOffset);
-                if ($data === false) {
-                    throw new InvalidArgumentException('Invalid BSON data');
-                }
-
-                // Recalculate new offset
-                $newOffset = $dataOffset + $dataLength;
-
-                // Remove trailing NUL byte from data length
-                $dataLength--;
+                // dataOffset points to the int32 length header (BsonDecoder convention)
+                $dataOffset = $newOffset;
+                $dataLength = 4 + (int) $data['length'];
+                $newOffset += $dataLength;
                 break;
 
             case BsonType::Document:
@@ -131,10 +116,10 @@ final class Indexer
                     throw new InvalidArgumentException('Invalid BSON data');
                 }
 
-                // Data length does not include the unsigned byte for the subtype, so add it here
-                $dataLength = (int) $data['length'] + 1;
-                $dataOffset = $newOffset + 4;
-                $newOffset  = $dataOffset + $dataLength;
+                // dataOffset points to the int32 length header; total = int32 + subtype byte + data
+                $dataOffset = $newOffset;
+                $dataLength = 4 + 1 + (int) $data['length'];
+                $newOffset += $dataLength;
                 break;
 
             case BsonType::Undefined:
@@ -199,7 +184,7 @@ final class Indexer
                 $newOffset += $dataLength;
                 break;
 
-            case BsonType::JavaScriptWithScope:
+            case BsonType::CodeWithScope:
                 // int32 string document
                 // The int32 contains the total number of bytes in the code_w_scope (including itself)
                 $data = @unpack('Vlength', $bson, $newOffset);
@@ -207,10 +192,10 @@ final class Indexer
                     throw new InvalidArgumentException('Invalid BSON data');
                 }
 
-                // Skip the 4 byte length
-                $dataOffset = $newOffset + 4;
-                $dataLength = (int) $data['length'] - 4;
-                $newOffset  = $dataOffset + $dataLength;
+                // dataOffset points to the outer int32 (BsonDecoder convention)
+                $dataOffset = $newOffset;
+                $dataLength = (int) $data['length'];
+                $newOffset += $dataLength;
                 break;
 
             case BsonType::Int32:
@@ -224,6 +209,9 @@ final class Indexer
                 $dataOffset = $newOffset;
                 $newOffset += $dataLength;
                 break;
+
+            default:
+                throw new InvalidArgumentException(sprintf('Invalid BSON type "%d"', $bsonType));
         }
 
         return [

@@ -97,7 +97,7 @@ final class ExtendedJson
     /**
      * Convert a PHP value decoded from Extended JSON back into BSON type objects.
      *
-     * Recognises the canonical ($binary, $oid, $date, etc.) wrapper patterns
+     * Recognizes the canonical ($binary, $oid, $date, etc.) wrapper patterns
      * produced by toCanonical() / toRelaxed() and converts them back to the
      * corresponding MongoDB\BSON\* instances.  Plain scalars pass through
      * unchanged.
@@ -163,7 +163,13 @@ final class ExtendedJson
         }
 
         if (isset($value['$code'])) {
-            return new Javascript($value['$code'], isset($value['$scope']) ? (object) $value['$scope'] : null);
+            if (isset($value['$scope'])) {
+                $scope = (object) array_map(self::fromValue(...), $value['$scope']);
+
+                return new Javascript($value['$code'], $scope);
+            }
+
+            return new Javascript($value['$code']);
         }
 
         if (isset($value['$numberInt'])) {
@@ -287,7 +293,7 @@ final class ExtendedJson
             if ($scope !== null) {
                 return [
                     '$code'  => $v->getCode(),
-                    '$scope' => self::canonicalizeValue((array) $scope),
+                    '$scope' => self::canonicalizeValue($scope),
                 ];
             }
 
@@ -462,7 +468,7 @@ final class ExtendedJson
             if ($scope !== null) {
                 return [
                     '$code'  => $v->getCode(),
-                    '$scope' => self::relaxValue((array) $scope),
+                    '$scope' => self::relaxValue($scope),
                 ];
             }
 
@@ -599,12 +605,11 @@ final class ExtendedJson
     }
 
     /**
-     * Returns true if the integer value is within the JavaScript safe-integer
-     * range: -(2^53 - 1) to (2^53 - 1).
+     * Returns true if the integer value is within the JavaScript safe-integer.
      */
     private static function isJsSafeInteger(int $v): bool
     {
-        return $v >= -9007199254740991 && $v <= 9007199254740991;
+        return $v >= -(2 ^ 53 - 1) && $v <= (2 ^ 53 - 1);
     }
 
     /**

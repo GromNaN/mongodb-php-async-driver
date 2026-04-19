@@ -20,9 +20,6 @@ final class Symbol implements JsonSerializable, Type, Stringable
 {
     private function __construct(public readonly string $symbol)
     {
-        if (str_contains($symbol, "\0")) {
-            throw new InvalidArgumentException('Symbol cannot contain null bytes');
-        }
     }
 
     /**

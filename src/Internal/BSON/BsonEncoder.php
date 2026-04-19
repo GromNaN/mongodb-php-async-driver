@@ -158,13 +158,13 @@ final class BsonEncoder
 
         [$bsonType, $encoded] = self::encodeValue($value, $depth);
 
-        return chr($bsonType->value) . $ckey . $encoded;
+        return chr($bsonType) . $ckey . $encoded;
     }
 
     /**
-     * Determine the BSON type for a value and return [BsonType, value_bytes].
+     * Determine the BSON type for a value and return [int, value_bytes].
      *
-     * @return array{BsonType, string}
+     * @return array{BsonType::*, string}
      */
     private static function encodeValue(mixed $value, int $depth = 0): array
     {
@@ -214,6 +214,14 @@ final class BsonEncoder
             $data    = $value->getData();
             $subtype = $value->getType();
 
+            // Subtype 0x02 (old binary) has a redundant int32 length prefix inside the data
+            if ($subtype === Binary::TYPE_OLD_BINARY) {
+                return [
+                    BsonType::Binary,
+                    pack('V', strlen($data) + 4) . chr($subtype) . pack('V', strlen($data)) . $data,
+                ];
+            }
+
             return [
                 BsonType::Binary,
                 pack('V', strlen($data)) . chr($subtype) . $data,
@@ -253,14 +261,14 @@ final class BsonEncoder
                 $totalLen   = 4 + strlen($inner); // includes the leading int32 itself
 
                 return [
-                    BsonType::JavaScriptWithScope,
+                    BsonType::CodeWithScope,
                     pack('V', $totalLen) . $inner,
                 ];
             }
 
             // plain javascript (0x0D)
             return [
-                BsonType::JavaScript,
+                BsonType::Code,
                 pack('V', strlen($code) + 1) . $code . "\x00",
             ];
         }

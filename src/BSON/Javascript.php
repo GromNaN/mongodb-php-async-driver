@@ -13,7 +13,6 @@ use function is_array;
 use function is_object;
 use function is_string;
 use function sprintf;
-use function str_contains;
 
 final class Javascript implements JavascriptInterface, JsonSerializable, Type, Stringable
 {
@@ -21,10 +20,6 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
 
     public function __construct(public readonly string $code, array|object|null $scope = null)
     {
-        if (str_contains($code, "\0")) {
-            throw new InvalidArgumentException('Code cannot contain null bytes');
-        }
-
         if (is_array($scope)) {
             $this->scope = (object) $scope;
         } else {
@@ -87,10 +82,6 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
             );
         }
 
-        if (str_contains($data['code'], "\0")) {
-            throw new InvalidArgumentException('Code cannot contain null bytes');
-        }
-
         $scope = $data['scope'] ?? null;
 
         if ($scope !== null && ! is_array($scope) && ! is_object($scope)) {
@@ -109,10 +100,6 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
             throw new InvalidArgumentException(
                 'MongoDB\BSON\Javascript initialization requires "code" string field',
             );
-        }
-
-        if (str_contains($properties['code'], "\0")) {
-            throw new InvalidArgumentException('Code cannot contain null bytes');
         }
 
         $scope = $properties['scope'] ?? null;

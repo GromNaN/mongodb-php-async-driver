@@ -32,9 +32,18 @@ use function array_key_exists;
 use function array_merge;
 use function bin2hex;
 use function class_exists;
+use function gmp_add;
+use function gmp_and;
+use function gmp_init;
+use function gmp_mul;
+use function gmp_pow;
+use function gmp_strval;
 use function ord;
 use function sprintf;
+use function str_repeat;
+use function strlen;
 use function strpos;
+use function strrev;
 use function substr;
 use function unpack;
 
@@ -48,7 +57,7 @@ final class BsonDecoder
     /**
      * Default type map applied when none (or a partial one) is supplied.
      */
-    private const DEFAULT_TYPE_MAP = [
+    private const array DEFAULT_TYPE_MAP = [
         'root'     => 'object',
         'document' => 'object',
         'array'    => 'array',
@@ -71,7 +80,6 @@ final class BsonDecoder
         bool $handlePersistable = true,
         bool $ignoreRootKeys = false,
     ): array|object {
-        // Resolve null type map values to defaults
         foreach ($typeMap as $k => $v) {
             if ($v !== null) {
                 continue;
@@ -80,9 +88,6 @@ final class BsonDecoder
             unset($typeMap[$k]);
         }
 
-        // Compute Persistable-suppression flags from the filtered typeMap BEFORE merging with
-        // defaults: if the user explicitly set root/document to 'object', they want stdClass and
-        // Persistable detection must not override that.
         $noRootPersistable     = array_key_exists('root', $typeMap) && $typeMap['root'] === 'object';
         $noDocumentPersistable = array_key_exists('document', $typeMap) && $typeMap['document'] === 'object';
 
@@ -95,6 +100,48 @@ final class BsonDecoder
         } catch (RuntimeException $e) {
             throw new DriverUnexpectedValueException($e->getMessage(), previous: $e);
         }
+    }
+
+    /**
+     * Decode the value of a single typed BSON field at a known byte offset.
+     *
+     * $offset must point to the first byte of the complete field encoding:
+     *   - for length-prefixed types (String, Binary, Code, Symbol, CodeWithScope)
+     *     this is the first byte of the int32 length header
+     *   - for all other types it is the first byte of the raw value
+     *
+     * Types with no data (Null, Undefined, MinKey, MaxKey) ignore $offset.
+     */
+    public static function decodeFieldValue(string $bson, int $type, int $offset): mixed
+    {
+        $o = $offset;
+
+        return match ($type) {
+            BsonType::Null        => null,
+            BsonType::Undefined   => BsonUndefined::create(),
+            BsonType::MinKey      => new MinKey(),
+            BsonType::MaxKey      => new MaxKey(),
+            BsonType::Double      => self::readDouble($bson, $o),
+            BsonType::String      => self::readString($bson, $o),
+            BsonType::ObjectId    => self::readObjectId($bson, $o),
+            BsonType::Boolean     => self::readBoolean($bson, $o),
+            BsonType::Date        => self::readUtcDateTime($bson, $o),
+            BsonType::Regex       => self::readRegex($bson, $o),
+            BsonType::DBPointer   => self::readDbPointer($bson, $o),
+            BsonType::Code        => self::readJavascript($bson, $o),
+            BsonType::Symbol      => self::readSymbol($bson, $o),
+            BsonType::Int32       => self::readInt32($bson, $o),
+            BsonType::Timestamp   => self::readTimestamp($bson, $o),
+            BsonType::Int64       => new Int64(self::readInt64($bson, $o)),
+            BsonType::Decimal128  => self::readDecimal128($bson, $o),
+            BsonType::Binary      => self::readBinary($bson, $o),
+            BsonType::Document    => self::readSubDocumentAsBson($bson, $o),
+            BsonType::Array       => self::readSubArrayAsBson($bson, $o),
+            BsonType::CodeWithScope => self::readJavascriptWithScopeAsBson($bson, $o),
+            default => throw new DriverUnexpectedValueException(
+                sprintf('Detected unknown BSON type 0x%02X', $type & 0xFF),
+            ),
+        };
     }
 
     // -------------------------------------------------------------------------
@@ -120,7 +167,6 @@ final class BsonDecoder
     ): array|object {
         $startOffset = $offset;
 
-        // Read document total length (int32 LE)
         $totalLen = self::readInt32Unsigned($bson, $offset);
 
         if ($totalLen < 5) {
@@ -131,34 +177,26 @@ final class BsonDecoder
 
         $endOffset = $startOffset + $totalLen;
 
-        // For BSON arrays, collect elements sequentially (handles degenerate/duplicate BSON keys)
-        // Also allow callers to force sequential collection at root via $ignoreRootKeys
         $isArray = ($context === 'array') || ($context === 'root' && $ignoreRootKeys);
 
-        // Collect elements into a plain PHP array first
         $fields = [];
 
         while ($offset < $endOffset - 1) {
-            // Read type byte (unsigned 0–255)
             $typeByte = ord($bson[$offset]);
             $offset++;
 
             if ($typeByte === 0x00) {
-                // Terminating null – end of document
                 break;
             }
 
-            // Sign-extend for types with values >= 0x80 (e.g. MinKey = 0xFF → -1)
+            // Sign-extend for types with values >= 0x80 (MinKey = 0xFF → -1)
             $type = $typeByte >= 0x80 ? $typeByte - 0x100 : $typeByte;
 
-            // Read key (cstring) and build field path for error messages
             $key       = self::readCString($bson, $offset);
             $fieldPath = $parentFieldPath === '' ? $key : $parentFieldPath . '.' . $key;
 
-            // Read value
             $value = self::decodeElement($bson, $offset, $type, $typeMap, $handlePersistable, $fieldPath, $noRootPersistable, $noDocumentPersistable);
 
-            // For arrays, always append in insertion order (handles degenerate BSON)
             if ($isArray) {
                 $fields[] = $value;
             } else {
@@ -166,37 +204,28 @@ final class BsonDecoder
             }
         }
 
-        // Ensure offset is positioned right after the document
         $offset = $endOffset;
 
-        // Determine target type from typeMap
         $targetType = match ($context) {
-            'root'     => $typeMap['root']     ?? 'object',
-            'array'    => $typeMap['array']    ?? 'array',
-            default    => $typeMap['document'] ?? 'object',
+            'root'  => $typeMap['root']     ?? 'object',
+            'array' => $typeMap['array']    ?? 'array',
+            default => $typeMap['document'] ?? 'object',
         };
 
-        // Resolve 'bson' shorthand based on context (root is handled in callers)
         if ($targetType === 'bson' && $context !== 'root') {
             $targetType = $context === 'array' ? 'bsonArray' : 'bsonDocument';
         }
 
-        // Short-circuit for array/BSON-typed targets: no Persistable detection
         if ($targetType === 'array' || $targetType === 'bsonDocument' || $targetType === 'bsonArray') {
             return self::applyTargetType($fields, $targetType, $bson, $startOffset, $totalLen);
         }
 
-        // Determine if Persistable detection is suppressed for this context.
-        // It is suppressed when the user explicitly requested 'object' (= stdClass), meaning
-        // they do not want __pclass-based class instantiation.
         $persistableDisabled = match ($context) {
             'root'  => $noRootPersistable,
             'array' => true,
             default => $noDocumentPersistable,
         };
 
-        // Try __pclass Persistable override: if the document carries a __pclass Binary (subtype
-        // 0x80) whose class name implements Persistable, use that class regardless of type map.
         if (
             $handlePersistable
             && ! $persistableDisabled
@@ -209,19 +238,17 @@ final class BsonDecoder
                 $rc = new ReflectionClass($pclassName);
                 if ($rc->isInstantiable() && $rc->implementsInterface(Persistable::class)) {
                     $obj = $rc->newInstanceWithoutConstructor();
-                    $obj->bsonUnserialize($fields); // pass ALL fields including __pclass
+                    $obj->bsonUnserialize($fields);
 
                     return $obj;
                 }
             }
         }
 
-        // Resolve 'object' target to stdClass
         if ($targetType === 'object') {
             return self::arrayToStdClass($fields);
         }
 
-        // User-supplied class name: validate and instantiate
         return self::instantiateClass($targetType, $fields);
     }
 
@@ -241,63 +268,38 @@ final class BsonDecoder
         bool $noRootPersistable = false,
         bool $noDocumentPersistable = false,
     ): mixed {
-        return match (BsonType::tryFrom($type)) {
-            BsonType::Double => self::readDouble($bson, $offset),
-
-            BsonType::String => self::readString($bson, $offset),
-
-            BsonType::Document => self::decodeDocument($bson, $offset, $typeMap, 'document', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
-
-            BsonType::Array => self::decodeDocument($bson, $offset, $typeMap, 'array', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
-
-            BsonType::Binary => self::readBinary($bson, $offset),
-
-            BsonType::Undefined => BsonUndefined::create(),
-
-            BsonType::ObjectId => self::readObjectId($bson, $offset),
-
-            BsonType::Boolean => self::readBoolean($bson, $offset),
-
-            BsonType::Date => self::readUtcDateTime($bson, $offset),
-
-            BsonType::Null => null,
-
-            BsonType::Regex => self::readRegex($bson, $offset),
-
-            BsonType::DBPointer => self::readDbPointer($bson, $offset),
-
-            BsonType::JavaScript => self::readJavascript($bson, $offset),
-
-            BsonType::Symbol => self::readSymbol($bson, $offset),
-
-            BsonType::JavaScriptWithScope => self::readJavascriptWithScope($bson, $offset, $typeMap, $noRootPersistable, $noDocumentPersistable),
-
-            BsonType::Int32 => self::readInt32($bson, $offset),
-
-            BsonType::Timestamp => self::readTimestamp($bson, $offset),
-
-            BsonType::Int64 => new Int64(self::readInt64($bson, $offset)),
-
-            BsonType::Decimal128 => self::readDecimal128($bson, $offset),
-
-            BsonType::MaxKey => new MaxKey(),
-
-            BsonType::MinKey => new MinKey(),
-
-            null => throw new DriverUnexpectedValueException(
+        return match ($type) {
+            BsonType::Double      => self::readDouble($bson, $offset),
+            BsonType::String      => self::readString($bson, $offset),
+            BsonType::Document    => self::decodeDocument($bson, $offset, $typeMap, 'document', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
+            BsonType::Array       => self::decodeDocument($bson, $offset, $typeMap, 'array', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
+            BsonType::Binary      => self::readBinary($bson, $offset),
+            BsonType::Undefined   => BsonUndefined::create(),
+            BsonType::ObjectId    => self::readObjectId($bson, $offset),
+            BsonType::Boolean     => self::readBoolean($bson, $offset),
+            BsonType::Date        => self::readUtcDateTime($bson, $offset),
+            BsonType::Null        => null,
+            BsonType::Regex       => self::readRegex($bson, $offset),
+            BsonType::DBPointer   => self::readDbPointer($bson, $offset),
+            BsonType::Code        => self::readJavascript($bson, $offset),
+            BsonType::Symbol      => self::readSymbol($bson, $offset),
+            BsonType::CodeWithScope => self::readJavascriptWithScope($bson, $offset, $typeMap, $noRootPersistable, $noDocumentPersistable),
+            BsonType::Int32       => self::readInt32($bson, $offset),
+            BsonType::Timestamp   => self::readTimestamp($bson, $offset),
+            BsonType::Int64       => new Int64(self::readInt64($bson, $offset)),
+            BsonType::Decimal128  => self::readDecimal128($bson, $offset),
+            BsonType::MaxKey      => new MaxKey(),
+            BsonType::MinKey      => new MinKey(),
+            default => throw new DriverUnexpectedValueException(
                 sprintf('Detected unknown BSON type 0x%02X for field path "%s". Are you using the latest driver?', $type & 0xFF, $fieldPath),
             ),
         };
     }
 
     // -------------------------------------------------------------------------
-    // Low-level read helpers
+    // Low-level read helpers (offset passed by reference, advanced past the value)
     // -------------------------------------------------------------------------
 
-    /**
-     * Read a null-terminated C-string from $bson at $offset.
-     * Advances $offset past the null byte.
-     */
     private static function readCString(string $bson, int &$offset): string
     {
         $nullPos = strpos($bson, "\x00", $offset);
@@ -314,10 +316,6 @@ final class BsonDecoder
         return $str;
     }
 
-    /**
-     * Read an unsigned 32-bit little-endian integer.
-     * Does NOT sign-extend (returns 0–4294967295).
-     */
     private static function readInt32Unsigned(string $bson, int &$offset): int
     {
         /** @var array{1: int} $u */
@@ -327,14 +325,10 @@ final class BsonDecoder
         return $u[1];
     }
 
-    /**
-     * Read a signed 32-bit little-endian integer.
-     */
     private static function readInt32(string $bson, int &$offset): int
     {
         $v = self::readInt32Unsigned($bson, $offset);
 
-        // Sign-extend: values >= 0x80000000 are negative in two's complement
         if ($v >= 0x80000000) {
             $v -= 0x100000000;
         }
@@ -342,11 +336,6 @@ final class BsonDecoder
         return $v;
     }
 
-    /**
-     * Read a 64-bit little-endian integer.
-     * On 64-bit PHP, pack('P') / unpack('P') handles unsigned 64-bit;
-     * PHP natively stores it as a signed int64 on 64-bit systems.
-     */
     private static function readInt64(string $bson, int &$offset): int
     {
         /** @var array{1: int} $u */
@@ -356,9 +345,6 @@ final class BsonDecoder
         return $u[1];
     }
 
-    /**
-     * Read a 64-bit IEEE 754 little-endian double.
-     */
     private static function readDouble(string $bson, int &$offset): float
     {
         /** @var array{1: float} $u */
@@ -368,21 +354,15 @@ final class BsonDecoder
         return $u[1];
     }
 
-    /**
-     * Read a BSON UTF-8 string (int32 length + bytes + null terminator).
-     */
     private static function readString(string $bson, int &$offset): string
     {
-        $len    = self::readInt32Unsigned($bson, $offset); // includes null terminator
-        $str    = substr($bson, $offset, $len - 1);        // exclude null
-        $offset += $len;                                   // skip string bytes + null
+        $len    = self::readInt32Unsigned($bson, $offset);
+        $str    = substr($bson, $offset, $len - 1);
+        $offset += $len;
 
         return $str;
     }
 
-    /**
-     * Read a BSON Binary value.
-     */
     private static function readBinary(string $bson, int &$offset): Binary
     {
         $len     = self::readInt32Unsigned($bson, $offset);
@@ -391,12 +371,14 @@ final class BsonDecoder
         $data    = substr($bson, $offset, $len);
         $offset += $len;
 
+        // Subtype 0x02 (old binary) has a redundant int32 length prefix inside the data
+        if ($subtype === Binary::TYPE_OLD_BINARY) {
+            $data = substr($data, 4);
+        }
+
         return new Binary($data, $subtype);
     }
 
-    /**
-     * Read a 12-byte BSON ObjectId.
-     */
     private static function readObjectId(string $bson, int &$offset): ObjectId
     {
         $bytes  = substr($bson, $offset, 12);
@@ -405,9 +387,6 @@ final class BsonDecoder
         return new ObjectId(bin2hex($bytes));
     }
 
-    /**
-     * Read a single BSON boolean byte.
-     */
     private static function readBoolean(string $bson, int &$offset): bool
     {
         $byte = ord($bson[$offset]);
@@ -416,9 +395,6 @@ final class BsonDecoder
         return $byte !== 0x00;
     }
 
-    /**
-     * Read a BSON UTC datetime (int64 milliseconds).
-     */
     private static function readUtcDateTime(string $bson, int &$offset): UTCDateTime
     {
         $ms = self::readInt64($bson, $offset);
@@ -426,9 +402,6 @@ final class BsonDecoder
         return new UTCDateTime($ms);
     }
 
-    /**
-     * Read two cstrings as a BSON Regex.
-     */
     private static function readRegex(string $bson, int &$offset): Regex
     {
         $pattern = self::readCString($bson, $offset);
@@ -437,10 +410,6 @@ final class BsonDecoder
         return new Regex($pattern, $flags);
     }
 
-    /**
-     * Read a BSON DBPointer value (deprecated type 0x0C).
-     * Format: string (ref name) + 12-byte ObjectId bytes.
-     */
     private static function readDbPointer(string $bson, int &$offset): DBPointer
     {
         $ref = self::readString($bson, $offset);
@@ -450,10 +419,6 @@ final class BsonDecoder
         return DBPointer::create($ref, $oid);
     }
 
-    /**
-     * Read a BSON Symbol value (deprecated type 0x0E).
-     * Format: same as string (int32 length + bytes + null).
-     */
     private static function readSymbol(string $bson, int &$offset): Symbol
     {
         $sym = self::readString($bson, $offset);
@@ -461,9 +426,6 @@ final class BsonDecoder
         return Symbol::create($sym);
     }
 
-    /**
-     * Read a BSON JavaScript code value (no scope).
-     */
     private static function readJavascript(string $bson, int &$offset): Javascript
     {
         $code = self::readString($bson, $offset);
@@ -471,9 +433,6 @@ final class BsonDecoder
         return new Javascript($code);
     }
 
-    /**
-     * Read a BSON JavaScript with scope value.
-     */
     private static function readJavascriptWithScope(
         string $bson,
         int &$offset,
@@ -481,7 +440,6 @@ final class BsonDecoder
         bool $noRootPersistable = false,
         bool $noDocumentPersistable = false,
     ): Javascript {
-        // Total length of the javascript_with_scope value (includes the 4-byte length itself)
         $totalLen = self::readInt32Unsigned($bson, $offset);
 
         $code  = self::readString($bson, $offset);
@@ -491,8 +449,19 @@ final class BsonDecoder
     }
 
     /**
-     * Read a BSON Timestamp (two uint32 values: increment, timestamp).
+     * Variant used by decodeFieldValue: returns the scope as a raw Document
+     * instead of applying a type map.
      */
+    private static function readJavascriptWithScopeAsBson(string $bson, int &$offset): Javascript
+    {
+        self::readInt32Unsigned($bson, $offset); // consume outer length int32
+        $code     = self::readString($bson, $offset);
+        $scopeLen = (int) (unpack('V', substr($bson, $offset, 4))[1]);
+        $scope    = Document::fromBSON(substr($bson, $offset, $scopeLen));
+
+        return new Javascript($code, $scope);
+    }
+
     private static function readTimestamp(string $bson, int &$offset): Timestamp
     {
         $increment = self::readInt32Unsigned($bson, $offset);
@@ -501,30 +470,107 @@ final class BsonDecoder
         return new Timestamp($increment, $timestamp);
     }
 
-    /**
-     * Read a 16-byte BSON Decimal128 using IEEE 754-2008 BID binary format.
-     */
     private static function readDecimal128(string $bson, int &$offset): Decimal128
     {
         $bytes   = substr($bson, $offset, 16);
         $offset += 16;
 
-        return Decimal128::fromBinaryBytes($bytes);
+        return self::decimalFromBytes($bytes);
+    }
+
+    /**
+     * Decode a 16-byte IEEE 754-2008 Decimal128 BID binary representation.
+     */
+    private static function decimalFromBytes(string $bytes): Decimal128
+    {
+        $b15    = ord($bytes[15]);
+        $b14    = ord($bytes[14]);
+        $sign   = ($b15 >> 7) & 1;
+        $combo5 = ($b15 >> 2) & 0x1F;
+
+        if ($combo5 >= 0x1E) {
+            return new Decimal128($combo5 === 0x1E ? ($sign ? '-Infinity' : 'Infinity') : 'NaN');
+        }
+
+        if ($combo5 >= 0x18) {
+            $biasedExp = (($b15 & 0x1F) << 9) | ($b14 << 1) | ((ord($bytes[13]) >> 7) & 1);
+
+            return new Decimal128(self::decimalToString($sign, '0', $biasedExp - 6176));
+        }
+
+        $biasedExp = (($b15 & 0x7F) << 7) | ($b14 >> 1);
+        $exp       = $biasedExp - 6176;
+        $highGmp   = gmp_init('0x' . bin2hex(strrev(substr($bytes, 8, 8))));
+        $lowGmp    = gmp_init('0x' . bin2hex(strrev(substr($bytes, 0, 8))));
+        $high49    = gmp_and($highGmp, gmp_init('0x0001FFFFFFFFFFFF'));
+        $coeff     = gmp_add(gmp_mul($high49, gmp_pow(gmp_init(2), 64)), $lowGmp);
+
+        return new Decimal128(self::decimalToString($sign, gmp_strval($coeff), $exp));
+    }
+
+    private static function decimalToString(int $sign, string $coeffStr, int $exp): string
+    {
+        $prefix = $sign ? '-' : '';
+
+        if ($coeffStr === '0') {
+            if ($exp === 0) {
+                return $prefix . '0';
+            }
+
+            if ($exp > 0 || $exp < -6) {
+                return $prefix . '0E' . ($exp > 0 ? '+' : '') . $exp;
+            }
+
+            return $prefix . '0.' . str_repeat('0', -$exp);
+        }
+
+        $d           = strlen($coeffStr);
+        $adjustedExp = $exp + $d - 1;
+
+        if ($exp <= 0 && $adjustedExp >= -6) {
+            if ($exp === 0) {
+                return $prefix . $coeffStr;
+            }
+
+            $decimalPlaces = -$exp;
+            if ($decimalPlaces >= $d) {
+                return $prefix . '0.' . str_repeat('0', $decimalPlaces - $d) . $coeffStr;
+            }
+
+            return $prefix . substr($coeffStr, 0, $d - $decimalPlaces) . '.' . substr($coeffStr, $d - $decimalPlaces);
+        }
+
+        $mantissa = $d === 1 ? $coeffStr : ($coeffStr[0] . '.' . substr($coeffStr, 1));
+
+        return $prefix . $mantissa . 'E' . ($adjustedExp >= 0 ? '+' : '') . $adjustedExp;
+    }
+
+    /**
+     * Read a sub-document at $offset and return it as a raw Document.
+     * Reads the embedded int32 length; $offset is not modified.
+     */
+    private static function readSubDocumentAsBson(string $bson, int $offset): Document
+    {
+        $len = (int) (unpack('V', substr($bson, $offset, 4))[1]);
+
+        return Document::fromBSON(substr($bson, $offset, $len));
+    }
+
+    /**
+     * Read a sub-array at $offset and return it as a raw PackedArray.
+     * Reads the embedded int32 length; $offset is not modified.
+     */
+    private static function readSubArrayAsBson(string $bson, int $offset): PackedArray
+    {
+        $len = (int) (unpack('V', substr($bson, $offset, 4))[1]);
+
+        return PackedArray::fromBSON(substr($bson, $offset, $len));
     }
 
     // -------------------------------------------------------------------------
     // Type-map application
     // -------------------------------------------------------------------------
 
-    /**
-     * Convert a plain PHP array of decoded fields to the type requested by $targetType.
-     *
-     * @param array<string, mixed> $fields
-     * @param string               $targetType 'array'|'object'|'bsonDocument'|'bsonArray'|class-string
-     * @param string               $rawBson    Raw BSON for the full input (used for bsonDocument/bsonArray)
-     * @param int                  $docOffset  Byte offset where this document started in $rawBson
-     * @param int                  $docLen     Byte length of this document in $rawBson
-     */
     private static function applyTargetType(
         array $fields,
         string $targetType,
@@ -533,24 +579,15 @@ final class BsonDecoder
         int $docLen,
     ): array|object {
         return match ($targetType) {
-            'array' => $fields,
-
-            'object' => self::arrayToStdClass($fields),
-
+            'array'        => $fields,
+            'object'       => self::arrayToStdClass($fields),
             'bsonDocument' => Document::fromBSON(substr($rawBson, $docOffset, $docLen)),
-
-            'bsonArray' => PackedArray::fromBSON(substr($rawBson, $docOffset, $docLen)),
-
-            default => self::instantiateClass($targetType, $fields),
+            'bsonArray'    => PackedArray::fromBSON(substr($rawBson, $docOffset, $docLen)),
+            default        => self::instantiateClass($targetType, $fields),
         };
     }
 
-    /**
-     * Recursively convert an associative array to a stdClass, preserving
-     * nested stdClass objects for sub-documents.
-     *
-     * @param array<string, mixed> $data
-     */
+    /** @param array<string, mixed> $data */
     private static function arrayToStdClass(array $data): stdClass
     {
         $obj = new stdClass();
@@ -562,8 +599,6 @@ final class BsonDecoder
     }
 
     /**
-     * Instantiate a user-supplied class and populate it with decoded fields.
-     *
      * @param class-string         $className
      * @param array<string, mixed> $fields
      */
