@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\BSON;
 
+use BackedEnum;
 use InvalidArgumentException;
 use MongoDB\BSON\Binary;
 use MongoDB\BSON\DBPointer;
@@ -23,6 +24,7 @@ use MongoDB\BSON\Timestamp;
 use MongoDB\BSON\Undefined as BsonUndefined;
 use MongoDB\BSON\UTCDateTime;
 use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueException;
+use UnitEnum;
 
 use function array_is_list;
 use function chr;
@@ -76,6 +78,12 @@ final class BsonEncoder
      */
     public static function encode(array|object $document): string
     {
+        if ($document instanceof UnitEnum) {
+            throw new DriverUnexpectedValueException(
+                sprintf('Enum %s cannot be serialized as a root element', $document::class),
+            );
+        }
+
         return self::encodeDocument($document, 0);
     }
 
@@ -173,7 +181,7 @@ final class BsonEncoder
 
         $ckey = $key . "\x00";
 
-        [$bsonType, $encoded] = self::encodeValue($value, $depth);
+        [$bsonType, $encoded] = self::encodeValue($value, $depth, $key);
 
         return chr($bsonType) . $ckey . $encoded;
     }
@@ -183,7 +191,7 @@ final class BsonEncoder
      *
      * @return array{BsonType::*, string}
      */
-    private static function encodeValue(mixed $value, int $depth = 0): array
+    private static function encodeValue(mixed $value, int $depth = 0, string $fieldPath = ''): array
     {
         // --- null ---
         if ($value === null) {
@@ -359,12 +367,24 @@ final class BsonEncoder
             return [BsonType::Document, self::encodeDocument($serialized, $depth + 1)];
         }
 
+        // --- Non-backed enum: reject ---
+        if ($value instanceof UnitEnum && ! $value instanceof BackedEnum) {
+            throw new DriverUnexpectedValueException(
+                sprintf('Non-backed enum %s cannot be serialized for field path "%s"', $value::class, $fieldPath),
+            );
+        }
+
+        // --- Backed enum: serialize as backing value ---
+        if ($value instanceof BackedEnum) {
+            return self::encodeValue($value->value, $depth);
+        }
+
         // --- Generic object (stdClass, etc.) ---
         if (is_object($value)) {
             return [BsonType::Document, self::encodeDocument(get_object_vars($value), $depth + 1)];
         }
 
-        throw new InvalidArgumentException(
+        throw new DriverUnexpectedValueException(
             sprintf('Unsupported value type for BSON encoding: %s', get_debug_type($value)),
         );
     }

@@ -20,10 +20,12 @@ use function strtolower;
  */
 final class DBPointer implements JsonSerializable, Type, Stringable
 {
+    public readonly string $ref;
     public readonly string $id;
 
-    private function __construct(public readonly string $ref, string $id)
+    private function __construct(string $ref, string $id)
     {
+        $this->ref = $ref;
         $this->id  = strtolower($id);
     }
 

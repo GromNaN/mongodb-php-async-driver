@@ -4,19 +4,24 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\BSON\Index;
 
+use MongoDB\BSON\Document;
+use MongoDB\BSON\PackedArray;
 use OutOfBoundsException;
-use Stringable;
+use WeakMap;
 
 use function array_map;
 
 /** @internal */
 abstract class Index
 {
+    /** @var WeakMap<Document|PackedArray, self>|null */
+    private static ?WeakMap $cache = null;
+
     /** @var array<string|int, Field> */
     public readonly array $fields;
 
-    public function __construct(
-        Stringable $structure,
+    final public function __construct(
+        Document|PackedArray $structure,
         /** @param list<array{key: string, bsonType: int, keyOffset: int, keyLength: int, dataOffset?: int|null, dataLength?: int|null}> $fields */
         array $fields,
     ) {
@@ -32,6 +37,20 @@ abstract class Index
             ),
             static::sortFields($fields),
         );
+    }
+
+    public static function forBson(Document|PackedArray $bson): self
+    {
+        self::$cache ??= new WeakMap();
+
+        if (! isset(self::$cache[$bson])) {
+            $fields             = (new Indexer())->getIndex((string) $bson);
+            self::$cache[$bson] = $bson instanceof Document
+                ? new DocumentIndex($bson, $fields)
+                : new PackedArrayIndex($bson, $fields);
+        }
+
+        return self::$cache[$bson];
     }
 
     public function hasField(string|int $key): bool

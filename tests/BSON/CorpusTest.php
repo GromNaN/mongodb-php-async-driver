@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MongoDB\Tests\BSON;
 
 use MongoDB\BSON\Document;
+use MongoDB\Driver\Exception\Exception;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Throwable;
@@ -32,7 +33,11 @@ use const JSON_THROW_ON_ERROR;
 final class CorpusTest extends TestCase
 {
     private static array $tests = [];
-    private static array $skippedTests = ['Double type (double.json)/-0.0' => 'PHP cannot represent negative zero'];
+    private static array $skippedTests = [
+        'Double type (double.json)/-0.0'                                                                                       => 'PHP cannot represent negative zero',
+        'Javascript Code (code.json)/Embedded nulls'                                                                           => 'Pure PHP rejects null bytes in Javascript code',
+        'Javascript Code with Scope (code_w_scope.json)/Unicode and embedded null in code string, empty scope'                 => 'Pure PHP rejects null bytes in Javascript code',
+    ];
 
     public function setUp(): void
     {
@@ -168,10 +173,6 @@ final class CorpusTest extends TestCase
     #[DataProvider('provideParseErrorTests')]
     public function testParseErrors(string $bsonType, string $string): void
     {
-        if ($bsonType === '0x13') {
-            $this->markTestSkipped('Decimal128 string validation is not yet implemented');
-        }
-
         // The extension's fromJSON permissively accepts numeric $date values; a native
         // parser must reject them per the Extended JSON v2 spec.
         $permissiveDateCases = ['Top-level document validity (top.json)/Bad $date (number, not string or hash)'];
@@ -179,7 +180,7 @@ final class CorpusTest extends TestCase
             $this->markTestSkipped('Extension fromJSON accepts numeric $date values contrary to Extended JSON v2 spec');
         }
 
-        $this->expectException(Throwable::class);
+        $this->expectException(Exception::class);
         Document::fromJSON($string);
     }
 

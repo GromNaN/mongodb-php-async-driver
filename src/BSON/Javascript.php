@@ -6,6 +6,7 @@ namespace MongoDB\BSON;
 
 use JsonSerializable;
 use MongoDB\Driver\Exception\InvalidArgumentException;
+use MongoDB\Driver\Exception\UnexpectedValueException;
 use Stringable;
 
 use function get_debug_type;
@@ -13,13 +14,26 @@ use function is_array;
 use function is_object;
 use function is_string;
 use function sprintf;
+use function str_contains;
 
 final class Javascript implements JavascriptInterface, JsonSerializable, Type, Stringable
 {
+    public readonly string $code;
     public readonly ?object $scope;
 
-    public function __construct(public readonly string $code, array|object|null $scope = null)
+    public function __construct(string $code, array|object|null $scope = null)
     {
+        if (str_contains($code, "\0")) {
+            throw new InvalidArgumentException('Code cannot contain null bytes');
+        }
+
+        if ($scope instanceof PackedArray) {
+            throw new UnexpectedValueException(
+                'MongoDB\BSON\PackedArray cannot be serialized as a root document',
+            );
+        }
+
+        $this->code = $code;
         if (is_array($scope)) {
             $this->scope = (object) $scope;
         } else {
@@ -90,6 +104,10 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
             );
         }
 
+        if (str_contains($data['code'], "\0")) {
+            throw new InvalidArgumentException('Code cannot contain null bytes');
+        }
+
         $this->code  = $data['code'];
         $this->scope = is_array($scope) ? (object) $scope : $scope;
     }
@@ -108,6 +126,10 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
             throw new InvalidArgumentException(
                 sprintf('Expected scope to be array or object, %s given', get_debug_type($scope)),
             );
+        }
+
+        if (str_contains($properties['code'], "\0")) {
+            throw new InvalidArgumentException('Code cannot contain null bytes');
         }
 
         return new static($properties['code'], $scope);

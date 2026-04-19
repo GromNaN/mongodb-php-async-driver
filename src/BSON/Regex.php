@@ -17,9 +17,10 @@ use function str_split;
 
 final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
 {
+    public readonly string $pattern;
     public readonly string $flags;
 
-    public function __construct(public readonly string $pattern, string $flags = '')
+    public function __construct(string $pattern, string $flags = '')
     {
         if (str_contains($pattern, "\0")) {
             throw new InvalidArgumentException('Pattern cannot contain null bytes');
@@ -29,6 +30,7 @@ final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
             throw new InvalidArgumentException('Flags cannot contain null bytes');
         }
 
+        $this->pattern = $pattern;
         $this->flags   = self::sortFlags($flags);
     }
 

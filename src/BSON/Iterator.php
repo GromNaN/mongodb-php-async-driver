@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
+use Exception;
 use Iterator as IteratorInterface;
+use MongoDB\Driver\Exception\LogicException;
 
 use function array_keys;
 
@@ -17,6 +19,8 @@ use function array_keys;
  */
 final class Iterator implements IteratorInterface
 {
+    public readonly Document|PackedArray $bson;
+
     /** @var list<string|int> Ordered list of keys. */
     private array $keys;
 
@@ -27,8 +31,9 @@ final class Iterator implements IteratorInterface
      *
      * @param array<string|int, mixed> $data
      */
-    private function __construct(private array $data)
+    private function __construct(Document|PackedArray $bson, private array $data)
     {
+        $this->bson     = $bson;
         $this->keys     = array_keys($data);
         $this->position = 0;
     }
@@ -44,9 +49,24 @@ final class Iterator implements IteratorInterface
      *
      * @param array<string|int, mixed> $data
      */
-    public static function createFromDecodedData(array $data): static
+    public static function createFromDecodedData(Document|PackedArray $bson, array $data): static
     {
-        return new static($data);
+        return new static($bson, $data);
+    }
+
+    public function __clone(): void
+    {
+        $this->position = 0;
+    }
+
+    public function __serialize(): array
+    {
+        throw new Exception("Serialization of 'MongoDB\\BSON\\Iterator' is not allowed");
+    }
+
+    public function __debugInfo(): array
+    {
+        return ['bson' => $this->bson];
     }
 
     // ------------------------------------------------------------------
@@ -55,11 +75,19 @@ final class Iterator implements IteratorInterface
 
     public function current(): mixed
     {
+        if (! $this->valid()) {
+            throw new LogicException('Cannot call current() on an exhausted iterator');
+        }
+
         return $this->data[$this->keys[$this->position]];
     }
 
     public function key(): string|int
     {
+        if (! $this->valid()) {
+            throw new LogicException('Cannot call key() on an exhausted iterator');
+        }
+
         return $this->keys[$this->position];
     }
 

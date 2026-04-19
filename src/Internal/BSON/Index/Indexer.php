@@ -63,7 +63,7 @@ final class Indexer
 
     private function getNextFieldData(string $bson, int $offset): array
     {
-        $data = @unpack('ctype/Z*key', $bson, $offset);
+        $data = @unpack('Ctype/Z*key', $bson, $offset);
         if ($data === false) {
             throw new InvalidArgumentException('Invalid BSON data');
         }

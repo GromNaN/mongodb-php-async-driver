@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace MongoDB\BSON\Internal\Index;
+namespace MongoDB\Internal\BSON\Index;
 
 /** @internal */
 final class PackedArrayIndex extends Index

@@ -31,6 +31,9 @@
         <!-- Can cause subtle BC breaks -->
         <exclude name="SlevomatCodingStandard.TypeHints.DeclareStrictTypes" />
 
+        <!-- Property declaration order affects get_object_vars/var_export output -->
+        <exclude name="SlevomatCodingStandard.Classes.RequireConstructorPropertyPromotion" />
+
 
         <!-- **************************************** -->
         <!-- Exclude sniffs that force unwanted style -->

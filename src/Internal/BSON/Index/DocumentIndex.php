@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace MongoDB\BSON\Internal\Index;
+namespace MongoDB\Internal\BSON\Index;
 
 use function array_column;
 

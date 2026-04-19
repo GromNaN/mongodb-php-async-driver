@@ -16,7 +16,6 @@ use MongoDB\Internal\BSON\BsonDecoder;
 use MongoDB\Internal\BSON\BsonEncoder;
 use MongoDB\Internal\BSON\ExtendedJson;
 use MongoDB\Internal\BSON\Index\DocumentIndex;
-use MongoDB\Internal\BSON\Index\Indexer;
 use OutOfBoundsException;
 use Stringable;
 
@@ -48,7 +47,6 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     /** Base64-encoded raw BSON bytes — public for get_object_vars() / var_export() compat. */
     public readonly string $data;
 
-    private ?DocumentIndex $index = null;
 
     // ------------------------------------------------------------------
     // Private constructor
@@ -131,13 +129,13 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
 
     public function has(string $key): bool
     {
-        return $this->getIndex()->hasField($key);
+        return DocumentIndex::forBson($this)->hasField($key);
     }
 
     public function get(string $key): mixed
     {
         try {
-            return $this->getIndex()->getFieldValue($key);
+            return DocumentIndex::forBson($this)->getFieldValue($key);
         } catch (OutOfBoundsException) {
             throw new DriverRuntimeException(sprintf('Could not find key "%s" in BSON document', $key));
         }
@@ -200,11 +198,11 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     public function getIterator(): Iterator
     {
         $data = [];
-        foreach ($this->getIndex()->fields as $field) {
+        foreach (DocumentIndex::forBson($this)->fields as $field) {
             $data[$field->key] = $field->getValue();
         }
 
-        return Iterator::createFromDecodedData($data);
+        return Iterator::createFromDecodedData($this, $data);
     }
 
     // ------------------------------------------------------------------
@@ -296,11 +294,6 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
             'data'  => $this->data,
             'value' => $this->toPHP(['document' => 'bson', 'array' => 'bson']),
         ];
-    }
-
-    private function getIndex(): DocumentIndex
-    {
-        return $this->index ??= new DocumentIndex($this, (new Indexer())->getIndex((string) $this));
     }
 
     private static function assertValidBson(string $bson, string $className): void

@@ -189,8 +189,7 @@ final class BsonDecoder
                 break;
             }
 
-            // Sign-extend for types with values >= 0x80 (MinKey = 0xFF → -1)
-            $type = $typeByte >= 0x80 ? $typeByte - 0x100 : $typeByte;
+            $type = $typeByte;
 
             $key       = self::readCString($bson, $offset);
             $fieldPath = $parentFieldPath === '' ? $key : $parentFieldPath . '.' . $key;
