@@ -45,11 +45,11 @@ use MongoDB\Internal\Uri\UriOptions;
 use stdClass;
 use Throwable;
 
-use function array_is_list;
 use function array_map;
 use function array_merge;
 use function array_search;
 use function array_values;
+use function assert;
 use function count;
 use function explode;
 use function in_array;
@@ -713,7 +713,9 @@ final class OperationExecutor
             ? (int) $server->helloResponse['connectionId']
             : null;
 
-        $this->fireCommandStarted($cmdName, self::arrayToObject($prepared), $db, $requestId, $server->host, $server->port, $serverConnId);
+        $commandDoc = Document::fromPHP($prepared)->toPHP();
+        assert($commandDoc instanceof stdClass);
+        $this->fireCommandStarted($cmdName, $commandDoc, $db, $requestId, $server->host, $server->port, $serverConnId);
 
         try {
             [$bytes] = OpMsgEncoder::encodeWithRequestId($prepared);
@@ -1056,25 +1058,4 @@ final class OperationExecutor
      * Recursively convert an array to stdClass, turning associative arrays into objects.
      * List arrays remain as PHP arrays (since they represent BSON arrays).
      */
-    private static function arrayToObject(array $arr): object
-    {
-        $obj = new stdClass();
-
-        foreach ($arr as $key => $value) {
-            if (is_array($value)) {
-                if (array_is_list($value)) {
-                    $obj->$key = array_map(
-                        static fn ($v) => is_array($v) ? self::arrayToObject($v) : $v,
-                        $value,
-                    );
-                } else {
-                    $obj->$key = self::arrayToObject($value);
-                }
-            } else {
-                $obj->$key = $value;
-            }
-        }
-
-        return $obj;
-    }
 }
