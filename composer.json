@@ -1,5 +1,5 @@
 {
-    "name": "mongodb/mongodb-driver-revoltphp",
+    "name": "mongodb/async-driver",
     "description": "Pure userland async PHP 8.4+ MongoDB driver using RevoltPHP",
     "type": "library",
     "license": "Apache-2.0",
