@@ -164,7 +164,7 @@ final class OperationExecutor
             session:        $session,
         );
 
-        return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, 0, $command);
+        return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, 0, $command, $session);
     }
 
     /**
@@ -217,7 +217,7 @@ final class OperationExecutor
 
         $maxAwaitTimeMS = isset($opts['maxAwaitTimeMS']) ? (int) $opts['maxAwaitTimeMS'] : 0;
 
-        return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS);
+        return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session);
     }
 
     /**
@@ -340,7 +340,7 @@ final class OperationExecutor
             } elseif ($batchType === 'update') {
                 $updateSpecs = array_map(static function ($op): array {
                     [, $filter, $newObj, $opts] = $op;
-                    $spec = ['q' => $filter, 'u' => $newObj];
+                    $spec = ['q' => is_array($filter) ? (object) $filter : $filter, 'u' => $newObj];
 
                     if ($opts['multi']  ?? false) {
                         $spec['multi']  = true;
@@ -424,7 +424,7 @@ final class OperationExecutor
                 $deleteSpecs = array_map(static function ($op): array {
                     [, $filter, $opts] = $op;
                     $limit = $opts['limit'] ?? 1 ? 1 : 0;
-                    $spec  = ['q' => $filter, 'limit' => $limit];
+                    $spec  = ['q' => is_array($filter) ? (object) $filter : $filter, 'limit' => $limit];
 
                     if (isset($opts['collation'])) {
                         $spec['collation'] = $opts['collation'];
@@ -713,7 +713,10 @@ final class OperationExecutor
             ? (int) $server->helloResponse['connectionId']
             : null;
 
-        $commandDoc = Document::fromPHP($prepared)->toPHP();
+        // Decode with root/document='object' to suppress Persistable detection:
+        // CommandStartedEvent.getCommand() returns a plain stdClass view of the raw
+        // command as sent to MongoDB, not Persistable-reconstructed objects.
+        $commandDoc = Document::fromPHP($prepared)->toPHP(['root' => 'object', 'document' => 'object']);
         assert($commandDoc instanceof stdClass);
         $this->fireCommandStarted($cmdName, $commandDoc, $db, $requestId, $server->host, $server->port, $serverConnId);
 
@@ -773,10 +776,11 @@ final class OperationExecutor
         InternalServerDescription $server,
         int $maxAwaitTimeMS = 0,
         ?Command $debugCommand = null,
+        ?Session $session = null,
     ): CursorInterface {
         $body = $this->doSendCommand($pool, $db, $cmdName, $prepared, $server);
 
-        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand);
+        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand, $session);
     }
 
     // -------------------------------------------------------------------------
@@ -801,6 +805,7 @@ final class OperationExecutor
         InternalServerDescription $server,
         int $maxAwaitTimeMS = 0,
         ?Command $debugCommand = null,
+        ?Session $session = null,
     ): CursorInterface {
         $publicServer = $this->buildPublicServer($server);
 
@@ -813,32 +818,24 @@ final class OperationExecutor
             $ns         = (string) ($cursorDoc['ns'] ?? $db);
             $firstBatch = (array) ($cursorDoc['firstBatch'] ?? []);
 
-            $getMoreFn = static function (int $cursorId, string $ns) use ($pool, $db, $maxAwaitTimeMS): array {
-                $conn = $pool->acquire();
-                try {
-                    $getMoreCmd = [
-                        'getMore'    => $cursorId,
-                        'collection' => explode('.', $ns, 2)[1] ?? $ns,
-                        '$db'        => $db,
-                    ];
+            $getMoreFn = function (int $cursorId, string $ns) use ($pool, $db, $maxAwaitTimeMS, $server, $session): array {
+                $getMoreCmd = [
+                    'getMore'    => new Int64($cursorId),
+                    'collection' => explode('.', $ns, 2)[1] ?? $ns,
+                ];
 
-                    if ($maxAwaitTimeMS > 0) {
-                        $getMoreCmd['maxTimeMS'] = $maxAwaitTimeMS;
-                    }
-
-                    [$bytes] = OpMsgEncoder::encodeWithRequestId($getMoreCmd);
-                    $responseBytes = $conn->sendMessage($bytes);
-                    $decoded   = OpMsgDecoder::decodeAndCheck($responseBytes);
-                    $body      = is_array($decoded) ? $decoded : (array) $decoded;
-                    $cursorDoc = (array) ($body['cursor'] ?? []);
-                    $cursorIdRaw = $cursorDoc['id'] ?? 0;
-                    $newCursorId = $cursorIdRaw instanceof Int64 ? (int) (string) $cursorIdRaw : (int) $cursorIdRaw;
-                    $nextBatch   = (array) ($cursorDoc['nextBatch'] ?? []);
-
-                    return [$nextBatch, $newCursorId];
-                } finally {
-                    $pool->release($conn);
+                if ($maxAwaitTimeMS > 0) {
+                    $getMoreCmd['maxTimeMS'] = $maxAwaitTimeMS;
                 }
+
+                $prepared  = CommandHelper::prepareCommand(command: $getMoreCmd, db: $db, session: $session);
+                $body      = $this->doSendCommand($pool, $db, 'getMore', $prepared, $server);
+                $cursorDoc = (array) ($body['cursor'] ?? []);
+                $cursorIdRaw = $cursorDoc['id'] ?? 0;
+                $newCursorId = $cursorIdRaw instanceof Int64 ? (int) (string) $cursorIdRaw : (int) $cursorIdRaw;
+                $nextBatch   = (array) ($cursorDoc['nextBatch'] ?? []);
+
+                return [$nextBatch, $newCursorId];
             };
 
             return Cursor::createFromCommandResult(
