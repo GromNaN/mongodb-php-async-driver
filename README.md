@@ -132,7 +132,7 @@ src/
 |---|---|
 | Async runtime | RevoltPHP event loop; fibers suspend during I/O |
 | Sync compatibility | `SyncRunner::run()` wraps async ops in `EventLoop::run()` when called from non-fiber context |
-| BSON int64 | Decoded as `MongoDB\BSON\Int64` objects to preserve type fidelity |
+| BSON int64 | Decoded as native PHP `int` (matching 64-bit ext-mongodb behaviour); `MongoDB\BSON\Int64` is only used when constructing or encoding values explicitly |
 | Authentication | SCRAM-SHA-256 by default; SCRAM-SHA-1 fallback based on `saslSupportedMechs` |
 | Topology | Background fiber per seed host; SDAM spec state machine |
 | Connection pool | Per-server `SplQueue` of idle connections; fiber-suspending waiters when pool is full |
@@ -156,20 +156,40 @@ PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox
 - [x] `MongoDB\Driver\Cursor` — iterate, `toArray()`, lazy `getMore`
 - [x] `MongoDB\Driver\BulkWrite` — insert, update, delete
 - [x] `MongoDB\Driver\ReadPreference` / `WriteConcern` / `ReadConcern`
-- [x] `MongoDB\Driver\Session` — logical sessions (no multi-document transactions yet)
+- [x] `MongoDB\Driver\Session` — logical sessions with `lsid` propagation
 - [x] `MongoDB\Driver\ServerDescription` / `TopologyDescription`
 - [x] `MongoDB\BSON\*` — all 18 BSON types
 - [x] SCRAM-SHA-256 and SCRAM-SHA-1 authentication
 - [x] Replica set discovery and monitoring (SDAM)
 - [x] Connection pooling
-- [x] APM command monitoring subscribers
-- [x] SDAM monitoring subscribers
-- [ ] TLS/SSL (amphp/socket TLS context — planned)
-- [ ] Multi-document transactions
-- [ ] Client-side field level encryption
-- [ ] Compression (zlib/snappy/zstd)
-- [ ] SRV connection strings (`mongodb+srv://`)
-- [ ] Change streams
+- [x] APM command monitoring (`CommandSubscriber`)
+- [x] SDAM monitoring (`SDAMSubscriber`)
+- [x] Log subscribers (`LogSubscriber` / `mongoc_log()`)
+- [x] Change streams (via `aggregate` with `$changeStream` stage)
+- [x] Persistable / Unserializable BSON deserialization
+- [x] Non-genuine host warnings (CosmosDB / DocumentDB detected at connect time)
+
+## Unsupported features
+
+The following features from `ext-mongodb` are **not yet implemented**:
+
+| Feature | Notes |
+|---|---|
+| **TLS / SSL** | Plain TCP only; `tls=true` URI option is ignored |
+| **Multi-document transactions** | `Session::startTransaction()` / `commitTransaction()` / `abortTransaction()` are stubs |
+| **Client-side field level encryption (CSFLE)** | `ClientEncryption` class exists but encryption is not wired up |
+| **Queryable Encryption (QE)** | Not implemented |
+| **Wire compression** | `zlib`, `snappy`, and `zstd` compressors are not supported |
+| **SRV connection strings** | `mongodb+srv://` URIs are not supported |
+| **Persistent clients** | Each `Manager` instance creates independent connections; there is no cross-request connection persistence like in the C extension |
+| **GSSAPI / Kerberos authentication** | Only SCRAM-SHA-256 and SCRAM-SHA-1 are implemented |
+| **LDAP (PLAIN) authentication** | Not implemented |
+| **X.509 authentication** | Not implemented (requires TLS) |
+| **AWS authentication** | Not implemented |
+| **Stable API versioning** | `serverApi` URI / constructor option is parsed but not sent in commands |
+| **`MongoDB\Driver\BulkWrite::delete` with `hint`** | `hint` is accepted but the server may reject it on older versions |
+| **APM event filtering by operation type** | All commands are monitored; no exclude-list support |
+| **`Int64` arithmetic comparison** | In PHP 8.5+, `Int64 == 0` may emit a notice; use `(string) $id === '0'` instead |
 
 ## License
 
