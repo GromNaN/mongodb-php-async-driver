@@ -53,6 +53,7 @@ use function array_values;
 use function assert;
 use function count;
 use function explode;
+use function get_object_vars;
 use function in_array;
 use function is_array;
 use function is_object;
@@ -301,6 +302,10 @@ final class OperationExecutor
                     $insertBase['comment'] = $bulkOptions['comment'];
                 }
 
+                if ($bulkOptions['bypassDocumentValidation'] ?? false) {
+                    $insertBase['bypassDocumentValidation'] = true;
+                }
+
                 $insertCmd = CommandHelper::prepareCommand(
                     command:      $insertBase,
                     db:           $db,
@@ -341,7 +346,7 @@ final class OperationExecutor
             } elseif ($batchType === 'update') {
                 $updateSpecs = array_map(static function ($op): array {
                     [, $filter, $newObj, $opts] = $op;
-                    $spec = ['q' => is_array($filter) ? (object) $filter : $filter, 'u' => $newObj];
+                    $spec = ['q' => is_array($filter) ? (object) $filter : $filter, 'u' => self::normalizeUpdateDocument($newObj)];
 
                     if ($opts['multi']  ?? false) {
                         $spec['multi']  = true;
@@ -373,6 +378,10 @@ final class OperationExecutor
 
                 if (isset($bulkOptions['let'])) {
                     $updateBase['let'] = $bulkOptions['let'];
+                }
+
+                if (isset($bulkOptions['bypassDocumentValidation']) && $bulkOptions['bypassDocumentValidation']) {
+                    $updateBase['bypassDocumentValidation'] = true;
                 }
 
                 $updateCmd = CommandHelper::prepareCommand(
@@ -1021,10 +1030,45 @@ final class OperationExecutor
     // -------------------------------------------------------------------------
 
     /**
-     * Split "db.collection" into ['db', 'collection'].
+     * Normalize an update document for wire encoding.
      *
-     * @return array{string, string}
+     * - Empty PHP array [] → stdClass {} (replacement document, not a pipeline)
+     * - PHP object with consecutive integer keys '0','1',… → PHP list array
+     *   (encodes as BSON array = update pipeline; replicates libmongoc CDRIVER-4658)
+     * - Everything else → unchanged.
      */
+    private static function normalizeUpdateDocument(array|object $doc): array|object
+    {
+        if (is_array($doc)) {
+            // Empty PHP array must encode as {} (replacement), not [] (pipeline).
+            return count($doc) === 0 ? (object) $doc : $doc;
+        }
+
+        // Only apply the sequential-int-key → pipeline heuristic for plain stdClass
+        // objects.  Rich objects (BSONDocument, Document, PackedArray, …) are
+        // encoded correctly by the BSON encoder directly.
+        if (! ($doc instanceof stdClass)) {
+            return $doc;
+        }
+
+        $vars = get_object_vars($doc);
+        if (count($vars) === 0) {
+            return $doc; // empty stdClass stays as {} replacement document
+        }
+
+        $expectedKey = 0;
+        foreach ($vars as $key => $value) {
+            if ((string) $key !== (string) $expectedKey) {
+                return $doc;
+            }
+
+            ++$expectedKey;
+        }
+
+        // All keys are consecutive integers → encode as BSON array (pipeline).
+        return array_values($vars);
+    }
+
     private function splitNamespace(string $namespace): array
     {
         $pos = strpos($namespace, '.');

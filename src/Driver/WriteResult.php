@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
+use function sprintf;
+
 final class WriteResult
 {
     private int $insertedCount;
@@ -62,62 +64,55 @@ final class WriteResult
 
     public function getInsertedCount(): ?int
     {
-        if (! $this->acknowledged) {
-            throw new Exception\LogicException(
-                'MongoDB\Driver\WriteResult::getInsertedCount() should not be called for an unacknowledged write result',
-            );
-        }
+        $this->assertAcknowledged(__METHOD__);
 
         return $this->insertedCount;
     }
 
     public function getMatchedCount(): ?int
     {
-        if (! $this->acknowledged) {
-            throw new Exception\LogicException(
-                'MongoDB\Driver\WriteResult::getMatchedCount() should not be called for an unacknowledged write result',
-            );
-        }
+        $this->assertAcknowledged(__METHOD__);
 
         return $this->matchedCount;
     }
 
     public function getModifiedCount(): ?int
     {
-        if (! $this->acknowledged) {
-            throw new Exception\LogicException(
-                'MongoDB\Driver\WriteResult::getModifiedCount() should not be called for an unacknowledged write result',
-            );
-        }
+        $this->assertAcknowledged(__METHOD__);
 
         return $this->modifiedCount;
     }
 
     public function getDeletedCount(): ?int
     {
-        if (! $this->acknowledged) {
-            throw new Exception\LogicException(
-                'MongoDB\Driver\WriteResult::getDeletedCount() should not be called for an unacknowledged write result',
-            );
-        }
+        $this->assertAcknowledged(__METHOD__);
 
         return $this->deletedCount;
     }
 
     public function getUpsertedCount(): ?int
     {
-        if (! $this->acknowledged) {
-            throw new Exception\LogicException(
-                'MongoDB\Driver\WriteResult::getUpsertedCount() should not be called for an unacknowledged write result',
-            );
-        }
+        $this->assertAcknowledged(__METHOD__);
 
         return $this->upsertedCount;
     }
 
     public function getUpsertedIds(): array
     {
+        $this->assertAcknowledged(__METHOD__);
+
         return $this->upsertedIds;
+    }
+
+    private function assertAcknowledged(string $method): void
+    {
+        if ($this->acknowledged) {
+            return;
+        }
+
+        throw new Exception\LogicException(
+            sprintf('%s() should not be called for an unacknowledged write result', $method),
+        );
     }
 
     public function getServer(): Server

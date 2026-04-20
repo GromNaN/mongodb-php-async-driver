@@ -26,6 +26,7 @@ use function is_array;
 use function is_object;
 use function is_string;
 use function mb_check_encoding;
+use function sprintf;
 use function str_contains;
 use function str_starts_with;
 use function strpos;
@@ -183,9 +184,18 @@ final class BulkWrite implements Countable
         self::checkNullBytesInKeys($filterArr);
         self::checkUtf8($filterArr, '');
 
-        // newObj: PackedArray is allowed (pipeline); list array is also pipeline
+        // newObj: PackedArray is a pipeline; non-empty list array is a pipeline;
+        // empty array [] is treated as a replacement document, not a pipeline.
         $isPipeline = ($newObj instanceof PackedArray)
-            || (is_array($newObj) && array_is_list($newObj));
+            || (is_array($newObj) && array_is_list($newObj) && count($newObj) > 0);
+
+        // A Serializable object that serializes to a list is also a pipeline.
+        if (! $isPipeline && $newObj instanceof BsonSerializable) {
+            $serialized = $newObj->bsonSerialize();
+            if (is_array($serialized) && array_is_list($serialized) && count($serialized) > 0) {
+                $isPipeline = true;
+            }
+        }
 
         if (! $isPipeline) {
             $newObjArr = self::toValidationArray($newObj);
@@ -195,7 +205,7 @@ final class BulkWrite implements Countable
                 foreach ($newObjArr as $k => $v) {
                     if (! str_starts_with((string) $k, '$')) {
                         throw new InvalidArgumentException(
-                            "Invalid key '$k': update only works with \$ operators and pipelines",
+                            sprintf('Invalid key %s: update only works with $ operators and pipelines', $k),
                         );
                     }
                 }
@@ -321,6 +331,12 @@ final class BulkWrite implements Countable
     {
         if ($doc instanceof Document) {
             return (array) $doc->toPHP(['root' => 'array', 'document' => 'array']);
+        }
+
+        if ($doc instanceof BsonSerializable) {
+            $serialized = $doc->bsonSerialize();
+
+            return is_array($serialized) ? $serialized : (array) $serialized;
         }
 
         return is_array($doc) ? $doc : get_object_vars($doc);
