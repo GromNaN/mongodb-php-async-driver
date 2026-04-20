@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace MongoDB\Internal\BSON;
 
 use InvalidArgumentException;
+use MongoDB\BSON\Binary;
 use MongoDB\BSON\Document;
 use MongoDB\BSON\PackedArray;
+use MongoDB\BSON\Persistable;
 use MongoDB\BSON\Unserializable;
 use ReflectionClass;
 use stdClass;
@@ -158,7 +160,7 @@ final class TypeMapper
         }
 
         $prefix         = $key . '.';
-        $wildcardPrefix = '$' . '.';
+        $wildcardPrefix = '$.';
         $narrowed       = [];
 
         foreach ($fieldPaths as $path => $type) {
@@ -186,13 +188,44 @@ final class TypeMapper
         // Normalise to array for manipulation
         $fields = is_array($value) ? $value : (array) $value;
 
-        return match ($targetType) {
-            'array'               => $fields,
-            'object', 'stdClass'  => self::fieldsToStdClass($fields),
-            'bsonDocument'        => Document::fromPHP($fields),
-            'bsonArray'           => PackedArray::fromPHP(array_values($fields)),
-            default               => self::instantiateClass($targetType, $fields),
-        };
+        if ($targetType === 'array') {
+            return $fields;
+        }
+
+        if ($targetType === 'object' || $targetType === 'stdClass') {
+            return self::fieldsToStdClass($fields);
+        }
+
+        if ($targetType === 'bsonDocument') {
+            return Document::fromPHP($fields);
+        }
+
+        if ($targetType === 'bsonArray') {
+            return PackedArray::fromPHP(array_values($fields));
+        }
+
+        // For explicit class targets: check __pclass Persistable first.
+        // A document with __pclass pointing to a Persistable class is deserialized
+        // into that class regardless of the typeMap target class, matching ext-mongodb behavior.
+        // (Exception: when targetType is 'object'/stdClass above, Persistable is suppressed.)
+        if (
+            isset($fields['__pclass'])
+            && $fields['__pclass'] instanceof Binary
+            && $fields['__pclass']->getType() === Binary::TYPE_USER_DEFINED
+        ) {
+            $pclassName = $fields['__pclass']->getData();
+            if (class_exists($pclassName)) {
+                $rc = new ReflectionClass($pclassName);
+                if ($rc->isInstantiable() && $rc->implementsInterface(Persistable::class)) {
+                    $obj = $rc->newInstanceWithoutConstructor();
+                    $obj->bsonUnserialize($fields);
+
+                    return $obj;
+                }
+            }
+        }
+
+        return self::instantiateClass($targetType, $fields);
     }
 
     /**

@@ -299,17 +299,21 @@ final class Cursor implements CursorInterface
 
         $rc = new ReflectionClass($value);
 
+        if ($rc->implementsInterface(Unserializable::class)) {
+            // Unserializable classes are always allowed: newInstanceWithoutConstructor bypasses
+            // the constructor, so private constructors are valid (e.g. named constructors pattern).
+            return;
+        }
+
         if (! $rc->isInstantiable()) {
             $prefix = $rc->isInterface() ? 'Interface' : 'Class';
 
             throw new InvalidArgumentException($prefix . ' ' . $value . ' is not instantiatable');
         }
 
-        if (! $rc->implementsInterface(Unserializable::class)) {
-            throw new InvalidArgumentException(
-                'Class ' . $value . ' does not implement MongoDB\BSON\Unserializable',
-            );
-        }
+        throw new InvalidArgumentException(
+            'Class ' . $value . ' does not implement MongoDB\BSON\Unserializable',
+        );
     }
 
     private function validateFieldPaths(mixed $fieldPaths): void

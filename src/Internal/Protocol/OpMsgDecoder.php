@@ -77,7 +77,9 @@ final class OpMsgDecoder
 
             if ($kind === 0) {
                 // Kind 0: body BSON document.
-                $body    = BsonDecoder::decode(substr($bytes, $offset), $typeMap);
+                // Persistable reconstruction is suppressed here: the Cursor applies
+                // TypeMapper (which handles __pclass detection) when items are iterated.
+                $body    = BsonDecoder::decode(substr($bytes, $offset), $typeMap, handlePersistable: false);
                 $docLen  = self::readDocumentLength($bytes, $offset);
                 $offset += $docLen;
             } elseif ($kind === 1) {
@@ -101,7 +103,7 @@ final class OpMsgDecoder
                 // Read BSON documents until end of section.
                 $seqDocs = [];
                 while ($offset < $sectionEnd) {
-                    $seqDocs[] = BsonDecoder::decode(substr($bytes, $offset), $typeMap);
+                    $seqDocs[] = BsonDecoder::decode(substr($bytes, $offset), $typeMap, handlePersistable: false);
                     $docLen    = self::readDocumentLength($bytes, $offset);
                     $offset   += $docLen;
                 }
