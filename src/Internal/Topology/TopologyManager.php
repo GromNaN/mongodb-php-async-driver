@@ -98,17 +98,39 @@ final class TopologyManager
         $this->started = true;
         $this->fireSdamEvent('topologyOpening', new TopologyOpeningEvent($this->topologyId));
 
+        // Register all seed servers as Unknown placeholders so the initial
+        // topologyChanged event can include them in newServers.
         foreach ($this->seeds as $seed) {
             $host    = $seed['host'];
             $port    = (int) ($seed['port'] ?? 27017);
             $address = $host . ':' . $port;
 
-            // Register an Unknown placeholder so selectServer can tell the server exists.
             $this->servers[$address] = new InternalServerDescription(
                 host: $host,
                 port: $port,
                 type: InternalServerDescription::TYPE_UNKNOWN,
             );
+        }
+
+        // Fire the initial topologyChanged event (empty → seeds known, type stays Unknown).
+        // ext-mongodb fires this synchronously after topologyOpening, before serverOpening.
+        $initialServers = array_values(array_map(
+            fn (InternalServerDescription $s) => $this->buildPublicServerDescription($s),
+            $this->servers,
+        ));
+        $this->fireSdamEvent('topologyChanged', new TopologyChangedEvent(
+            topologyId:           $this->topologyId,
+            previousTopologyType: TopologyType::Unknown->value,
+            newTopologyType:      $this->topologyType->value,
+            previousServers:      [],
+            newServers:           $initialServers,
+        ));
+
+        // Now fire serverOpening for each seed and start its monitor.
+        foreach ($this->seeds as $seed) {
+            $host    = $seed['host'];
+            $port    = (int) ($seed['port'] ?? 27017);
+            $address = $host . ':' . $port;
 
             $this->fireSdamEvent('serverOpening', new ServerOpeningEvent($host, $port, $this->topologyId));
 
