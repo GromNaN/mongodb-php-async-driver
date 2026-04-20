@@ -1,5 +1,7 @@
 # mongodb-driver-revoltphp
 
+![Banner](docs/banner.svg)
+
 A pure userland PHP 8.4+ MongoDB driver that provides the same `MongoDB\Driver\*` and `MongoDB\BSON\*` namespaces as the `ext-mongodb` C extension, but implemented entirely in PHP using [RevoltPHP](https://revolt.run) for async I/O.
 
 ## Why
