@@ -6,6 +6,7 @@ namespace MongoDB\Internal\Operation;
 
 use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
+use MongoDB\BSON\Timestamp;
 use MongoDB\Driver\BulkWrite;
 use MongoDB\Driver\BulkWriteCommand;
 use MongoDB\Driver\BulkWriteCommandResult;
@@ -308,7 +309,7 @@ final class OperationExecutor
                 );
 
                 try {
-                    $cursor = $this->sendCommand($pool, $db, 'insert', $insertCmd, $server);
+                    $cursor = $this->sendCommand($pool, $db, 'insert', $insertCmd, $server, 0, null, $session);
                     $result = (array) (iterator_to_array($cursor)[0] ?? []);
 
                     $totalInserted += (int) ($result['n'] ?? count($docs));
@@ -382,7 +383,7 @@ final class OperationExecutor
                 );
 
                 try {
-                    $cursor = $this->sendCommand($pool, $db, 'update', $updateCmd, $server);
+                    $cursor = $this->sendCommand($pool, $db, 'update', $updateCmd, $server, 0, null, $session);
                     $result = (array) (iterator_to_array($cursor)[0] ?? []);
 
                     $upsertedInBatch = (array) ($result['upserted'] ?? []);
@@ -454,7 +455,7 @@ final class OperationExecutor
                 );
 
                 try {
-                    $cursor = $this->sendCommand($pool, $db, 'delete', $deleteCmd, $server);
+                    $cursor = $this->sendCommand($pool, $db, 'delete', $deleteCmd, $server, 0, null, $session);
                     $result = (array) (iterator_to_array($cursor)[0] ?? []);
 
                     $totalDeleted += (int) ($result['n'] ?? 0);
@@ -780,7 +781,31 @@ final class OperationExecutor
     ): CursorInterface {
         $body = $this->doSendCommand($pool, $db, $cmdName, $prepared, $server);
 
+        $this->advanceSessionFromResponse($session, $body);
+
         return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand, $session);
+    }
+
+    /**
+     * Update session cluster time and operation time from a server response body.
+     */
+    private function advanceSessionFromResponse(?Session $session, array $body): void
+    {
+        if ($session === null) {
+            return;
+        }
+
+        $clusterTime = $body['$clusterTime'] ?? null;
+        if ($clusterTime !== null) {
+            $session->advanceClusterTime(is_array($clusterTime) ? (object) $clusterTime : $clusterTime);
+        }
+
+        $operationTime = $body['operationTime'] ?? null;
+        if (! ($operationTime instanceof Timestamp)) {
+            return;
+        }
+
+        $session->advanceOperationTime($operationTime);
     }
 
     // -------------------------------------------------------------------------
