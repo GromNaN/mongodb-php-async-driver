@@ -40,6 +40,7 @@ use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
 use MongoDB\Internal\Protocol\RequestIdGenerator;
+use MongoDB\Internal\Session\SessionPool;
 use MongoDB\Internal\Topology\InternalServerDescription;
 use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\UriOptions;
@@ -60,6 +61,7 @@ use function is_object;
 use function iterator_to_array;
 use function microtime;
 use function reset;
+use function sprintf;
 use function strpos;
 use function substr;
 
@@ -84,11 +86,13 @@ final class OperationExecutor
     /**
      * @param TopologyManager  $topology    Live topology manager.
      * @param UriOptions       $options     Parsed URI options.
+     * @param SessionPool      $sessionPool Session pool for implicit sessions.
      * @param list<Subscriber> $subscribers Monitoring subscribers.
      */
     public function __construct(
         private TopologyManager $topology,
         private UriOptions $options,
+        private SessionPool $sessionPool,
         private array $subscribers = [],
     ) {
     }
@@ -166,7 +170,9 @@ final class OperationExecutor
             session:        $session,
         );
 
-        return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, 0, $command, $session);
+        $maxAwaitTimeMS = (int) ($command->getOptions()['maxAwaitTimeMS'] ?? 0);
+
+        return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session);
     }
 
     /**
@@ -714,6 +720,13 @@ final class OperationExecutor
         array $prepared,
         InternalServerDescription $server,
     ): array {
+        // Inject an implicit session lsid if the command doesn't already have one.
+        $implicitLsid = null;
+        if (! isset($prepared['lsid'])) {
+            $implicitLsid      = $this->sessionPool->acquire();
+            $prepared['lsid']  = $implicitLsid;
+        }
+
         $conn      = $pool->acquire();
         $requestId = RequestIdGenerator::next();
         $startUs   = (int) (microtime(true) * 1_000_000);
@@ -758,6 +771,19 @@ final class OperationExecutor
                 throw new CommandException($errmsg, $code, (object) $body);
             }
 
+            // Check for write concern errors on ok:1 responses (e.g. findAndModify with unsatisfiable w).
+            $wce = $body['writeConcernError'] ?? null;
+            if ($wce !== null) {
+                $wceArr  = is_array($wce) ? $wce : (array) $wce;
+                $wceMsg  = (string) ($wceArr['errmsg'] ?? 'Write Concern error');
+                $wceCode = (int) ($wceArr['code'] ?? 0);
+                $eventErr = new ServerException($wceMsg, $wceCode, (object) $body);
+                $this->fireCommandFailed($cmdName, $eventErr, $db, $requestId, $durationUs, $server->host, $server->port, (object) $body, $serverConnId);
+                $pool->release($conn);
+
+                throw new CommandException(sprintf('Write Concern error: %s', $wceMsg), $wceCode, (object) $body);
+            }
+
             $this->fireCommandSucceeded($cmdName, (object) $body, $db, $requestId, $durationUs, $server->host, $server->port, $serverConnId);
 
             $pool->release($conn);
@@ -772,6 +798,10 @@ final class OperationExecutor
             $pool->release($conn);
 
             throw $e;
+        } finally {
+            if ($implicitLsid !== null) {
+                $this->sessionPool->release($implicitLsid);
+            }
         }
     }
 

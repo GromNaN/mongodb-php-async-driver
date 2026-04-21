@@ -125,14 +125,15 @@ final class Manager
             $this->uriOptions,
         );
 
+        $this->sessionPool = new SessionPool();
+
         // Create the operation executor
         $this->executor = new OperationExecutor(
             $this->topologyManager,
             $this->uriOptions,
+            $this->sessionPool,
             $this->subscribers,
         );
-
-        $this->sessionPool = new SessionPool();
 
         // Topology start is deferred until first operation so that subscribers
         // registered via addSubscriber() receive the initial SDAM events.

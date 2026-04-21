@@ -59,6 +59,9 @@ final class Cursor implements CursorInterface
     /** True when all batches have been fetched and the cursor cannot fetch more. */
     private bool $exhausted = false;
 
+    /** Last exception that caused abnormal exhaustion; re-thrown on subsequent next() calls. */
+    private ?Throwable $lastError = null;
+
     /** True after the first call to next(), preventing rewind(). */
     private bool $started = false;
 
@@ -157,6 +160,10 @@ final class Cursor implements CursorInterface
     {
         if (! $this->valid()) {
             if ($this->exhausted) {
+                if ($this->lastError !== null) {
+                    throw $this->lastError;
+                }
+
                 // Regular cursor fully consumed: superfluous iteration.
                 throw new RuntimeException('Cannot advance a completed or failed cursor.');
             }
@@ -187,7 +194,7 @@ final class Cursor implements CursorInterface
 
     public function rewind(): void
     {
-        if ($this->started) {
+        if ($this->started && $this->position > 0) {
             throw new LogicException('Cursors cannot rewind after starting iteration');
         }
 
@@ -253,7 +260,8 @@ final class Cursor implements CursorInterface
             $this->cursorId = $newCursorId;
             $this->exhausted = ($newCursorId === 0);
         } catch (Throwable $e) {
-            $this->exhausted = true;
+            $this->exhausted  = true;
+            $this->lastError  = $e;
 
             throw $e;
         }
