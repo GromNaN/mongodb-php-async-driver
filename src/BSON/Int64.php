@@ -12,8 +12,11 @@ use function get_debug_type;
 use function is_float;
 use function is_int;
 use function is_string;
+use function ltrim;
 use function preg_match;
 use function sprintf;
+use function str_starts_with;
+use function strlen;
 
 final class Int64 implements JsonSerializable, Type, Stringable
 {
@@ -110,9 +113,14 @@ final class Int64 implements JsonSerializable, Type, Stringable
             );
         }
 
-        $int = (int) $value;
+        // Strip leading zeros (but keep a single "0") to normalise before range check.
+        $normalized = ltrim($value, '-0') ?: '0';
+        $isNegative = str_starts_with($value, '-');
 
-        if ((string) $int !== $value) {
+        // INT64_MIN = -9223372036854775808, INT64_MAX = 9223372036854775807
+        $limit = $isNegative ? '9223372036854775808' : '9223372036854775807';
+
+        if (strlen($normalized) > strlen($limit) || (strlen($normalized) === strlen($limit) && $normalized > $limit)) {
             throw new InvalidArgumentException(
                 sprintf('Error parsing "%s" as 64-bit integer for MongoDB\BSON\Int64 initialization', $value),
             );
