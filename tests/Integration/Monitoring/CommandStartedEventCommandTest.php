@@ -11,7 +11,7 @@ use MongoDB\Driver\Monitoring\CommandFailedEvent;
 use MongoDB\Driver\Monitoring\CommandStartedEvent;
 use MongoDB\Driver\Monitoring\CommandSubscriber;
 use MongoDB\Driver\Monitoring\CommandSucceededEvent;
-use PHPUnit\Framework\TestCase;
+use MongoDB\Tests\Integration\IntegrationTestCase;
 use stdClass;
 
 use function getenv;
@@ -39,7 +39,7 @@ class SerializableDocument implements Serializable
     }
 }
 
-class CommandStartedEventCommandTest extends TestCase implements CommandSubscriber
+class CommandStartedEventCommandTest extends IntegrationTestCase implements CommandSubscriber
 {
     private ?CommandStartedEvent $capturedEvent = null;
 
@@ -58,6 +58,8 @@ class CommandStartedEventCommandTest extends TestCase implements CommandSubscrib
 
     protected function setUp(): void
     {
+        parent::setUp();
+
         $this->capturedEvent = null;
     }
 
