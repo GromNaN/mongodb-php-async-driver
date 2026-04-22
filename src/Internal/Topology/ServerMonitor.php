@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MongoDB\Internal\Topology;
 
 use Closure;
+use Exception;
 use MongoDB\Driver\Exception\ConnectionException;
 use MongoDB\Driver\Monitoring\ServerHeartbeatFailedEvent;
 use MongoDB\Driver\Monitoring\ServerHeartbeatStartedEvent;
@@ -12,6 +13,7 @@ use MongoDB\Driver\Monitoring\ServerHeartbeatSucceededEvent;
 use MongoDB\Internal\Connection\Connection;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
+use RuntimeException;
 use Throwable;
 
 use function Amp\async;
@@ -151,7 +153,7 @@ final class ServerMonitor
     {
         $startUs = (int) (microtime(true) * 1_000_000);
 
-        $this->fireHeartbeat('serverHeartbeatStarted', new ServerHeartbeatStartedEvent(
+        $this->fireHeartbeat('serverHeartbeatStarted', ServerHeartbeatStartedEvent::create(
             host:    $this->host,
             port:    $this->port,
             awaited: false,
@@ -172,7 +174,7 @@ final class ServerMonitor
             $body     = $decoded['body'];
             $response = is_array($body) ? $body : (array) $body;
 
-            $this->fireHeartbeat('serverHeartbeatSucceeded', new ServerHeartbeatSucceededEvent(
+            $this->fireHeartbeat('serverHeartbeatSucceeded', ServerHeartbeatSucceededEvent::create(
                 host:           $this->host,
                 port:           $this->port,
                 durationMicros: $durationUs,
@@ -184,12 +186,13 @@ final class ServerMonitor
         } catch (Throwable $e) {
             $endUs      = (int) (microtime(true) * 1_000_000);
             $durationUs = $endUs - $startUs;
+            $exception  = $e instanceof Exception ? $e : new RuntimeException($e->getMessage(), $e->getCode(), $e);
 
-            $this->fireHeartbeat('serverHeartbeatFailed', new ServerHeartbeatFailedEvent(
+            $this->fireHeartbeat('serverHeartbeatFailed', ServerHeartbeatFailedEvent::create(
                 host:           $this->host,
                 port:           $this->port,
                 durationMicros: $durationUs,
-                error:          $e,
+                error:          $exception,
                 awaited:        false,
             ));
 

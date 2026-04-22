@@ -96,7 +96,7 @@ final class TopologyManager
         }
 
         $this->started = true;
-        $this->fireSdamEvent('topologyOpening', new TopologyOpeningEvent($this->topologyId));
+        $this->fireSdamEvent('topologyOpening', TopologyOpeningEvent::create($this->topologyId));
 
         // Register all seed servers as Unknown placeholders so the initial
         // topologyChanged event can include them in newServers.
@@ -118,7 +118,7 @@ final class TopologyManager
             fn (InternalServerDescription $s) => $this->buildPublicServerDescription($s),
             $this->servers,
         ));
-        $this->fireSdamEvent('topologyChanged', new TopologyChangedEvent(
+        $this->fireSdamEvent('topologyChanged', TopologyChangedEvent::create(
             topologyId:           $this->topologyId,
             previousTopologyType: TopologyType::Unknown->value,
             newTopologyType:      $this->topologyType->value,
@@ -132,7 +132,7 @@ final class TopologyManager
             $port    = (int) ($seed['port'] ?? 27017);
             $address = $host . ':' . $port;
 
-            $this->fireSdamEvent('serverOpening', new ServerOpeningEvent($host, $port, $this->topologyId));
+            $this->fireSdamEvent('serverOpening', ServerOpeningEvent::create($host, $port, $this->topologyId));
 
             $monitor = new ServerMonitor(
                 host:                    $host,
@@ -157,7 +157,7 @@ final class TopologyManager
             $monitor->stop();
 
             $sd = $this->servers[$address] ?? null;
-            $this->fireSdamEvent('serverClosed', new ServerClosedEvent(
+            $this->fireSdamEvent('serverClosed', ServerClosedEvent::create(
                 $sd?->host ?? '',
                 $sd?->port ?? 0,
                 $this->topologyId,
@@ -165,7 +165,7 @@ final class TopologyManager
         }
 
         $this->monitors = [];
-        $this->fireSdamEvent('topologyClosed', new TopologyClosedEvent($this->topologyId));
+        $this->fireSdamEvent('topologyClosed', TopologyClosedEvent::create($this->topologyId));
     }
 
     // -------------------------------------------------------------------------
@@ -271,7 +271,7 @@ final class TopologyManager
             $previousSd->type !== ($this->servers[$address]->type ?? InternalServerDescription::TYPE_UNKNOWN)
             || $previousSd->roundTripTimeMs !== ($this->servers[$address]->roundTripTimeMs ?? null)
         ) {
-            $this->fireSdamEvent('serverChanged', new ServerChangedEvent(
+            $this->fireSdamEvent('serverChanged', ServerChangedEvent::create(
                 host:                $sd->host,
                 port:                $sd->port,
                 topologyId:          $this->topologyId,
@@ -287,7 +287,7 @@ final class TopologyManager
                 $this->servers,
             ));
 
-            $this->fireSdamEvent('topologyChanged', new TopologyChangedEvent(
+            $this->fireSdamEvent('topologyChanged', TopologyChangedEvent::create(
                 topologyId:           $this->topologyId,
                 previousTopologyType: $previousType->value,
                 newTopologyType:      $this->topologyType->value,
@@ -302,7 +302,7 @@ final class TopologyManager
                 continue;
             }
 
-            $this->fireSdamEvent('serverOpening', new ServerOpeningEvent(
+            $this->fireSdamEvent('serverOpening', ServerOpeningEvent::create(
                 $knownSd->host,
                 $knownSd->port,
                 $this->topologyId,

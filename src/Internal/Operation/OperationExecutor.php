@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Operation;
 
+use Exception;
 use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
 use MongoDB\BSON\Timestamp;
@@ -44,6 +45,7 @@ use MongoDB\Internal\Session\SessionPool;
 use MongoDB\Internal\Topology\InternalServerDescription;
 use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\UriOptions;
+use RuntimeException;
 use stdClass;
 use Throwable;
 
@@ -332,7 +334,7 @@ final class OperationExecutor
                     foreach ((array) ($result['writeErrors'] ?? []) as $e) {
                         $localIdx  = (int) ($e->index ?? 0);
                         $globalIdx = $batchGlobalIndices[$localIdx] ?? $localIdx;
-                        $writeErrors[] = new WriteError(
+                        $writeErrors[] = WriteError::create(
                             code:    (int) ($e->code    ?? 0),
                             index:   $globalIdx,
                             message: (string) ($e->errmsg ?? ''),
@@ -342,7 +344,7 @@ final class OperationExecutor
 
                     if (isset($result['writeConcernError'])) {
                         $wce     = (array) $result['writeConcernError'];
-                        $wcError = new WriteConcernError(
+                        $wcError = WriteConcernError::create(
                             code:    (int) ($wce['code']   ?? 0),
                             message: (string) ($wce['errmsg'] ?? ''),
                         );
@@ -419,7 +421,7 @@ final class OperationExecutor
                     foreach ((array) ($result['writeErrors'] ?? []) as $e) {
                         $localIdx  = (int) ($e->index ?? 0);
                         $globalIdx = $batchGlobalIndices[$localIdx] ?? $localIdx;
-                        $writeErrors[] = new WriteError(
+                        $writeErrors[] = WriteError::create(
                             code:    (int) ($e->code    ?? 0),
                             index:   $globalIdx,
                             message: (string) ($e->errmsg ?? ''),
@@ -429,7 +431,7 @@ final class OperationExecutor
 
                     if (isset($result['writeConcernError']) && $wcError === null) {
                         $wce     = (array) $result['writeConcernError'];
-                        $wcError = new WriteConcernError(
+                        $wcError = WriteConcernError::create(
                             code:    (int) ($wce['code']   ?? 0),
                             message: (string) ($wce['errmsg'] ?? ''),
                         );
@@ -481,7 +483,7 @@ final class OperationExecutor
                     foreach ((array) ($result['writeErrors'] ?? []) as $e) {
                         $localIdx  = (int) ($e->index ?? 0);
                         $globalIdx = $batchGlobalIndices[$localIdx] ?? $localIdx;
-                        $writeErrors[] = new WriteError(
+                        $writeErrors[] = WriteError::create(
                             code:    (int) ($e->code    ?? 0),
                             index:   $globalIdx,
                             message: (string) ($e->errmsg ?? ''),
@@ -491,7 +493,7 @@ final class OperationExecutor
 
                     if (isset($result['writeConcernError']) && $wcError === null) {
                         $wce     = (array) $result['writeConcernError'];
-                        $wcError = new WriteConcernError(
+                        $wcError = WriteConcernError::create(
                             code:    (int) ($wce['code']   ?? 0),
                             message: (string) ($wce['errmsg'] ?? ''),
                         );
@@ -725,7 +727,7 @@ final class OperationExecutor
                 $globalIdx = $batchStart + (int) ($doc['idx'] ?? 0);
 
                 if ($ok === 0) {
-                    $writeErrors[$globalIdx] = new WriteError(
+                    $writeErrors[$globalIdx] = WriteError::create(
                         code:    (int) ($doc['code']   ?? 0),
                         index:   $globalIdx,
                         message: (string) ($doc['errmsg'] ?? ''),
@@ -764,7 +766,7 @@ final class OperationExecutor
             // Write concern error from top-level response body.
             if (isset($body['writeConcernError'])) {
                 $wce = (array) $body['writeConcernError'];
-                $writeConcernErrors[] = new WriteConcernError(
+                $writeConcernErrors[] = WriteConcernError::create(
                     code:    (int) ($wce['code']   ?? 0),
                     message: (string) ($wce['errmsg'] ?? ''),
                 );
@@ -1115,7 +1117,7 @@ final class OperationExecutor
         ?int $serverConnectionId = null,
         int $operationId = 0,
     ): void {
-        $event = new CommandStartedEvent(
+        $event = CommandStartedEvent::create(
             commandName:         $cmdName,
             command:             $cmd,
             databaseName:        $db,
@@ -1151,7 +1153,7 @@ final class OperationExecutor
         ?int $serverConnectionId = null,
         int $operationId = 0,
     ): void {
-        $event = new CommandSucceededEvent(
+        $event = CommandSucceededEvent::create(
             commandName:         $cmdName,
             reply:               $reply,
             databaseName:        $db,
@@ -1189,10 +1191,11 @@ final class OperationExecutor
         ?int $serverConnectionId = null,
         int $operationId = 0,
     ): void {
-        $event = new CommandFailedEvent(
+        $exception = $e instanceof Exception ? $e : new RuntimeException($e->getMessage(), $e->getCode(), $e);
+        $event     = CommandFailedEvent::create(
             commandName:         $cmdName,
             databaseName:        $db,
-            error:               $e,
+            error:               $exception,
             requestId:           $requestId,
             operationId:         $operationId ?: $requestId,
             durationMicros:      $durationMicros,
