@@ -58,11 +58,14 @@ use function get_object_vars;
 use function in_array;
 use function is_array;
 use function is_object;
+use function is_string;
 use function iterator_to_array;
 use function microtime;
 use function reset;
 use function sprintf;
+use function strlen;
 use function strpos;
+use function strtolower;
 use function substr;
 
 /**
@@ -559,110 +562,220 @@ final class OperationExecutor
         $options        = $bulk->getOptions();
         $ordered        = (bool) ($options['ordered'] ?? true);
         $verboseResults = (bool) ($options['verboseResults'] ?? false);
+        $acknowledged   = $writeConcern === null || $writeConcern->getW() !== 0;
 
-        $command = [
-            'bulkWrite' => 1,
-            'ops'       => $bulk->getOps(),
-            'nsInfo'    => $bulk->getNsInfo(),
-            'ordered'   => $ordered,
-            'errorsOnly' => ! $verboseResults,
-        ];
-
-        foreach (['bypassDocumentValidation', 'comment', 'let'] as $opt) {
-            if (! isset($options[$opt])) {
-                continue;
-            }
-
-            $command[$opt] = $options[$opt];
-        }
-
-        $prepared = CommandHelper::prepareCommand(
-            command:      $command,
-            db:           'admin',
-            writeConcern: $writeConcern,
-            session:      $session,
-        );
-
-        $acknowledged = $writeConcern === null || $writeConcern->getW() !== 0;
-
-        // Send command and capture raw body for the summary counts.
-        try {
-            $body = $this->doSendCommand($pool, 'admin', 'bulkWrite', $prepared, $server);
-        } catch (CommandException $e) {
-            throw BulkWriteCommandException::create(
-                message:      $e->getMessage(),
-                code:         $e->getCode(),
-                resultDocument: $e->getResultDocument(),
-                errorReply:   Document::fromPHP($e->getResultDocument()),
-            );
-        }
-
-        // Summary counts live in the top-level response body.
-        $nInserted = (int) ($body['nInserted'] ?? 0);
-        $nUpserted = (int) ($body['nUpserted'] ?? 0);
-        $nMatched  = (int) ($body['nMatched']  ?? 0);
-        $nModified = (int) ($body['nModified'] ?? 0);
-        $nDeleted  = (int) ($body['nDeleted']  ?? 0);
-
-        // Per-operation results / errors come from the results cursor.
-        $resultsCursor = $this->buildCursor($body, 'admin', 'bulkWrite', $pool, $server);
-
-        $ops         = $bulk->getOps();
+        $allOps      = $bulk->getOps();
+        $allNsInfo   = $bulk->getNsInfo();
         $insertedIds = $bulk->getInsertedIds();
 
+        // Limits from the server hello response.
+        $maxMessageSizeBytes = (int) ($server->helloResponse['maxMessageSizeBytes'] ?? 48_000_000);
+        $maxWriteBatchSize   = (int) ($server->helloResponse['maxWriteBatchSize']   ?? 100_000);
+
+        // Check individual document/namespace sizes BEFORE batching to avoid OOM.
+        foreach ($allNsInfo as $nsEntry) {
+            if (strlen((string) ($nsEntry['ns'] ?? '')) >= $maxMessageSizeBytes) {
+                throw new DriverInvalidArgumentException('unable to send document: namespace is too large');
+            }
+        }
+
+        foreach ($allOps as $op) {
+            $docToCheck = $op['document'] ?? null;
+            if ($docToCheck !== null && self::estimateBsonSize($docToCheck) >= $maxMessageSizeBytes) {
+                throw new DriverInvalidArgumentException('unable to send document: document is too large');
+            }
+        }
+
+        // A single operationId is shared across all batches for APM correlation.
+        $operationId = RequestIdGenerator::next();
+
+        $totalOps   = count($allOps);
+        $batchStart = 0;
+
+        // Accumulated results across all batches.
+        $nInserted          = 0;
+        $nUpserted          = 0;
+        $nMatched           = 0;
+        $nModified          = 0;
+        $nDeleted           = 0;
         $writeErrors        = [];
         $writeConcernErrors = [];
         $insertResultsMap   = [];
         $updateResultsMap   = [];
         $deleteResultsMap   = [];
 
-        foreach ($resultsCursor as $doc) {
-            $doc = is_array($doc) ? $doc : (array) $doc;
-            $ok  = (int) ($doc['ok'] ?? 1);
-            $idx = (int) ($doc['idx'] ?? 0);
+        while ($batchStart < $totalOps) {
+            // Build the ops slice for this batch, respecting maxWriteBatchSize and maxMessageSizeBytes.
+            // Ops are sent as an OP_MSG kind-1 document sequence; nsInfo stays in the kind-0 body.
+            // Overhead: OP_MSG header (16) + flagBits (4) + kind-0 marker (1) + kind-1 header (9) +
+            // fixed command fields (bulkWrite, ordered, errorsOnly, lsid, $db) + BSON encoding
+            // overhead for the ops array structure ≈ 900 bytes total (calibrated to match MongoDB's
+            // maxMessageSizeBytes budget so that batch splitting occurs at the right boundary).
+            $fixedOverhead   = 900;
+            $batchNsIndexMap = [];   // old global ns index → new batch-local index
+            $batchNsInfo     = [];
+            $batchOps        = [];
+            $estimatedNsInfo = 0;
+            $estimatedOps    = 0;
 
-            if ($ok === 0) {
-                $writeErrors[$idx] = new WriteError(
-                    code:    (int) ($doc['code']   ?? 0),
-                    index:   $idx,
-                    message: (string) ($doc['errmsg'] ?? ''),
-                    info:    isset($doc['errInfo']) ? (object) $doc['errInfo'] : null,
-                );
-                continue;
-            }
-
-            if (! $verboseResults) {
-                continue;
-            }
-
-            $op = $ops[$idx] ?? [];
-
-            if (isset($op['insert'])) {
-                if (isset($insertedIds[$idx])) {
-                    $insertResultsMap[(string) $idx] = (object) ['insertedId' => $insertedIds[$idx]];
-                }
-            } elseif (isset($op['update'])) {
-                $res = (object) [
-                    'matchedCount'  => (int) ($doc['n'] ?? 0),
-                    'modifiedCount' => (int) ($doc['nModified'] ?? 0),
-                ];
-                if (isset($doc['upserted']['_id'])) {
-                    $res->upsertedId = $doc['upserted']['_id'];
+            for ($i = $batchStart; $i < $totalOps; $i++) {
+                if (count($batchOps) >= $maxWriteBatchSize) {
+                    break;
                 }
 
-                $updateResultsMap[(string) $idx] = $res;
-            } elseif (isset($op['delete'])) {
-                $deleteResultsMap[(string) $idx] = (object) ['deletedCount' => (int) ($doc['n'] ?? 0)];
-            }
-        }
+                $op    = $allOps[$i];
+                $nsKey = $op['insert'] ?? $op['update'] ?? $op['delete'] ?? 0;
+                $oldNs = (int) $nsKey;
 
-        // Write concern error from top-level response body.
-        if (isset($body['writeConcernError'])) {
-            $wce = (array) $body['writeConcernError'];
-            $writeConcernErrors[] = new WriteConcernError(
-                code:    (int) ($wce['code']   ?? 0),
-                message: (string) ($wce['errmsg'] ?? ''),
+                $isNewNs     = ! isset($batchNsIndexMap[$oldNs]);
+                $nsAddition  = $isNewNs ? self::estimateBsonSize($allNsInfo[$oldNs]) : 0;
+                $opSize      = self::estimateBsonSize($op);
+                $newTotal    = $fixedOverhead + $estimatedNsInfo + $nsAddition + $estimatedOps + $opSize;
+
+                if (count($batchOps) > 0 && $newTotal > $maxMessageSizeBytes) {
+                    break;
+                }
+
+                if ($isNewNs) {
+                    $batchNsIndexMap[$oldNs] = count($batchNsInfo);
+                    $batchNsInfo[]           = $allNsInfo[$oldNs];
+                    $estimatedNsInfo        += $nsAddition;
+                }
+
+                $batchOps[]   = $op;
+                $estimatedOps += $opSize;
+            }
+
+            $batchCount = count($batchOps);
+
+            // Remap ns indices in ops to point to the filtered batch nsInfo.
+            $remappedOps = [];
+            foreach ($batchOps as $op) {
+                $remapped = $op;
+                foreach (['insert', 'update', 'delete'] as $opType) {
+                    if (! isset($remapped[$opType])) {
+                        continue;
+                    }
+
+                    $remapped[$opType] = $batchNsIndexMap[(int) $op[$opType]];
+                }
+
+                $remappedOps[] = $remapped;
+            }
+
+            // Command body (kind 0): no ops field; ops go in kind-1 doc sequence.
+            // Include ops in the command for APM events (CommandStartedEvent.getCommand()).
+            $command = [
+                'bulkWrite'  => 1,
+                'ops'        => $remappedOps,
+                'nsInfo'     => $batchNsInfo,
+                'ordered'    => $ordered,
+                'errorsOnly' => ! $verboseResults,
+            ];
+
+            foreach (['bypassDocumentValidation', 'comment', 'let'] as $opt) {
+                if (! isset($options[$opt])) {
+                    continue;
+                }
+
+                $command[$opt] = $options[$opt];
+            }
+
+            $prepared = CommandHelper::prepareCommand(
+                command:      $command,
+                db:           'admin',
+                writeConcern: $writeConcern,
+                session:      $session,
             );
+
+            // Send this batch using 'ops' as a kind-1 OP_MSG document sequence so that
+            // the kind-0 body stays well below maxBsonObjectSize.
+            try {
+                $body = $this->doSendCommand(
+                    $pool,
+                    'admin',
+                    'bulkWrite',
+                    $prepared,
+                    $server,
+                    $operationId,
+                    [['id' => 'ops', 'docs' => $remappedOps]],
+                );
+            } catch (CommandException $e) {
+                throw BulkWriteCommandException::create(
+                    message:        $e->getMessage(),
+                    code:           $e->getCode(),
+                    resultDocument: $e->getResultDocument(),
+                    errorReply:     Document::fromPHP($e->getResultDocument()),
+                );
+            }
+
+            // Accumulate summary counts.
+            $nInserted += (int) ($body['nInserted'] ?? 0);
+            $nUpserted += (int) ($body['nUpserted'] ?? 0);
+            $nMatched  += (int) ($body['nMatched']  ?? 0);
+            $nModified += (int) ($body['nModified'] ?? 0);
+            $nDeleted  += (int) ($body['nDeleted']  ?? 0);
+
+            // Per-operation results / errors from cursor (idx is relative to this batch).
+            $resultsCursor = $this->buildCursor($body, 'admin', 'bulkWrite', $pool, $server);
+
+            foreach ($resultsCursor as $doc) {
+                $doc       = is_array($doc) ? $doc : (array) $doc;
+                $ok        = (int) ($doc['ok'] ?? 1);
+                $globalIdx = $batchStart + (int) ($doc['idx'] ?? 0);
+
+                if ($ok === 0) {
+                    $writeErrors[$globalIdx] = new WriteError(
+                        code:    (int) ($doc['code']   ?? 0),
+                        index:   $globalIdx,
+                        message: (string) ($doc['errmsg'] ?? ''),
+                        info:    isset($doc['errInfo']) ? (object) $doc['errInfo'] : null,
+                    );
+                    continue;
+                }
+
+                if (! $verboseResults) {
+                    continue;
+                }
+
+                $op = $allOps[$globalIdx] ?? [];
+
+                if (isset($op['insert'])) {
+                    if (isset($insertedIds[$globalIdx])) {
+                        $insertResultsMap[(string) $globalIdx] = (object) ['insertedId' => $insertedIds[$globalIdx]];
+                    }
+                } elseif (isset($op['update'])) {
+                    $res = (object) [
+                        'matchedCount'  => (int) ($doc['n'] ?? 0),
+                        'modifiedCount' => (int) ($doc['nModified'] ?? 0),
+                    ];
+                    $upserted = $doc['upserted'] ?? null;
+                    if ($upserted !== null) {
+                        $upsertedArr     = is_array($upserted) ? $upserted : (array) $upserted;
+                        $res->upsertedId = $upsertedArr['_id'] ?? null;
+                    }
+
+                    $updateResultsMap[(string) $globalIdx] = $res;
+                } elseif (isset($op['delete'])) {
+                    $deleteResultsMap[(string) $globalIdx] = (object) ['deletedCount' => (int) ($doc['n'] ?? 0)];
+                }
+            }
+
+            // Write concern error from top-level response body.
+            if (isset($body['writeConcernError'])) {
+                $wce = (array) $body['writeConcernError'];
+                $writeConcernErrors[] = new WriteConcernError(
+                    code:    (int) ($wce['code']   ?? 0),
+                    message: (string) ($wce['errmsg'] ?? ''),
+                );
+            }
+
+            $batchStart += $batchCount;
+
+            // For ordered writes, stop sending further batches if any write errors occurred.
+            if ($ordered && $writeErrors !== []) {
+                break;
+            }
         }
 
         $insertResultsDoc = $verboseResults && $insertResultsMap !== []
@@ -719,6 +832,8 @@ final class OperationExecutor
         string $cmdName,
         array $prepared,
         InternalServerDescription $server,
+        int $operationId = 0,
+        array $docSequences = [],
     ): array {
         // Inject an implicit session lsid if the command doesn't already have one.
         $implicitLsid = null;
@@ -726,6 +841,11 @@ final class OperationExecutor
             $implicitLsid      = $this->sessionPool->acquire();
             $prepared['lsid']  = $implicitLsid;
         }
+
+        // Detect unacknowledged writes (writeConcern w=0). Per the Command Monitoring spec,
+        // APM events for unacknowledged writes must use a synthetic {ok: 1} reply.
+        $wc = $prepared['writeConcern'] ?? null;
+        $isUnacknowledged = is_array($wc) && ($wc['w'] ?? 1) === 0;
 
         $conn      = $pool->acquire();
         $requestId = RequestIdGenerator::next();
@@ -736,15 +856,29 @@ final class OperationExecutor
             ? (int) $server->helloResponse['connectionId']
             : null;
 
-        // Decode with root/document='object' to suppress Persistable detection:
-        // CommandStartedEvent.getCommand() returns a plain stdClass view of the raw
-        // command as sent to MongoDB, not Persistable-reconstructed objects.
-        $commandDoc = Document::fromPHP($prepared)->toPHP(['root' => 'object', 'document' => 'object']);
+        // Remove fields that are sent as OP_MSG kind-1 document sequences so they do not
+        // appear twice (once in kind-0 body and once in kind-1 section).
+        $bodyForEncoding = $prepared;
+        foreach ($docSequences as $seq) {
+            unset($bodyForEncoding[$seq['id']]);
+        }
+
+        // Build APM command doc from the (small) body only, avoiding BSON-encoding of large
+        // doc-sequence fields (e.g. ops containing 16 MB documents) which would cause OOM.
+        // Re-add doc-sequence fields as PHP arrays; CommandStartedEvent consumers receive them
+        // as plain arrays which is equivalent to the decoded BSON representation.
+        $commandDoc = Document::fromPHP($bodyForEncoding)->toPHP(['root' => 'object', 'document' => 'object']);
         assert($commandDoc instanceof stdClass);
-        $this->fireCommandStarted($cmdName, $commandDoc, $db, $requestId, $server->host, $server->port, $serverConnId);
+        foreach ($docSequences as $seq) {
+            $commandDoc->{$seq['id']} = $prepared[$seq['id']] ?? [];
+        }
+
+        // Sensitive commands must have their command body replaced with {} in APM events.
+        $isSensitive = self::isSensitiveCommand($cmdName, $commandDoc);
+        $this->fireCommandStarted($cmdName, $isSensitive ? new stdClass() : $commandDoc, $db, $requestId, $server->host, $server->port, $serverConnId, $operationId ?: $requestId);
 
         try {
-            [$bytes] = OpMsgEncoder::encodeWithRequestId($prepared);
+            [$bytes] = OpMsgEncoder::encodeWithRequestId($bodyForEncoding, $docSequences);
 
             $responseBytes = $conn->sendMessage($bytes);
             $durationUs    = (int) (microtime(true) * 1_000_000) - $startUs;
@@ -764,7 +898,7 @@ final class OperationExecutor
 
                 // Per PHPC-1990: CommandFailedEvent stores a ServerException (not CommandException).
                 $eventErr = new ServerException($errmsg, $code, (object) $body);
-                $this->fireCommandFailed($cmdName, $eventErr, $db, $requestId, $durationUs, $server->host, $server->port, (object) $body, $serverConnId);
+                $this->fireCommandFailed($cmdName, $eventErr, $db, $requestId, $durationUs, $server->host, $server->port, $isSensitive ? new stdClass() : (object) $body, $serverConnId);
 
                 $pool->release($conn);
 
@@ -778,13 +912,19 @@ final class OperationExecutor
                 $wceMsg  = (string) ($wceArr['errmsg'] ?? 'Write Concern error');
                 $wceCode = (int) ($wceArr['code'] ?? 0);
                 $eventErr = new ServerException($wceMsg, $wceCode, (object) $body);
-                $this->fireCommandFailed($cmdName, $eventErr, $db, $requestId, $durationUs, $server->host, $server->port, (object) $body, $serverConnId);
+                $this->fireCommandFailed($cmdName, $eventErr, $db, $requestId, $durationUs, $server->host, $server->port, $isSensitive ? new stdClass() : (object) $body, $serverConnId, $operationId ?: $requestId);
                 $pool->release($conn);
 
                 throw new CommandException(sprintf('Write Concern error: %s', $wceMsg), $wceCode, (object) $body);
             }
 
-            $this->fireCommandSucceeded($cmdName, (object) $body, $db, $requestId, $durationUs, $server->host, $server->port, $serverConnId);
+            // Unacknowledged writes must report {ok: 1} in APM (no result fields).
+            $apmReply = $isSensitive || $isUnacknowledged ? new stdClass() : (object) $body;
+            if (! $isSensitive && $isUnacknowledged) {
+                $apmReply->ok = 1;
+            }
+
+            $this->fireCommandSucceeded($cmdName, $apmReply, $db, $requestId, $durationUs, $server->host, $server->port, $serverConnId, $operationId ?: $requestId);
 
             $pool->release($conn);
 
@@ -793,7 +933,7 @@ final class OperationExecutor
             throw $e;
         } catch (Throwable $e) {
             $durationUs = (int) (microtime(true) * 1_000_000) - $startUs;
-            $this->fireCommandFailed($cmdName, $e, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId);
+            $this->fireCommandFailed($cmdName, $e, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
 
             $pool->release($conn);
 
@@ -822,7 +962,10 @@ final class OperationExecutor
 
         $this->advanceSessionFromResponse($session, $body);
 
-        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand, $session);
+        // Pass batchSize through to getMore commands so APM events include it.
+        $batchSize = isset($prepared['batchSize']) ? (int) $prepared['batchSize'] : 0;
+
+        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand, $session, $batchSize);
     }
 
     /**
@@ -870,6 +1013,7 @@ final class OperationExecutor
         int $maxAwaitTimeMS = 0,
         ?Command $debugCommand = null,
         ?Session $session = null,
+        int $batchSize = 0,
     ): CursorInterface {
         $publicServer = $this->buildPublicServer($server);
 
@@ -882,11 +1026,15 @@ final class OperationExecutor
             $ns         = (string) ($cursorDoc['ns'] ?? $db);
             $firstBatch = (array) ($cursorDoc['firstBatch'] ?? []);
 
-            $getMoreFn = function (int $cursorId, string $ns) use ($pool, $db, $maxAwaitTimeMS, $server, $session): array {
+            $getMoreFn = function (int $cursorId, string $ns) use ($pool, $db, $maxAwaitTimeMS, $batchSize, $server, $session): array {
                 $getMoreCmd = [
                     'getMore'    => new Int64($cursorId),
                     'collection' => explode('.', $ns, 2)[1] ?? $ns,
                 ];
+
+                if ($batchSize > 0) {
+                    $getMoreCmd['batchSize'] = $batchSize;
+                }
 
                 if ($maxAwaitTimeMS > 0) {
                     $getMoreCmd['maxTimeMS'] = $maxAwaitTimeMS;
@@ -955,13 +1103,14 @@ final class OperationExecutor
         string $host = '',
         int $port = 27017,
         ?int $serverConnectionId = null,
+        int $operationId = 0,
     ): void {
         $event = new CommandStartedEvent(
             commandName:         $cmdName,
             command:             $cmd,
             databaseName:        $db,
             requestId:           $requestId,
-            operationId:         $requestId,
+            operationId:         $operationId ?: $requestId,
             host:                $host,
             port:                $port,
             serverConnectionId:  $serverConnectionId,
@@ -990,13 +1139,14 @@ final class OperationExecutor
         string $host = '',
         int $port = 27017,
         ?int $serverConnectionId = null,
+        int $operationId = 0,
     ): void {
         $event = new CommandSucceededEvent(
             commandName:         $cmdName,
             reply:               $reply,
             databaseName:        $db,
             requestId:           $requestId,
-            operationId:         $requestId,
+            operationId:         $operationId ?: $requestId,
             durationMicros:      $durationMicros,
             host:                $host,
             port:                $port,
@@ -1027,13 +1177,14 @@ final class OperationExecutor
         int $port = 27017,
         ?object $reply = null,
         ?int $serverConnectionId = null,
+        int $operationId = 0,
     ): void {
         $event = new CommandFailedEvent(
             commandName:         $cmdName,
             databaseName:        $db,
             error:               $e,
             requestId:           $requestId,
-            operationId:         $requestId,
+            operationId:         $operationId ?: $requestId,
             durationMicros:      $durationMicros,
             host:                $host,
             port:                $port,
@@ -1151,7 +1302,64 @@ final class OperationExecutor
     }
 
     /**
-     * Recursively convert an array to stdClass, turning associative arrays into objects.
-     * List arrays remain as PHP arrays (since they represent BSON arrays).
+     * Estimate the BSON-encoded size of a document without allocating the BSON bytes.
+     *
+     * This is used to detect oversized documents before attempting to encode them,
+     * which would cause out-of-memory errors when documents approach maxMessageSizeBytes.
      */
+    private static function estimateBsonSize(array|object $doc): int
+    {
+        $fields = is_object($doc) ? get_object_vars($doc) : $doc;
+        $size   = 5; // 4-byte document length + 1-byte terminator
+
+        foreach ($fields as $key => $value) {
+            $size += 1 + strlen((string) $key) + 1; // type byte + key + null terminator
+
+            if (is_string($value)) {
+                $size += 4 + strlen($value) + 1; // int32 length + string bytes + null terminator
+            } elseif (is_array($value) || is_object($value)) {
+                $size += self::estimateBsonSize($value);
+            } else {
+                $size += 8; // conservative estimate for scalar BSON types
+            }
+        }
+
+        return $size;
+    }
+
+    /**
+     * Return true when this command must have its body and reply redacted in APM events.
+     *
+     * Per the Command Monitoring specification, the following commands are sensitive:
+     * authenticate, saslStart, saslContinue, getnonce, createUser, updateUser,
+     * copydbgetnonce, copydbsaslstart, copydb, and hello / isMaster when they contain
+     * speculativeAuthenticate.
+     */
+    private static function isSensitiveCommand(string $cmdName, object $cmd): bool
+    {
+        static $unconditional = [
+            'authenticate'   => true,
+            'saslstart'      => true,
+            'saslcontinue'   => true,
+            'getnonce'       => true,
+            'createuser'     => true,
+            'updateuser'     => true,
+            'copydbgetnonce' => true,
+            'copydbsaslstart' => true,
+            'copydb'         => true,
+        ];
+
+        $lower = strtolower($cmdName);
+
+        if (isset($unconditional[$lower])) {
+            return true;
+        }
+
+        // hello (and legacy hello variants) are sensitive only when speculativeAuthenticate is present.
+        if ($lower === 'hello' || $lower === 'ismaster' || $lower === 'ismaster') {
+            return isset($cmd->speculativeAuthenticate);
+        }
+
+        return false;
+    }
 }
