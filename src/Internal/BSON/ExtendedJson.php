@@ -165,9 +165,8 @@ final class ExtendedJson
                 if (
                     count($value) !== 1
                     || count($bin) !== 2
-                    || ! isset($bin['base64'], $bin['subType'])
-                    || ! is_string($bin['base64'])
-                    || ! is_string($bin['subType'])
+                    || ! is_string($bin['base64'] ?? null)
+                    || ! is_string($bin['subType'] ?? null)
                 ) {
                     throw new UnexpectedValueException('Invalid $binary in Extended JSON');
                 }
@@ -237,9 +236,8 @@ final class ExtendedJson
                 count($value) !== 1
                 || ! is_array($r)
                 || count($r) !== 2
-                || ! isset($r['pattern'], $r['options'])
-                || ! is_string($r['pattern'])
-                || ! is_string($r['options'])
+                || ! is_string($r['pattern'] ?? null)
+                || ! is_string($r['options'] ?? null)
             ) {
                 throw new UnexpectedValueException('Invalid $regularExpression in Extended JSON');
             }
@@ -248,7 +246,7 @@ final class ExtendedJson
         }
 
         // --- $regex + $options (legacy) — only when $regex is a plain string ---
-        if (isset($value['$regex']) && isset($value['$options']) && is_string($value['$regex'])) {
+        if (is_string($value['$regex'] ?? null) && is_string($value['$options'] ?? null)) {
             return new Regex($value['$regex'], $value['$options']);
         }
 
@@ -399,7 +397,7 @@ final class ExtendedJson
         }
 
         // --- $undefined ---
-        if (isset($value['$undefined']) && $value['$undefined'] === true) {
+        if (($value['$undefined'] ?? null) === true) {
             return BsonUndefined::create();
         }
 
