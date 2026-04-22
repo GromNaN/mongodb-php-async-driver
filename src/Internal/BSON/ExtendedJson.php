@@ -200,7 +200,7 @@ final class ExtendedJson
 
             $d = $value['$date'];
             if (is_array($d)) {
-                if (! isset($d['$numberLong']) || ! is_string($d['$numberLong']) || count($d) !== 1) {
+                if (! is_string($d['$numberLong'] ?? null) || count($d) !== 1) {
                     throw new UnexpectedValueException('Invalid $date in Extended JSON');
                 }
 
@@ -370,7 +370,7 @@ final class ExtendedJson
         }
 
         // --- $symbol ---
-        if (isset($value['$symbol']) && is_string($value['$symbol'])) {
+        if (is_string($value['$symbol'] ?? null)) {
             return Symbol::create($value['$symbol']);
         }
 

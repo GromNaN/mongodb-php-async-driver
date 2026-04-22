@@ -182,7 +182,7 @@ final class InternalServerDescription
         }
 
         // Extract tag set if present.
-        if (isset($response['tags']) && is_array($response['tags'])) {
+        if (is_array($response['tags'] ?? null)) {
             $tags = $response['tags'];
         }
 

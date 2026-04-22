@@ -82,7 +82,7 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
 
     public function __unserialize(array $data): void
     {
-        if (! isset($data['oid']) || ! is_string($data['oid'])) {
+        if (! is_string($data['oid'] ?? null)) {
             throw new InvalidArgumentException(
                 'MongoDB\BSON\ObjectId initialization requires "oid" string field',
             );
@@ -99,7 +99,7 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
 
     public static function __set_state(array $properties): static
     {
-        if (! isset($properties['oid']) || ! is_string($properties['oid'])) {
+        if (! is_string($properties['oid'] ?? null)) {
             throw new InvalidArgumentException(
                 'MongoDB\BSON\ObjectId initialization requires "oid" string field',
             );

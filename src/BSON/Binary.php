@@ -195,7 +195,7 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
     private static function validateInitFields(array $data): void
     {
         if (
-            ! isset($data['data']) || ! is_string($data['data']) ||
+            ! is_string($data['data'] ?? null) ||
             ! isset($data['type']) || ! is_int($data['type'])
         ) {
             throw new InvalidArgumentException(

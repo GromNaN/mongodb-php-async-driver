@@ -90,7 +90,7 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
 
     public function __unserialize(array $data): void
     {
-        if (! isset($data['code']) || ! is_string($data['code'])) {
+        if (! is_string($data['code'] ?? null)) {
             throw new InvalidArgumentException(
                 'MongoDB\BSON\Javascript initialization requires "code" string field',
             );
@@ -114,7 +114,7 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
 
     public static function __set_state(array $properties): static
     {
-        if (! isset($properties['code']) || ! is_string($properties['code'])) {
+        if (! is_string($properties['code'] ?? null)) {
             throw new InvalidArgumentException(
                 'MongoDB\BSON\Javascript initialization requires "code" string field',
             );

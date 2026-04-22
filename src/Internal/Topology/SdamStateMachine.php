@@ -269,7 +269,7 @@ final class SdamStateMachine
         // Collect all members reported by the primary.
         $reported = [];
         foreach (['hosts', 'passives', 'arbiters'] as $key) {
-            if (! isset($response[$key]) || ! is_array($response[$key])) {
+            if (! is_array($response[$key] ?? null)) {
                 continue;
             }
 

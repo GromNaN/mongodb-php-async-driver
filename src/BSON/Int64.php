@@ -76,7 +76,7 @@ final class Int64 implements JsonSerializable, Type, Stringable
 
     public function __unserialize(array $data): void
     {
-        if (! isset($data['integer']) || ! is_string($data['integer'])) {
+        if (! is_string($data['integer'] ?? null)) {
             throw new InvalidArgumentException(
                 'MongoDB\BSON\Int64 initialization requires "integer" string field',
             );
@@ -87,7 +87,7 @@ final class Int64 implements JsonSerializable, Type, Stringable
 
     public static function __set_state(array $properties): static
     {
-        if (! isset($properties['integer']) || ! is_string($properties['integer'])) {
+        if (! is_string($properties['integer'] ?? null)) {
             throw new InvalidArgumentException(
                 'MongoDB\BSON\Int64 initialization requires "integer" string field',
             );

@@ -61,7 +61,7 @@ final class AuthMechanismFactory
         ?string $authSource,
     ): AuthMechanism {
         // If the server advertises supported mechanisms, honour its list.
-        if (isset($helloResponse['saslSupportedMechs']) && is_array($helloResponse['saslSupportedMechs'])) {
+        if (is_array($helloResponse['saslSupportedMechs'] ?? null)) {
             $supported = $helloResponse['saslSupportedMechs'];
 
             if (in_array('SCRAM-SHA-256', $supported, true)) {

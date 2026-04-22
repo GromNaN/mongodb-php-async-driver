@@ -58,7 +58,7 @@ final class Symbol implements JsonSerializable, Type, Stringable
 
     public function __unserialize(array $data): void
     {
-        if (! isset($data['symbol']) || ! is_string($data['symbol'])) {
+        if (! is_string($data['symbol'] ?? null)) {
             throw new InvalidArgumentException(
                 'MongoDB\BSON\Symbol initialization requires "symbol" string field',
             );
@@ -73,7 +73,7 @@ final class Symbol implements JsonSerializable, Type, Stringable
 
     public static function __set_state(array $properties): static
     {
-        if (! isset($properties['symbol']) || ! is_string($properties['symbol'])) {
+        if (! is_string($properties['symbol'] ?? null)) {
             throw new InvalidArgumentException(
                 'MongoDB\BSON\Symbol initialization requires "symbol" string field',
             );

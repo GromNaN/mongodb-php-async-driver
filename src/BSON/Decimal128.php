@@ -51,7 +51,7 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
 
     public function __unserialize(array $data): void
     {
-        if (! isset($data['dec']) || ! is_string($data['dec'])) {
+        if (! is_string($data['dec'] ?? null)) {
             throw new InvalidArgumentException(
                 'MongoDB\BSON\Decimal128 initialization requires "dec" string field',
             );
@@ -62,7 +62,7 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
 
     public static function __set_state(array $properties): static
     {
-        if (! isset($properties['dec']) || ! is_string($properties['dec'])) {
+        if (! is_string($properties['dec'] ?? null)) {
             throw new InvalidArgumentException(
                 'MongoDB\BSON\Decimal128 initialization requires "dec" string field',
             );
