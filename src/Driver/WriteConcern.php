@@ -9,7 +9,6 @@ use MongoDB\Driver\Exception\InvalidArgumentException;
 use stdClass;
 
 use function ctype_digit;
-use function get_debug_type;
 use function is_bool;
 use function is_int;
 use function is_string;
@@ -31,15 +30,8 @@ final class WriteConcern implements Serializable
 {
     public const string MAJORITY = 'majority';
 
-    public function __construct(mixed $w, mixed $wtimeout = null, mixed $journal = null)
+    public function __construct(string|int $w, ?int $wtimeout = null, ?bool $journal = null)
     {
-        // Validate w type
-        if (! is_int($w) && ! is_string($w)) {
-            throw new InvalidArgumentException(
-                'Expected w to be integer or string, ' . get_debug_type($w) . ' given',
-            );
-        }
-
         // Validate w range
         if (is_int($w) && $w < -3) {
             throw new InvalidArgumentException(
@@ -47,24 +39,13 @@ final class WriteConcern implements Serializable
             );
         }
 
-        // Validate wtimeout type and range
+        // Validate wtimeout range
         if ($wtimeout !== null) {
-            if (! is_int($wtimeout)) {
-                throw new InvalidArgumentException(
-                    'Expected wtimeout to be >= 0, ' . get_debug_type($wtimeout) . ' given',
-                );
-            }
-
             if ($wtimeout < 0) {
                 throw new InvalidArgumentException(
                     'Expected wtimeout to be >= 0, ' . $wtimeout . ' given',
                 );
             }
-        }
-
-        // Validate journal: cannot use j=true with w=0
-        if ($journal !== null) {
-            $journal = (bool) $journal;
         }
 
         if ($journal === true && $w === 0) {

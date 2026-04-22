@@ -62,35 +62,35 @@ final class WriteResult
         return $instance;
     }
 
-    public function getInsertedCount(): ?int
+    public function getInsertedCount(): int
     {
         $this->assertAcknowledged(__METHOD__);
 
         return $this->insertedCount;
     }
 
-    public function getMatchedCount(): ?int
+    public function getMatchedCount(): int
     {
         $this->assertAcknowledged(__METHOD__);
 
         return $this->matchedCount;
     }
 
-    public function getModifiedCount(): ?int
+    public function getModifiedCount(): int
     {
         $this->assertAcknowledged(__METHOD__);
 
         return $this->modifiedCount;
     }
 
-    public function getDeletedCount(): ?int
+    public function getDeletedCount(): int
     {
         $this->assertAcknowledged(__METHOD__);
 
         return $this->deletedCount;
     }
 
-    public function getUpsertedCount(): ?int
+    public function getUpsertedCount(): int
     {
         $this->assertAcknowledged(__METHOD__);
 
@@ -129,6 +129,11 @@ final class WriteResult
     public function getWriteErrors(): array
     {
         return $this->writeErrors;
+    }
+
+    public function getErrorReplies(): array
+    {
+        return [];
     }
 
     public function isAcknowledged(): bool

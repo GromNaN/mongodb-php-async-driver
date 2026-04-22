@@ -5,12 +5,18 @@ namespace MongoDB\Driver;
 
 final class WriteError
 {
-    public function __construct(
+    private function __construct(
         private readonly int $code,
         private readonly int $index,
         private readonly string $message,
         private readonly ?object $info = null,
     ) {
+    }
+
+    /** @internal */
+    public static function create(int $code, int $index, string $message, ?object $info = null): self
+    {
+        return new self($code, $index, $message, $info);
     }
 
     public function getCode(): int

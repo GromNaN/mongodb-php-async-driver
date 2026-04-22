@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver;
 
+use MongoDB\BSON\Binary;
 use MongoDB\Driver\Exception\RuntimeException;
 
 final class ClientEncryption
@@ -15,14 +16,9 @@ final class ClientEncryption
     public const string QUERY_TYPE_EQUALITY                         = 'equality';
     public const string QUERY_TYPE_RANGE                            = 'range';
 
-    private function __construct()
+    public function __construct(array $options)
     {
-    }
-
-    /** @internal */
-    public static function create(): self
-    {
-        return new self();
+        throw new RuntimeException('Client-side encryption is not supported in this driver');
     }
 
     public function addKeyAltName(Binary $keyId, string $keyAltName): ?object

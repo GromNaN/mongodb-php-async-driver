@@ -92,30 +92,30 @@ final class ServerApi implements Serializable
         $this->deprecationErrors = $data['deprecationErrors'] ?? null;
     }
 
-    public static function __set_state(array $array): static
+    public static function __set_state(array $properties): static
     {
-        if (! is_string($array['version'] ?? null)) {
+        if (! is_string($properties['version'] ?? null)) {
             throw new Exception\InvalidArgumentException(
                 'MongoDB\Driver\ServerApi initialization requires "version" field to be string',
             );
         }
 
-        if (array_key_exists('strict', $array) && $array['strict'] !== null && ! is_bool($array['strict'])) {
+        if (array_key_exists('strict', $properties) && $properties['strict'] !== null && ! is_bool($properties['strict'])) {
             throw new Exception\InvalidArgumentException(
                 'MongoDB\Driver\ServerApi initialization requires "strict" field to be bool or null',
             );
         }
 
-        if (array_key_exists('deprecationErrors', $array) && $array['deprecationErrors'] !== null && ! is_bool($array['deprecationErrors'])) {
+        if (array_key_exists('deprecationErrors', $properties) && $properties['deprecationErrors'] !== null && ! is_bool($properties['deprecationErrors'])) {
             throw new Exception\InvalidArgumentException(
                 'MongoDB\Driver\ServerApi initialization requires "deprecationErrors" field to be bool or null',
             );
         }
 
         return new static(
-            $array['version'],
-            $array['strict'] ?? null,
-            $array['deprecationErrors'] ?? null,
+            $properties['version'],
+            $properties['strict'] ?? null,
+            $properties['deprecationErrors'] ?? null,
         );
     }
 

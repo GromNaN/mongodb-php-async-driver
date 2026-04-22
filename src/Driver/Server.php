@@ -183,7 +183,7 @@ final class Server
         return $this->executor->executeQuery($namespace, $query, $readPreference, $session);
     }
 
-    public function executeBulkWrite(string $namespace, BulkWrite $bulk, ?array $options = null): WriteResult
+    public function executeBulkWrite(string $namespace, BulkWrite $bulkWrite, ?array $options = null): WriteResult
     {
         $options ??= [];
         self::validateOptions($options, ['session', 'writeConcern']);
@@ -191,7 +191,7 @@ final class Server
         $writeConcern = $options['writeConcern'] ?? null;
         $session      = $options['session'] ?? null;
 
-        return $this->executor->executeBulkWrite($namespace, $bulk, $writeConcern, $session);
+        return $this->executor->executeBulkWrite($namespace, $bulkWrite, $writeConcern, $session);
     }
 
     public function executeBulkWriteCommand(

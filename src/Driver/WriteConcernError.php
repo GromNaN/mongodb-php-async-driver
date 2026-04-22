@@ -7,13 +7,19 @@ final class WriteConcernError
 {
     private ?object $details;
 
-    public function __construct(
+    private function __construct(
         private readonly int $code,
         private readonly string $message,
         private readonly ?object $info = null,
         ?array $details = null,
     ) {
         $this->details = $details !== null ? (object) $details : null;
+    }
+
+    /** @internal */
+    public static function create(int $code, string $message, ?object $info = null, ?array $details = null): self
+    {
+        return new self($code, $message, $info, $details);
     }
 
     public function getCode(): int
