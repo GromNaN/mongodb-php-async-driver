@@ -12,12 +12,12 @@ class RuntimeException extends BaseRuntimeException implements Exception
 {
     protected mixed $errorLabels = null;
 
-    public function hasErrorLabel(string $label): bool
+    final public function hasErrorLabel(string $errorLabel): bool
     {
         if (! is_array($this->errorLabels)) {
             return false;
         }
 
-        return in_array($label, $this->errorLabels, true);
+        return in_array($errorLabel, $this->errorLabels, true);
     }
 }

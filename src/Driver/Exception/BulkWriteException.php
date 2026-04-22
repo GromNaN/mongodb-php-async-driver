@@ -13,7 +13,7 @@ class BulkWriteException extends ServerException
         parent::__construct($message, $code, $resultDocument ?? new stdClass());
     }
 
-    public function getWriteResult(): ?WriteResult
+    final public function getWriteResult(): WriteResult
     {
         return $this->writeResult;
     }
