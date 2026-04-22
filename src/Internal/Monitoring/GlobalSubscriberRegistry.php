@@ -7,8 +7,6 @@ namespace MongoDB\Internal\Monitoring;
 use MongoDB\Driver\Monitoring\Subscriber;
 use SplObjectStorage;
 
-use function iterator_to_array;
-
 /** @internal */
 final class GlobalSubscriberRegistry
 {
@@ -28,6 +26,11 @@ final class GlobalSubscriberRegistry
     /** @return Subscriber[] */
     public static function getAll(): array
     {
-        return self::$subscribers ? iterator_to_array(self::$subscribers, false) : [];
+        $result = [];
+        foreach (self::$subscribers ?? [] as $subscriber) {
+            $result[] = $subscriber;
+        }
+
+        return $result;
     }
 }
