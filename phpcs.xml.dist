@@ -60,6 +60,9 @@
         <!-- Disable forbidden annotation sniff as excluding @api from the list doesn't work -->
         <exclude name="SlevomatCodingStandard.Commenting.ForbiddenAnnotations.AnnotationForbidden" />
 
+        <!-- Allow \Exception in type hints (ext-mongodb stubs use Exception, not Throwable) -->
+        <exclude name="SlevomatCodingStandard.Exceptions.ReferenceThrowableOnly" />
+
         <exclude name="Squiz.Commenting.FunctionComment.WrongStyle"/>
     </rule>
 
