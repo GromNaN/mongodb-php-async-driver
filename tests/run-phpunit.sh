@@ -25,7 +25,7 @@ if ! PHP_INI_SCAN_DIR="" php -r "exit(extension_loaded('mongodb') ? 1 : 0);"; th
     exit 1
 fi
 
-PHPUNIT=(php -d memory_limit=512M ./vendor/bin/phpunit)
+PHPUNIT=(php -d memory_limit=1G ./vendor/bin/phpunit)
 
 if [[ "${1:-}" == mongodb://* ]]; then
     MONGODB_URI="$1"
