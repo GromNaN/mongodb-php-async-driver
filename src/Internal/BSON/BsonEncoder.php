@@ -258,13 +258,7 @@ final class BsonEncoder
         }
 
         if ($value instanceof UTCDateTime) {
-            // getMilliseconds() returns an int or \MongoDB\BSON\Int64
-            $ms = $value->getMilliseconds();
-            if ($ms instanceof Int64) {
-                $ms = (int) (string) $ms;
-            }
-
-            return [BsonType::Date, pack('P', $ms)];
+            return [BsonType::Date, pack('P', (int) $value->milliseconds)];
         }
 
         if ($value instanceof Regex) {
