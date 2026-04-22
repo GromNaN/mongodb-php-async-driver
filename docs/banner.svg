@@ -89,5 +89,5 @@
   </g>
 
   <!-- Title at the bottom -->
-  <text x="400" y="178" font-family="sans-serif" font-size="13" fill="#8b949e" text-anchor="middle" letter-spacing="1">mongodb-driver-revoltphp — drop-in MongoDB driver, no C extension required</text>
+  <text x="400" y="178" font-family="sans-serif" font-size="13" fill="#8b949e" text-anchor="middle" letter-spacing="1">mongodb/async-driver — drop-in MongoDB PHP Driver, no C extension required</text>
 </svg>

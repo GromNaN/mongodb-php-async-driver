@@ -102,11 +102,10 @@ Simply don't install the extension (the default on most base images):
 The extension is typically loaded via a file in PHP's `conf.d` scan directory. Bypass it for a single command with:
 
 ```bash
-PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit
 PHP_INI_SCAN_DIR="" php my-script.php
 ```
 
-To make this permanent for a project, add to your shell profile or a `.env` file loaded by your test runner.
+To make this permanent for the project, add `PHP_INI_SCAN_DIR=""` to your shell profile or a `.env` file loaded by your test runner.
 
 ## Architecture
 
@@ -141,15 +140,27 @@ src/
 
 ## Running tests
 
+> **Note:** `ext-mongodb` must **not** be active when running tests (classes would conflict). Check with `php --ri mongodb`.
+
 ```bash
 # Unit tests (no MongoDB required)
-PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox --testsuite unit
+./vendor/bin/phpunit --testdox --testsuite unit
 
 # Integration tests (requires MongoDB on localhost:27017)
-PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox --testsuite integration
+./vendor/bin/phpunit --testdox --testsuite integration
 
-# All tests
-PHP_INI_SCAN_DIR="" ./vendor/bin/phpunit --testdox
+# ext-mongodb phpt compatibility tests
+tests/run-phpt.sh
+
+# Official mongodb/mongodb library tests (use run-phpunit.sh to inject MONGODB_URI)
+tests/run-phpunit.sh mongodb://127.0.0.1:PORT/ \
+    -c tests/references/mongo-php-library/phpunit.xml.dist \
+    tests/references/mongo-php-library/tests/
+
+# Run a subset of library tests
+tests/run-phpunit.sh mongodb://127.0.0.1:PORT/ \
+    -c tests/references/mongo-php-library/phpunit.xml.dist \
+    tests/references/mongo-php-library/tests/ --filter testCrud
 ```
 
 ## Supported features
@@ -189,6 +200,7 @@ The following features from `ext-mongodb` are **not yet implemented**:
 | **X.509 authentication** | Not implemented (requires TLS) |
 | **AWS authentication** | Not implemented |
 | **Stable API versioning** | `serverApi` URI / constructor option is parsed but not sent in commands |
+| **Snapshot sessions** | `Session` objects do not support snapshot read concern |
 | **`MongoDB\Driver\BulkWrite::delete` with `hint`** | `hint` is accepted but the server may reject it on older versions |
 | **APM event filtering by operation type** | All commands are monitored; no exclude-list support |
 | **`Int64` arithmetic comparison** | In PHP 8.5+, `Int64 == 0` may emit a notice; use `(string) $id === '0'` instead |

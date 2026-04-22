@@ -17,12 +17,12 @@
 
 set -euo pipefail
 
-PHPUNIT="./vendor/bin/phpunit"
+PHPUNIT=(php -d memory_limit=512M ./vendor/bin/phpunit)
 
 if [[ "${1:-}" == mongodb://* ]]; then
     MONGODB_URI="$1"
     shift
-    exec env PHP_INI_SCAN_DIR="" MONGODB_URI="$MONGODB_URI" "$PHPUNIT" "$@"
+    exec env PHP_INI_SCAN_DIR="" MONGODB_URI="$MONGODB_URI" "${PHPUNIT[@]}" "$@"
 else
-    exec env PHP_INI_SCAN_DIR="" "$PHPUNIT" "$@"
+    exec env PHP_INI_SCAN_DIR="" "${PHPUNIT[@]}" "$@"
 fi

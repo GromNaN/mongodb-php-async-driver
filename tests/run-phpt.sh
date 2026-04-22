@@ -57,7 +57,7 @@ SKIPPED=$(printf '%s\n' "$SKIP_PATHS" | grep -c . || true)
 echo "Running $TOTAL phpt tests ($SKIPPED skipped)"
 
 TEST_PHP_EXECUTABLE=$(which php) \
-php "$RUN_TESTS" \
+PHP_INI_SCAN_DIR="" php "$RUN_TESTS" \
     -P \
     -q \
     -d "auto_prepend_file=$PREPEND_FILE" \
