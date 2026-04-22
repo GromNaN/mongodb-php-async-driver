@@ -101,18 +101,20 @@ final class ExtendedJson
 
     /**
      * Preprocess a json_decode result (with associative:false) for fromValue.
-     * Non-empty stdClass objects are recursively converted to associative arrays;
-     * empty stdClass is preserved so BsonEncoder can distinguish {} from [].
+     * stdClass objects are preserved as-is (recursing into values only) so that
+     * BsonEncoder can distinguish JSON objects ({}) from JSON arrays ([]).
      */
     public static function normalizeJson(mixed $v): mixed
     {
         if ($v instanceof stdClass) {
-            $arr = (array) $v;
-            if ($arr === []) {
-                return $v; // preserve empty stdClass → BsonEncoder encodes as {}
+            // Preserve stdClass to keep document-vs-array semantics for BsonEncoder.
+            // Only recurse into the property values.
+            $result = new stdClass();
+            foreach ((array) $v as $k => $val) {
+                $result->{(string) $k} = self::normalizeJson($val);
             }
 
-            return array_map(self::normalizeJson(...), $arr);
+            return $result;
         }
 
         if (is_array($v)) {
@@ -132,8 +134,12 @@ final class ExtendedJson
      */
     public static function fromValue(mixed $value): mixed
     {
-        if (! is_array($value)) {
-            // Handles stdClass (empty {}) and scalars unchanged.
+        // Track whether input was a stdClass so we can return stdClass for
+        // non-extended-JSON objects, preserving BSON document encoding.
+        $isObject = $value instanceof stdClass;
+        if ($isObject) {
+            $value = (array) $value;
+        } elseif (! is_array($value)) {
             return $value;
         }
 
@@ -293,7 +299,7 @@ final class ExtendedJson
                 throw new UnexpectedValueException('Invalid $numberLong in Extended JSON');
             }
 
-            return new Int64((int) $value['$numberLong']);
+            return new Int64($value['$numberLong']);
         }
 
         // --- $numberDouble ---
@@ -385,7 +391,9 @@ final class ExtendedJson
             $result[$k] = self::fromValue($v);
         }
 
-        return $result;
+        // Restore stdClass for JSON objects so BsonEncoder encodes them as BSON
+        // documents, not arrays (a PHP list like [0 => v] would be a BSON array).
+        return $isObject ? (object) $result : $result;
     }
 
     // -------------------------------------------------------------------------
