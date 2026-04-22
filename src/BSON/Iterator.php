@@ -73,7 +73,7 @@ final class Iterator implements IteratorInterface
     // Iterator
     // ------------------------------------------------------------------
 
-    public function current(): mixed
+    final public function current(): mixed
     {
         if (! $this->valid()) {
             throw new LogicException('Cannot call current() on an exhausted iterator');
@@ -82,7 +82,7 @@ final class Iterator implements IteratorInterface
         return $this->data[$this->keys[$this->position]];
     }
 
-    public function key(): string|int
+    final public function key(): string|int
     {
         if (! $this->valid()) {
             throw new LogicException('Cannot call key() on an exhausted iterator');
@@ -91,17 +91,17 @@ final class Iterator implements IteratorInterface
         return $this->keys[$this->position];
     }
 
-    public function next(): void
+    final public function next(): void
     {
         ++$this->position;
     }
 
-    public function rewind(): void
+    final public function rewind(): void
     {
         $this->position = 0;
     }
 
-    public function valid(): bool
+    final public function valid(): bool
     {
         return isset($this->keys[$this->position]);
     }

@@ -30,7 +30,7 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
     public const TYPE_VECTOR       = 9;
     public const TYPE_USER_DEFINED = 128;
 
-    public function __construct(public readonly string $data, public readonly int $type = self::TYPE_GENERIC)
+    final public function __construct(public readonly string $data, public readonly int $type = self::TYPE_GENERIC)
     {
         if ($type < 0 || $type > 255) {
             throw new InvalidArgumentException(
@@ -58,7 +58,7 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
     // Static factories
     // ------------------------------------------------------------------
 
-    public static function fromVector(array $vector, VectorType $vectorType): Binary
+    final public static function fromVector(array $vector, VectorType $vectorType): Binary
     {
         $data = $vectorType->encode($vector);
 
@@ -69,17 +69,17 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
     // BinaryInterface
     // ------------------------------------------------------------------
 
-    public function getData(): string
+    final public function getData(): string
     {
         return $this->data;
     }
 
-    public function getType(): int
+    final public function getType(): int
     {
         return $this->type;
     }
 
-    public function getVectorType(): VectorType
+    final public function getVectorType(): VectorType
     {
         if ($this->type !== self::TYPE_VECTOR) {
             throw new LogicException(
@@ -90,7 +90,7 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
         return VectorType::fromDtypeByte(ord($this->data[0]));
     }
 
-    public function toArray(): array
+    final public function toArray(): array
     {
         if ($this->type !== self::TYPE_VECTOR) {
             throw new LogicException(
@@ -101,7 +101,7 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
         return VectorType::fromDtypeByte(ord($this->data[0]))->decode($this->data);
     }
 
-    public function __toString(): string
+    final public function __toString(): string
     {
         return $this->data;
     }
@@ -110,7 +110,7 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
     // JsonSerializable
     // ------------------------------------------------------------------
 
-    public function jsonSerialize(): mixed
+    final public function jsonSerialize(): mixed
     {
         return [
             '$binary' => base64_encode($this->data),
@@ -122,7 +122,7 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return [
             'data' => $this->data,
@@ -130,7 +130,7 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
         ];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         self::validateInitFields($data);
         self::validateTypeRange($data['type']);
@@ -152,7 +152,7 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
         $this->type = $data['type'];
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         self::validateInitFields($properties);
         self::validateTypeRange($properties['type']);

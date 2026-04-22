@@ -8,7 +8,6 @@ use JsonSerializable;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use Stringable;
 
-use function get_debug_type;
 use function is_int;
 use function is_string;
 use function preg_match;
@@ -19,20 +18,8 @@ final class Timestamp implements TimestampInterface, JsonSerializable, Type, Str
     public readonly string $increment;
     public readonly string $timestamp;
 
-    public function __construct(mixed $increment, mixed $timestamp)
+    final public function __construct(int|string $increment, int|string $timestamp)
     {
-        if (! is_int($increment) && ! is_string($increment)) {
-            throw new InvalidArgumentException(
-                sprintf('Expected increment to be an unsigned 32-bit integer or string, %s given', get_debug_type($increment)),
-            );
-        }
-
-        if (! is_int($timestamp) && ! is_string($timestamp)) {
-            throw new InvalidArgumentException(
-                sprintf('Expected timestamp to be an unsigned 32-bit integer or string, %s given', get_debug_type($timestamp)),
-            );
-        }
-
         $this->increment = is_string($increment)
             ? self::parseStringField($increment, 'increment')
             : self::validateIntField($increment, 'increment');
@@ -46,17 +33,17 @@ final class Timestamp implements TimestampInterface, JsonSerializable, Type, Str
     // TimestampInterface
     // ------------------------------------------------------------------
 
-    public function getIncrement(): int
+    final public function getIncrement(): int
     {
         return (int) $this->increment;
     }
 
-    public function getTimestamp(): int
+    final public function getTimestamp(): int
     {
         return (int) $this->timestamp;
     }
 
-    public function __toString(): string
+    final public function __toString(): string
     {
         return sprintf('[%s:%s]', $this->increment, $this->timestamp);
     }
@@ -65,7 +52,7 @@ final class Timestamp implements TimestampInterface, JsonSerializable, Type, Str
     // JsonSerializable
     // ------------------------------------------------------------------
 
-    public function jsonSerialize(): mixed
+    final public function jsonSerialize(): mixed
     {
         return [
             '$timestamp' => [
@@ -79,7 +66,7 @@ final class Timestamp implements TimestampInterface, JsonSerializable, Type, Str
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return [
             'increment' => $this->increment,
@@ -87,7 +74,7 @@ final class Timestamp implements TimestampInterface, JsonSerializable, Type, Str
         ];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         self::validateInitFields($data);
 
@@ -100,7 +87,7 @@ final class Timestamp implements TimestampInterface, JsonSerializable, Type, Str
         }
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         self::validateInitFields($properties);
 

@@ -17,7 +17,7 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
 {
     public readonly string $dec;
 
-    public function __construct(string $value)
+    final public function __construct(string $value)
     {
         $this->dec = self::normalizeAndValidate($value);
     }
@@ -26,7 +26,7 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
     // Decimal128Interface / Stringable
     // ------------------------------------------------------------------
 
-    public function __toString(): string
+    final public function __toString(): string
     {
         return $this->dec;
     }
@@ -35,7 +35,7 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
     // JsonSerializable
     // ------------------------------------------------------------------
 
-    public function jsonSerialize(): mixed
+    final public function jsonSerialize(): mixed
     {
         return ['$numberDecimal' => $this->dec];
     }
@@ -44,12 +44,12 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return ['dec' => $this->dec];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         if (! is_string($data['dec'] ?? null)) {
             throw new InvalidArgumentException(
@@ -60,7 +60,7 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
         $this->dec = self::normalizeAndValidate($data['dec']);
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         if (! is_string($properties['dec'] ?? null)) {
             throw new InvalidArgumentException(

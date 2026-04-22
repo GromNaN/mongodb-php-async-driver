@@ -8,8 +8,6 @@ use JsonSerializable;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use Stringable;
 
-use function get_debug_type;
-use function is_float;
 use function is_int;
 use function is_string;
 use function ltrim;
@@ -22,36 +20,22 @@ final class Int64 implements JsonSerializable, Type, Stringable
 {
     public readonly string $integer;
 
-    public function __construct(mixed $value)
+    final public function __construct(int|string $value)
     {
-        if (is_float($value)) {
-            throw new InvalidArgumentException(
-                sprintf('Expected value to be integer or string, float given'),
-            );
-        }
-
         if (is_int($value)) {
             $this->integer = (string) $value;
 
             return;
         }
 
-        if (is_string($value)) {
-            $this->integer = self::parseString($value);
-
-            return;
-        }
-
-        throw new InvalidArgumentException(
-            sprintf('Expected value to be integer or string, %s given', get_debug_type($value)),
-        );
+        $this->integer = self::parseString($value);
     }
 
     // ------------------------------------------------------------------
     // Stringable
     // ------------------------------------------------------------------
 
-    public function __toString(): string
+    final public function __toString(): string
     {
         return $this->integer;
     }
@@ -60,7 +44,7 @@ final class Int64 implements JsonSerializable, Type, Stringable
     // JsonSerializable
     // ------------------------------------------------------------------
 
-    public function jsonSerialize(): mixed
+    final public function jsonSerialize(): mixed
     {
         return ['$numberLong' => $this->integer];
     }
@@ -69,12 +53,12 @@ final class Int64 implements JsonSerializable, Type, Stringable
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return ['integer' => $this->integer];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         if (! is_string($data['integer'] ?? null)) {
             throw new InvalidArgumentException(
@@ -85,7 +69,7 @@ final class Int64 implements JsonSerializable, Type, Stringable
         $this->integer = self::parseString($data['integer']);
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         if (! is_string($properties['integer'] ?? null)) {
             throw new InvalidArgumentException(

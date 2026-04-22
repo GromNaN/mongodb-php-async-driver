@@ -64,7 +64,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     /**
      * Create a Document from raw BSON bytes.
      */
-    public static function fromBSON(string $bson): static
+    final public static function fromBSON(string $bson): static
     {
         $len = strlen($bson);
         if ($len < 4) {
@@ -90,7 +90,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     /**
      * Create a Document from a MongoDB Extended JSON string.
      */
-    public static function fromJSON(string $json): static
+    final public static function fromJSON(string $json): static
     {
         try {
             $phpValue = json_decode($json, associative: false, flags: JSON_THROW_ON_ERROR);
@@ -118,7 +118,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     /**
      * Create a Document from a PHP array or object.
      */
-    public static function fromPHP(array|object $value): static
+    final public static function fromPHP(array|object $value): static
     {
         return new static(BsonEncoder::encode($value));
     }
@@ -127,12 +127,12 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     // Key access
     // ------------------------------------------------------------------
 
-    public function has(string $key): bool
+    final public function has(string $key): bool
     {
         return DocumentIndex::forBson($this)->hasField($key);
     }
 
-    public function get(string $key): mixed
+    final public function get(string $key): mixed
     {
         try {
             return DocumentIndex::forBson($this)->getFieldValue($key);
@@ -150,7 +150,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
      *
      * @param array<string, string>|null $typeMap
      */
-    public function toPHP(?array $typeMap = null): array|object
+    final public function toPHP(?array $typeMap = null): array|object
     {
         $map = $typeMap ?? [];
         // Resolve 'bson' root to Document
@@ -161,7 +161,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
         return BsonDecoder::decode(base64_decode($this->data), $map, handlePersistable: true);
     }
 
-    public function toCanonicalExtendedJSON(): string
+    final public function toCanonicalExtendedJSON(): string
     {
         $decoded = BsonDecoder::decode(
             base64_decode($this->data),
@@ -172,7 +172,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
         return ExtendedJson::toCanonical($decoded);
     }
 
-    public function toRelaxedExtendedJSON(): string
+    final public function toRelaxedExtendedJSON(): string
     {
         $decoded = BsonDecoder::decode(
             base64_decode($this->data),
@@ -188,7 +188,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     // ------------------------------------------------------------------
 
     /** Returns the raw BSON bytes. */
-    public function __toString(): string
+    final public function __toString(): string
     {
         return base64_decode($this->data);
     }
@@ -197,7 +197,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     // IteratorAggregate
     // ------------------------------------------------------------------
 
-    public function getIterator(): Iterator
+    final public function getIterator(): Iterator
     {
         $data = [];
         foreach (DocumentIndex::forBson($this)->fields as $field) {
@@ -266,19 +266,19 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return ['data' => $this->data];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         $bson = base64_decode($data['data'] ?? '');
         self::assertValidBson($bson, self::class);
         $this->data = base64_encode($bson);
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         $bson = base64_decode($properties['data'] ?? '');
         self::assertValidBson($bson, self::class);

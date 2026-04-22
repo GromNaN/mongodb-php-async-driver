@@ -30,7 +30,7 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
     public readonly string $oid;
 
     /** @throws InvalidArgumentException if $id is not a valid 24-character hex string. */
-    public function __construct(?string $id = null)
+    final public function __construct(?string $id = null)
     {
         if ($id === null) {
             $this->oid = bin2hex(self::generate());
@@ -49,7 +49,7 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
     // ObjectIdInterface
     // ------------------------------------------------------------------
 
-    public function getTimestamp(): int
+    final public function getTimestamp(): int
     {
         /** @var array{ts: int} $unpacked */
         $unpacked = unpack('Nts', hex2bin(substr($this->oid, 0, 8)));
@@ -57,7 +57,7 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
         return $unpacked['ts'];
     }
 
-    public function __toString(): string
+    final public function __toString(): string
     {
         return $this->oid;
     }
@@ -66,7 +66,7 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
     // JsonSerializable
     // ------------------------------------------------------------------
 
-    public function jsonSerialize(): mixed
+    final public function jsonSerialize(): mixed
     {
         return ['$oid' => $this->oid];
     }
@@ -75,12 +75,12 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return ['oid' => $this->oid];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         if (! is_string($data['oid'] ?? null)) {
             throw new InvalidArgumentException(
@@ -97,7 +97,7 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
         $this->oid = strtolower($data['oid']);
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         if (! is_string($properties['oid'] ?? null)) {
             throw new InvalidArgumentException(

@@ -51,7 +51,7 @@ final class DBPointer implements JsonSerializable, Type, Stringable
         return $this->id;
     }
 
-    public function __toString(): string
+    final public function __toString(): string
     {
         return sprintf('[%s/%s]', $this->ref, $this->id);
     }
@@ -60,7 +60,7 @@ final class DBPointer implements JsonSerializable, Type, Stringable
     // JsonSerializable
     // ------------------------------------------------------------------
 
-    public function jsonSerialize(): mixed
+    final public function jsonSerialize(): mixed
     {
         return [
             '$dbPointer' => [
@@ -74,7 +74,7 @@ final class DBPointer implements JsonSerializable, Type, Stringable
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return [
             'ref' => $this->ref,
@@ -82,7 +82,7 @@ final class DBPointer implements JsonSerializable, Type, Stringable
         ];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         if (
             ! isset($data['ref'], $data['id']) ||
@@ -100,7 +100,7 @@ final class DBPointer implements JsonSerializable, Type, Stringable
         $this->id  = strtolower($data['id']);
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         if (
             ! isset($properties['ref'], $properties['id']) ||

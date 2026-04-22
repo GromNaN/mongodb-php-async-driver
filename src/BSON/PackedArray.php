@@ -77,7 +77,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
         return new static($bson);
     }
 
-    public static function fromJSON(string $json): static
+    final public static function fromJSON(string $json): static
     {
         try {
             $phpValue = json_decode($json, associative: true, flags: JSON_THROW_ON_ERROR);
@@ -112,7 +112,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
         return new static($bson);
     }
 
-    public static function fromPHP(array $value): static
+    final public static function fromPHP(array $value): static
     {
         if (! array_is_list($value)) {
             throw new DriverInvalidArgumentException('Expected value to be a list, but given array is not');
@@ -125,12 +125,12 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     // Key access
     // ------------------------------------------------------------------
 
-    public function has(int $index): bool
+    final public function has(int $index): bool
     {
         return PackedArrayIndex::forBson($this)->hasField($index);
     }
 
-    public function get(int $index): mixed
+    final public function get(int $index): mixed
     {
         try {
             return PackedArrayIndex::forBson($this)->getFieldValue($index);
@@ -143,7 +143,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     // Conversion
     // ------------------------------------------------------------------
 
-    public function toPHP(?array $typeMap = null): array|object
+    final public function toPHP(?array $typeMap = null): array|object
     {
         $map = $typeMap ?? ['root' => 'array'];
         // Resolve 'bson' root to PackedArray
@@ -158,12 +158,12 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
         return BsonDecoder::decode(base64_decode($this->data), $map, ignoreRootKeys: $ignoreRoot);
     }
 
-    public function toCanonicalExtendedJSON(): string
+    final public function toCanonicalExtendedJSON(): string
     {
         return ExtendedJson::toCanonical(BsonDecoder::decode(base64_decode($this->data), ['root' => 'array'], preserveInt64: true));
     }
 
-    public function toRelaxedExtendedJSON(): string
+    final public function toRelaxedExtendedJSON(): string
     {
         return ExtendedJson::toRelaxed(BsonDecoder::decode(base64_decode($this->data), ['root' => 'array'], preserveInt64: true));
     }
@@ -172,7 +172,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     // Stringable
     // ------------------------------------------------------------------
 
-    public function __toString(): string
+    final public function __toString(): string
     {
         return base64_decode($this->data);
     }
@@ -181,7 +181,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     // IteratorAggregate
     // ------------------------------------------------------------------
 
-    public function getIterator(): Iterator
+    final public function getIterator(): Iterator
     {
         $data = [];
         foreach (PackedArrayIndex::forBson($this)->fields as $i => $field) {
@@ -230,19 +230,19 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return ['data' => $this->data];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         $bson = base64_decode($data['data'] ?? '');
         self::assertValidBson($bson, self::class);
         $this->data = base64_encode($bson);
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         $bson = base64_decode($properties['data'] ?? '');
         self::assertValidBson($bson, self::class);

@@ -21,7 +21,7 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
     public readonly string $code;
     public readonly ?object $scope;
 
-    public function __construct(string $code, array|object|null $scope = null)
+    final public function __construct(string $code, array|object|null $scope = null)
     {
         if (str_contains($code, "\0")) {
             throw new InvalidArgumentException('Code cannot contain null bytes');
@@ -45,17 +45,17 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
     // JavascriptInterface
     // ------------------------------------------------------------------
 
-    public function getCode(): string
+    final public function getCode(): string
     {
         return $this->code;
     }
 
-    public function getScope(): ?object
+    final public function getScope(): ?object
     {
         return $this->scope;
     }
 
-    public function __toString(): string
+    final public function __toString(): string
     {
         return $this->code;
     }
@@ -64,7 +64,7 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
     // JsonSerializable
     // ------------------------------------------------------------------
 
-    public function jsonSerialize(): mixed
+    final public function jsonSerialize(): mixed
     {
         if ($this->scope === null) {
             return ['$code' => $this->code];
@@ -80,7 +80,7 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return [
             'code'  => $this->code,
@@ -88,7 +88,7 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
         ];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         if (! is_string($data['code'] ?? null)) {
             throw new InvalidArgumentException(
@@ -112,7 +112,7 @@ final class Javascript implements JavascriptInterface, JsonSerializable, Type, S
         $this->scope = is_array($scope) ? (object) $scope : $scope;
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         if (! is_string($properties['code'] ?? null)) {
             throw new InvalidArgumentException(

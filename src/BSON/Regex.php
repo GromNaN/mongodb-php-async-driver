@@ -20,7 +20,7 @@ final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
     public readonly string $pattern;
     public readonly string $flags;
 
-    public function __construct(string $pattern, string $flags = '')
+    final public function __construct(string $pattern, string $flags = '')
     {
         if (str_contains($pattern, "\0")) {
             throw new InvalidArgumentException('Pattern cannot contain null bytes');
@@ -38,17 +38,17 @@ final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
     // RegexInterface
     // ------------------------------------------------------------------
 
-    public function getPattern(): string
+    final public function getPattern(): string
     {
         return $this->pattern;
     }
 
-    public function getFlags(): string
+    final public function getFlags(): string
     {
         return $this->flags;
     }
 
-    public function __toString(): string
+    final public function __toString(): string
     {
         return sprintf('/%s/%s', $this->pattern, $this->flags);
     }
@@ -57,7 +57,7 @@ final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
     // JsonSerializable
     // ------------------------------------------------------------------
 
-    public function jsonSerialize(): mixed
+    final public function jsonSerialize(): mixed
     {
         return [
             '$regex'   => $this->pattern,
@@ -69,7 +69,7 @@ final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return [
             'pattern' => $this->pattern,
@@ -77,7 +77,7 @@ final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
         ];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         self::validateInitFields($data);
 
@@ -93,7 +93,7 @@ final class Regex implements RegexInterface, JsonSerializable, Type, Stringable
         $this->flags   = self::sortFlags($data['flags']);
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         self::validateInitFields($properties);
 

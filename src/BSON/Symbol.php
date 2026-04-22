@@ -33,7 +33,7 @@ final class Symbol implements JsonSerializable, Type, Stringable
         return new static($symbol);
     }
 
-    public function __toString(): string
+    final public function __toString(): string
     {
         return $this->symbol;
     }
@@ -42,7 +42,7 @@ final class Symbol implements JsonSerializable, Type, Stringable
     // JsonSerializable
     // ------------------------------------------------------------------
 
-    public function jsonSerialize(): mixed
+    final public function jsonSerialize(): mixed
     {
         return ['$symbol' => $this->symbol];
     }
@@ -51,12 +51,12 @@ final class Symbol implements JsonSerializable, Type, Stringable
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return ['symbol' => $this->symbol];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         if (! is_string($data['symbol'] ?? null)) {
             throw new InvalidArgumentException(
@@ -71,7 +71,7 @@ final class Symbol implements JsonSerializable, Type, Stringable
         $this->symbol = $data['symbol'];
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         if (! is_string($properties['symbol'] ?? null)) {
             throw new InvalidArgumentException(

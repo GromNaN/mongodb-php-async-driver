@@ -8,5 +8,5 @@ use stdClass;
 
 interface Serializable extends Type
 {
-    public function bsonSerialize(): array|stdClass;
+    public function bsonSerialize(): array|stdClass|Document|PackedArray;
 }

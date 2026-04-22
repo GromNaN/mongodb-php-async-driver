@@ -12,7 +12,7 @@ final class MinKey implements MinKeyInterface, JsonSerializable, Type
     // JsonSerializable
     // ------------------------------------------------------------------
 
-    public function jsonSerialize(): mixed
+    final public function jsonSerialize(): mixed
     {
         return ['$minKey' => 1];
     }
@@ -21,17 +21,17 @@ final class MinKey implements MinKeyInterface, JsonSerializable, Type
     // Serialization helpers
     // ------------------------------------------------------------------
 
-    public function __serialize(): array
+    final public function __serialize(): array
     {
         return [];
     }
 
-    public function __unserialize(array $data): void
+    final public function __unserialize(array $data): void
     {
         // No state to restore.
     }
 
-    public static function __set_state(array $properties): static
+    final public static function __set_state(array $properties): static
     {
         return new static();
     }

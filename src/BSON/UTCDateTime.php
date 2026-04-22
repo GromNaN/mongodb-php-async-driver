@@ -33,7 +33,7 @@ final class UTCDateTime implements UTCDateTimeInterface, JsonSerializable, Type,
      *   - Int64            : milliseconds since epoch (extracted as int)
      *   - DateTimeInterface: converted to milliseconds
      */
-    public function __construct(mixed $milliseconds = null)
+    final public function __construct(int|DateTimeInterface|Int64|null $milliseconds = null)
     {
         if ($milliseconds === null) {
             $this->milliseconds = (string) (int) (microtime(as_float: true) * 1000);
