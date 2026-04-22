@@ -291,9 +291,7 @@ final class ExtendedJson
                     throw new UnexpectedValueException('Invalid $scope in Extended JSON: must be a document');
                 }
 
-                if (is_array($scope)) {
-                    $scope = (object) array_map(self::fromValue(...), $scope);
-                }
+                $scope = (object) array_map(self::fromValue(...), (array) $scope);
 
                 return new Javascript($value['$code'], $scope);
             }
