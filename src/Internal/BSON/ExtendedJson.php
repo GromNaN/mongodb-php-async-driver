@@ -155,6 +155,11 @@ final class ExtendedJson
         // --- $binary ---
         if (array_key_exists('$binary', $value)) {
             $bin = $value['$binary'];
+            // normalizeJson() preserves stdClass; cast it so the canonical check works.
+            if ($bin instanceof stdClass) {
+                $bin = (array) $bin;
+            }
+
             // Canonical v2: { "$binary": { "base64": "...", "subType": "xx" } }
             if (is_array($bin)) {
                 if (
@@ -171,7 +176,7 @@ final class ExtendedJson
             }
 
             // Legacy v1: { "$binary": "base64string", "$type": "xx" }
-            if (is_string($bin) && isset($value['$type']) && is_string($value['$type'])) {
+            if (is_string($bin) && is_string($value['$type'] ?? null)) {
                 return new Binary(base64_decode($bin), (int) hexdec($value['$type']));
             }
 
@@ -199,6 +204,10 @@ final class ExtendedJson
             }
 
             $d = $value['$date'];
+            if ($d instanceof stdClass) {
+                $d = (array) $d;
+            }
+
             if (is_array($d)) {
                 if (! is_string($d['$numberLong'] ?? null) || count($d) !== 1) {
                     throw new UnexpectedValueException('Invalid $date in Extended JSON');
@@ -220,6 +229,10 @@ final class ExtendedJson
         // --- $regularExpression ---
         if (array_key_exists('$regularExpression', $value)) {
             $r = $value['$regularExpression'];
+            if ($r instanceof stdClass) {
+                $r = (array) $r;
+            }
+
             if (
                 count($value) !== 1
                 || ! is_array($r)
@@ -242,6 +255,10 @@ final class ExtendedJson
         // --- $timestamp ---
         if (array_key_exists('$timestamp', $value)) {
             $t = $value['$timestamp'];
+            if ($t instanceof stdClass) {
+                $t = (array) $t;
+            }
+
             if (
                 count($value) !== 1
                 || ! is_array($t)
@@ -354,6 +371,10 @@ final class ExtendedJson
         // --- $dbPointer ---
         if (array_key_exists('$dbPointer', $value)) {
             $dbp = $value['$dbPointer'];
+            if ($dbp instanceof stdClass) {
+                $dbp = (array) $dbp;
+            }
+
             if (
                 count($value) !== 1
                 || ! is_array($dbp)
@@ -363,8 +384,13 @@ final class ExtendedJson
                 throw new UnexpectedValueException('Invalid $dbPointer in Extended JSON');
             }
 
-            $ref = $dbp['$ref'] ?? '';
-            $oid = is_array($dbp['$id'] ?? null) ? ($dbp['$id']['$oid'] ?? '') : '';
+            $ref   = $dbp['$ref'] ?? '';
+            $dbpId = $dbp['$id'] ?? null;
+            if ($dbpId instanceof stdClass) {
+                $dbpId = (array) $dbpId;
+            }
+
+            $oid = is_array($dbpId) ? ($dbpId['$oid'] ?? '') : '';
 
             return DBPointer::create($ref, $oid);
         }
