@@ -17,6 +17,14 @@
 
 set -euo pipefail
 
+# Guard: abort immediately if ext-mongodb is still loaded.
+# Tests must run without the extension to avoid class conflicts with our shim.
+if ! PHP_INI_SCAN_DIR="" php -r "exit(extension_loaded('mongodb') ? 1 : 0);"; then
+    echo "ERROR: ext-mongodb is still loaded even with PHP_INI_SCAN_DIR=\"\"." >&2
+    echo "       Tests must run without the extension to avoid class conflicts." >&2
+    exit 1
+fi
+
 PHPUNIT=(php -d memory_limit=512M ./vendor/bin/phpunit)
 
 if [[ "${1:-}" == mongodb://* ]]; then
