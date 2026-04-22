@@ -8,13 +8,19 @@ use MongoDB\Driver\ServerDescription;
 
 final class ServerChangedEvent
 {
-    public function __construct(
+    private function __construct(
         private readonly string $host,
         private readonly int $port,
         private readonly ObjectId $topologyId,
         private readonly ServerDescription $previousDescription,
         private readonly ServerDescription $newDescription,
     ) {
+    }
+
+    /** @internal */
+    public static function create(string $host, int $port, ObjectId $topologyId, ServerDescription $previousDescription, ServerDescription $newDescription): self
+    {
+        return new self($host, $port, $topologyId, $previousDescription, $newDescription);
     }
 
     public function getHost(): string

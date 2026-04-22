@@ -3,15 +3,15 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver\Monitoring;
 
+use Exception;
 use MongoDB\BSON\ObjectId;
-use Throwable;
 
 final class CommandFailedEvent
 {
-    public function __construct(
+    private function __construct(
         private readonly string $commandName,
         private readonly string $databaseName,
-        private readonly Throwable $error,
+        private readonly Exception $error,
         private readonly int $requestId,
         private readonly int $operationId,
         private readonly int $durationMicros,
@@ -21,6 +21,23 @@ final class CommandFailedEvent
         private readonly ?int $serverConnectionId = null,
         private readonly ?object $reply = null,
     ) {
+    }
+
+    /** @internal */
+    public static function create(
+        string $commandName,
+        string $databaseName,
+        Exception $error,
+        int $requestId,
+        int $operationId,
+        int $durationMicros,
+        string $host = '',
+        int $port = 27017,
+        ?ObjectId $serviceId = null,
+        ?int $serverConnectionId = null,
+        ?object $reply = null,
+    ): self {
+        return new self($commandName, $databaseName, $error, $requestId, $operationId, $durationMicros, $host, $port, $serviceId, $serverConnectionId, $reply);
     }
 
     public function getCommandName(): string
@@ -33,7 +50,7 @@ final class CommandFailedEvent
         return $this->databaseName;
     }
 
-    public function getError(): Throwable
+    public function getError(): Exception
     {
         return $this->error;
     }

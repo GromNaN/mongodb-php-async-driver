@@ -7,9 +7,15 @@ use MongoDB\BSON\ObjectId;
 
 final class TopologyOpeningEvent
 {
-    public function __construct(
+    private function __construct(
         private readonly ObjectId $topologyId,
     ) {
+    }
+
+    /** @internal */
+    public static function create(ObjectId $topologyId): self
+    {
+        return new self($topologyId);
     }
 
     public function getTopologyId(): ObjectId

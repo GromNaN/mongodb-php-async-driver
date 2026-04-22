@@ -16,7 +16,7 @@ final class TopologyChangedEvent
      * @param list<ServerDescription> $previousServers
      * @param list<ServerDescription> $newServers
      */
-    public function __construct(
+    private function __construct(
         private readonly ObjectId $topologyId,
         private readonly string $previousTopologyType,
         private readonly string $newTopologyType,
@@ -25,6 +25,17 @@ final class TopologyChangedEvent
     ) {
         $this->previousDescription = TopologyDescription::createFromInternal($previousTopologyType, $previousServers);
         $this->newDescription      = TopologyDescription::createFromInternal($newTopologyType, $newServers);
+    }
+
+    /**
+     * @internal
+     *
+     * @param list<ServerDescription> $previousServers
+     * @param list<ServerDescription> $newServers
+     */
+    public static function create(ObjectId $topologyId, string $previousTopologyType, string $newTopologyType, array $previousServers = [], array $newServers = []): self
+    {
+        return new self($topologyId, $previousTopologyType, $newTopologyType, $previousServers, $newServers);
     }
 
     public function getTopologyId(): ObjectId

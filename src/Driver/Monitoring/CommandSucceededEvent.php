@@ -7,7 +7,7 @@ use MongoDB\BSON\ObjectId;
 
 final class CommandSucceededEvent
 {
-    public function __construct(
+    private function __construct(
         private readonly string $commandName,
         private readonly object $reply,
         private readonly string $databaseName,
@@ -19,6 +19,22 @@ final class CommandSucceededEvent
         private readonly ?ObjectId $serviceId = null,
         private readonly ?int $serverConnectionId = null,
     ) {
+    }
+
+    /** @internal */
+    public static function create(
+        string $commandName,
+        object $reply,
+        string $databaseName,
+        int $requestId,
+        int $operationId,
+        int $durationMicros,
+        string $host = '',
+        int $port = 27017,
+        ?ObjectId $serviceId = null,
+        ?int $serverConnectionId = null,
+    ): self {
+        return new self($commandName, $reply, $databaseName, $requestId, $operationId, $durationMicros, $host, $port, $serviceId, $serverConnectionId);
     }
 
     public function getCommandName(): string

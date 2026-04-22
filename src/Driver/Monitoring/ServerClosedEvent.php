@@ -7,11 +7,17 @@ use MongoDB\BSON\ObjectId;
 
 final class ServerClosedEvent
 {
-    public function __construct(
+    private function __construct(
         private readonly string $host,
         private readonly int $port,
         private readonly ObjectId $topologyId,
     ) {
+    }
+
+    /** @internal */
+    public static function create(string $host, int $port, ObjectId $topologyId): self
+    {
+        return new self($host, $port, $topologyId);
     }
 
     public function getHost(): string

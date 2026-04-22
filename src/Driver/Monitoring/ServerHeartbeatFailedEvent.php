@@ -3,17 +3,23 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver\Monitoring;
 
-use Throwable;
+use Exception;
 
 final class ServerHeartbeatFailedEvent
 {
-    public function __construct(
+    private function __construct(
         private readonly string $host,
         private readonly int $port,
         private readonly int $durationMicros,
-        private readonly Throwable $error,
+        private readonly Exception $error,
         private readonly bool $awaited,
     ) {
+    }
+
+    /** @internal */
+    public static function create(string $host, int $port, int $durationMicros, Exception $error, bool $awaited): self
+    {
+        return new self($host, $port, $durationMicros, $error, $awaited);
     }
 
     public function getHost(): string
@@ -31,7 +37,7 @@ final class ServerHeartbeatFailedEvent
         return $this->durationMicros;
     }
 
-    public function getError(): Throwable
+    public function getError(): Exception
     {
         return $this->error;
     }

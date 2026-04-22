@@ -5,11 +5,17 @@ namespace MongoDB\Driver\Monitoring;
 
 final class ServerHeartbeatStartedEvent
 {
-    public function __construct(
+    private function __construct(
         private readonly string $host,
         private readonly int $port,
         private readonly bool $awaited,
     ) {
+    }
+
+    /** @internal */
+    public static function create(string $host, int $port, bool $awaited): self
+    {
+        return new self($host, $port, $awaited);
     }
 
     public function getHost(): string
