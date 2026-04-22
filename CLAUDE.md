@@ -1,5 +1,10 @@
 # CLAUDE.md — Project guide for Claude Code
 
+## AI assistance
+
+This project is developed with [Claude Code](https://claude.ai/code) (`claude-sonnet-4-6`).
+All commits carry an `Assisted-by: Claude Code/claude-sonnet-4-6` trailer.
+
 ## What this project is
 
 A pure userland PHP 8.4+ MongoDB driver that replicates the `MongoDB\Driver\*` and `MongoDB\BSON\*` namespaces normally provided by `ext-mongodb`. Async I/O is handled by RevoltPHP (`revolt/event-loop`) and `amphp/socket`.
