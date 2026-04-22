@@ -962,10 +962,15 @@ final class OperationExecutor
 
         $this->advanceSessionFromResponse($session, $body);
 
-        // Pass batchSize through to getMore commands so APM events include it.
-        $batchSize = isset($prepared['batchSize']) ? (int) $prepared['batchSize'] : 0;
+        // Pass batchSize and comment through to getMore commands (spec requirement).
+        // find uses top-level batchSize; aggregate uses cursor.batchSize.
+        $cursorOpt = $prepared['cursor'] ?? null;
+        $batchSize = isset($prepared['batchSize'])
+            ? (int) $prepared['batchSize']
+            : (int) ((is_array($cursorOpt) ? ($cursorOpt['batchSize'] ?? 0) : 0));
+        $comment = $prepared['comment'] ?? null;
 
-        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand, $session, $batchSize);
+        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand, $session, $batchSize, $comment);
     }
 
     /**
@@ -1014,6 +1019,7 @@ final class OperationExecutor
         ?Command $debugCommand = null,
         ?Session $session = null,
         int $batchSize = 0,
+        mixed $comment = null,
     ): CursorInterface {
         $publicServer = $this->buildPublicServer($server);
 
@@ -1026,7 +1032,7 @@ final class OperationExecutor
             $ns         = (string) ($cursorDoc['ns'] ?? $db);
             $firstBatch = (array) ($cursorDoc['firstBatch'] ?? []);
 
-            $getMoreFn = function (int $cursorId, string $ns) use ($pool, $db, $maxAwaitTimeMS, $batchSize, $server, $session): array {
+            $getMoreFn = function (int $cursorId, string $ns) use ($pool, $db, $maxAwaitTimeMS, $batchSize, $comment, $server, $session): array {
                 $getMoreCmd = [
                     'getMore'    => new Int64($cursorId),
                     'collection' => explode('.', $ns, 2)[1] ?? $ns,
@@ -1034,6 +1040,10 @@ final class OperationExecutor
 
                 if ($batchSize > 0) {
                     $getMoreCmd['batchSize'] = $batchSize;
+                }
+
+                if ($comment !== null) {
+                    $getMoreCmd['comment'] = $comment;
                 }
 
                 if ($maxAwaitTimeMS > 0) {
