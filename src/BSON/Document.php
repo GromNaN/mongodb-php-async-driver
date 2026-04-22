@@ -163,24 +163,22 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
 
     public function toCanonicalExtendedJSON(): string
     {
-        BsonDecoder::$preserveInt64 = true;
         $decoded = BsonDecoder::decode(
             base64_decode($this->data),
             ['root' => 'object', 'document' => 'object', 'array' => 'array'],
+            preserveInt64: true,
         );
-        BsonDecoder::$preserveInt64 = false;
 
         return ExtendedJson::toCanonical($decoded);
     }
 
     public function toRelaxedExtendedJSON(): string
     {
-        BsonDecoder::$preserveInt64 = true;
         $decoded = BsonDecoder::decode(
             base64_decode($this->data),
             ['root' => 'object', 'document' => 'object', 'array' => 'array'],
+            preserveInt64: true,
         );
-        BsonDecoder::$preserveInt64 = false;
 
         return ExtendedJson::toRelaxed($decoded);
     }

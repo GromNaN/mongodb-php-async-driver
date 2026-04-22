@@ -65,12 +65,6 @@ final class BsonDecoder
         'array'    => 'array',
     ];
 
-    /**
-     * When true, BSON int64 values decode as Int64 objects instead of native PHP int.
-     * Set to true before decoding for Extended JSON output; reset to false afterwards.
-     * On 32-bit PHP (PHP_INT_SIZE < 8), int64 is always returned as Int64 regardless.
-     */
-    public static bool $preserveInt64 = false;
 
     // -------------------------------------------------------------------------
     // Public API
@@ -88,6 +82,7 @@ final class BsonDecoder
         array $typeMap = [],
         bool $handlePersistable = true,
         bool $ignoreRootKeys = false,
+        bool $preserveInt64 = false,
     ): array|object {
         foreach ($typeMap as $k => $v) {
             if ($v !== null) {
@@ -105,7 +100,7 @@ final class BsonDecoder
         $offset = 0;
 
         try {
-            return self::decodeDocument($bson, $offset, $typeMap, 'root', $handlePersistable, $ignoreRootKeys, $noRootPersistable, $noDocumentPersistable);
+            return self::decodeDocument($bson, $offset, $typeMap, 'root', $handlePersistable, $ignoreRootKeys, $noRootPersistable, $noDocumentPersistable, '', $preserveInt64);
         } catch (RuntimeException $e) {
             throw new UnexpectedValueException($e->getMessage(), previous: $e);
         }
@@ -134,16 +129,14 @@ final class BsonDecoder
             BsonType::String      => self::readString($bson, $o),
             BsonType::ObjectId    => self::readObjectId($bson, $o),
             BsonType::Boolean     => self::readBoolean($bson, $o),
-            BsonType::Date        => self::readUtcDateTime($bson, $o),
+            BsonType::Date        => self::readUTCDateTime($bson, $o),
             BsonType::Regex       => self::readRegex($bson, $o),
             BsonType::DBPointer   => self::readDbPointer($bson, $o),
             BsonType::Code        => self::readJavascript($bson, $o),
             BsonType::Symbol      => self::readSymbol($bson, $o),
             BsonType::Int32       => self::readInt32($bson, $o),
             BsonType::Timestamp   => self::readTimestamp($bson, $o),
-            BsonType::Int64       => PHP_INT_SIZE < 8
-                ? new Int64(self::readInt64($bson, $o))
-                : self::readInt64($bson, $o),
+            BsonType::Int64       => self::readInt64($bson, $o),
             BsonType::Decimal128  => self::readDecimal128($bson, $o),
             BsonType::Binary      => self::readBinary($bson, $o),
             BsonType::Document    => self::readSubDocumentAsBson($bson, $o),
@@ -175,6 +168,7 @@ final class BsonDecoder
         bool $noRootPersistable = false,
         bool $noDocumentPersistable = false,
         string $parentFieldPath = '',
+        bool $preserveInt64 = false,
     ): array|object {
         $startOffset = $offset;
 
@@ -205,7 +199,7 @@ final class BsonDecoder
             $key       = self::readCString($bson, $offset);
             $fieldPath = $parentFieldPath === '' ? $key : $parentFieldPath . '.' . $key;
 
-            $value = self::decodeElement($bson, $offset, $type, $typeMap, $handlePersistable, $fieldPath, $noRootPersistable, $noDocumentPersistable);
+            $value = self::decodeElement($bson, $offset, $type, $typeMap, $handlePersistable, $fieldPath, $noRootPersistable, $noDocumentPersistable, $preserveInt64);
 
             if ($isArray) {
                 $fields[] = $value;
@@ -277,6 +271,7 @@ final class BsonDecoder
         string $fieldPath = '',
         bool $noRootPersistable = false,
         bool $noDocumentPersistable = false,
+        bool $preserveInt64 = false,
     ): mixed {
         return match ($type) {
             BsonType::Double      => self::readDouble($bson, $offset),
@@ -284,24 +279,22 @@ final class BsonDecoder
             // When a fieldPaths entry exists for the current path, use 'root' as context so
             // that typeMap['root'] (set by typeMapForFieldPath) is used as the target type.
             // This keeps typeMap['document'] intact for sub-documents within that field.
-            BsonType::Document    => self::decodeDocument($bson, $offset, self::typeMapForFieldPath($typeMap, $fieldPath), isset($typeMap['fieldPaths'][$fieldPath]) ? 'root' : 'document', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
-            BsonType::Array       => self::decodeDocument($bson, $offset, self::typeMapForFieldPath($typeMap, $fieldPath), isset($typeMap['fieldPaths'][$fieldPath]) ? 'root' : 'array', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath),
+            BsonType::Document    => self::decodeDocument($bson, $offset, self::typeMapForFieldPath($typeMap, $fieldPath), isset($typeMap['fieldPaths'][$fieldPath]) ? 'root' : 'document', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath, $preserveInt64),
+            BsonType::Array       => self::decodeDocument($bson, $offset, self::typeMapForFieldPath($typeMap, $fieldPath), isset($typeMap['fieldPaths'][$fieldPath]) ? 'root' : 'array', $handlePersistable, false, $noRootPersistable, $noDocumentPersistable, $fieldPath, $preserveInt64),
             BsonType::Binary      => self::readBinary($bson, $offset),
             BsonType::Undefined   => BsonUndefined::create(),
             BsonType::ObjectId    => self::readObjectId($bson, $offset),
             BsonType::Boolean     => self::readBoolean($bson, $offset),
-            BsonType::Date        => self::readUtcDateTime($bson, $offset),
+            BsonType::Date        => self::readUTCDateTime($bson, $offset),
             BsonType::Null        => null,
             BsonType::Regex       => self::readRegex($bson, $offset),
             BsonType::DBPointer   => self::readDbPointer($bson, $offset),
             BsonType::Code        => self::readJavascript($bson, $offset),
             BsonType::Symbol      => self::readSymbol($bson, $offset),
-            BsonType::CodeWithScope => self::readJavascriptWithScope($bson, $offset, $typeMap, $noRootPersistable, $noDocumentPersistable),
+            BsonType::CodeWithScope => self::readJavascriptWithScope($bson, $offset, $typeMap, $noRootPersistable, $noDocumentPersistable, $preserveInt64),
             BsonType::Int32       => self::readInt32($bson, $offset),
             BsonType::Timestamp   => self::readTimestamp($bson, $offset),
-            BsonType::Int64       => self::$preserveInt64 || PHP_INT_SIZE < 8
-                ? new Int64(self::readInt64($bson, $offset))
-                : self::readInt64($bson, $offset),
+            BsonType::Int64       => self::readInt64($bson, $offset, $preserveInt64),
             BsonType::Decimal128  => self::readDecimal128($bson, $offset),
             BsonType::MaxKey      => new MaxKey(),
             BsonType::MinKey      => new MinKey(),
@@ -351,11 +344,15 @@ final class BsonDecoder
         return $v;
     }
 
-    private static function readInt64(string $bson, int &$offset): int
+    private static function readInt64(string $bson, int &$offset, bool $preserveInt64 = false): int|Int64
     {
         /** @var array{1: int} $u */
         $u = unpack('P', substr($bson, $offset, 8));
         $offset += 8;
+
+        if ($preserveInt64 || PHP_INT_SIZE < 8) {
+            return new Int64((string) $u[1]);
+        }
 
         return $u[1];
     }
@@ -410,7 +407,7 @@ final class BsonDecoder
         return $byte !== 0x00;
     }
 
-    private static function readUtcDateTime(string $bson, int &$offset): UTCDateTime
+    private static function readUTCDateTime(string $bson, int &$offset): UTCDateTime
     {
         $ms = self::readInt64($bson, $offset);
 
@@ -454,11 +451,12 @@ final class BsonDecoder
         array $typeMap,
         bool $noRootPersistable = false,
         bool $noDocumentPersistable = false,
+        bool $preserveInt64 = false,
     ): Javascript {
         $totalLen = self::readInt32Unsigned($bson, $offset);
 
         $code  = self::readString($bson, $offset);
-        $scope = self::decodeDocument($bson, $offset, $typeMap, 'document', false, false, $noRootPersistable, $noDocumentPersistable);
+        $scope = self::decodeDocument($bson, $offset, $typeMap, 'document', false, false, $noRootPersistable, $noDocumentPersistable, '', $preserveInt64);
 
         return new Javascript($code, $scope);
     }
