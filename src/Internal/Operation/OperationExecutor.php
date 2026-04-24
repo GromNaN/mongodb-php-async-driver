@@ -885,17 +885,19 @@ final class OperationExecutor
         int $operationId = 0,
         array $docSequences = [],
     ): array {
-        // Inject an implicit session lsid if the command doesn't already have one.
+        // Detect unacknowledged writes (writeConcern w=0). Per the Command Monitoring spec,
+        // APM events for unacknowledged writes must use a synthetic {ok: 1} reply.
+        // Per PHPC-1163, unacknowledged writes must also omit the implicit session lsid.
+        $wc = $prepared['writeConcern'] ?? null;
+        $isUnacknowledged = is_array($wc) && ($wc['w'] ?? 1) === 0;
+
+        // Inject an implicit session lsid if the command doesn't already have one,
+        // unless this is an unacknowledged write (sessions are incompatible with w=0).
         $implicitLsid = null;
-        if (! isset($prepared['lsid'])) {
+        if (! isset($prepared['lsid']) && ! $isUnacknowledged) {
             $implicitLsid      = $this->sessionPool->acquire();
             $prepared['lsid']  = $implicitLsid;
         }
-
-        // Detect unacknowledged writes (writeConcern w=0). Per the Command Monitoring spec,
-        // APM events for unacknowledged writes must use a synthetic {ok: 1} reply.
-        $wc = $prepared['writeConcern'] ?? null;
-        $isUnacknowledged = is_array($wc) && ($wc['w'] ?? 1) === 0;
 
         $conn      = $pool->acquire();
         $requestId = RequestIdGenerator::next();

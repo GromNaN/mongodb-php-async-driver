@@ -268,7 +268,7 @@ final class Manager
     ): CursorInterface {
         $readPreference = $this->extractReadPreference($options);
         $readConcern    = $this->extractReadConcern($options);
-        $writeConcern   = $this->extractWriteConcern($options);
+        $writeConcern   = $this->extractWriteConcern($options) ?? $this->writeConcern;
         $session        = $this->extractSession($options);
 
         return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, $writeConcern));
