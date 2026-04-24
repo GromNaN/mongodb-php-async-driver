@@ -205,7 +205,7 @@ final class BulkWrite implements Countable
                 foreach ($newObjArr as $k => $v) {
                     if (! str_starts_with((string) $k, '$')) {
                         throw new InvalidArgumentException(
-                            sprintf("Invalid key '%s': update only works with \$ operators and pipelines", $k),
+                            sprintf('Invalid key \'%s\': update only works with $ operators and pipelines', $k),
                         );
                     }
                 }

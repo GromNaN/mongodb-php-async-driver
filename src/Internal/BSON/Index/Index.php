@@ -10,6 +10,7 @@ use OutOfBoundsException;
 use WeakMap;
 
 use function array_map;
+use function sprintf;
 
 /** @internal */
 abstract class Index
@@ -65,7 +66,7 @@ abstract class Index
 
     public function getField(string|int $key): Field
     {
-        return $this->fields[$key] ?? throw new OutOfBoundsException('Field "' . $key . '" not found in BSON document');
+        return $this->fields[$key] ?? throw new OutOfBoundsException(sprintf('Field "%s" not found in BSON document', $key));
     }
 
     abstract protected static function sortFields(array $fields): array;

@@ -1249,7 +1249,7 @@ final class OperationExecutor
     {
         $pos = strpos($namespace, '.');
         if ($pos === false) {
-            throw new DriverInvalidArgumentException('Invalid namespace provided: ' . $namespace);
+            throw new DriverInvalidArgumentException(sprintf('Invalid namespace provided: %s', $namespace));
         }
 
         return [substr($namespace, 0, $pos), substr($namespace, $pos + 1)];

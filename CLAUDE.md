@@ -70,6 +70,12 @@ These failures are expected and should not block commits:
 | **`killAllSessions` test isolation** | `UnifiedTestRunner::doSetUp()` calls `killAllSessions` before each test, which can invalidate pooled sessions from other tests running in the same suite |
 | **`logging-addSubscriber-004.phpt`** | Uses `mongodb.debug` INI — controls C extension trace output; not implemented in userland driver. Skipped via `tests/Phpt/skip_list.php`. |
 
+## Coding conventions
+
+- **Exception messages always use `sprintf()`** — never string concatenation (`.`) or double-quoted interpolation. Static messages with no dynamic parts may be plain string literals.
+- **Use `hrtime(true)` for durations** — monotonic nanosecond integer. `microtime(true)` only for absolute wall-clock timestamps.
+- **No manual `use` statements** — write FQCNs in code, phpcbf adds imports automatically.
+
 ## Commit discipline
 
 Commit at each debugging milestone — don't accumulate unrelated changes into one commit. Use imperative-mood subjects, ≤ 72 chars.

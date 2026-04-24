@@ -18,6 +18,7 @@ use function get_debug_type;
 use function is_array;
 use function is_object;
 use function is_string;
+use function sprintf;
 
 final class Query
 {
@@ -149,7 +150,7 @@ final class Query
                     throw new InvalidArgumentException('Cannot use empty keys in filter document');
                 }
 
-                throw new InvalidArgumentException('Cannot use empty keys in "' . $context . '" option');
+                throw new InvalidArgumentException(sprintf('Cannot use empty keys in "%s" option', $context));
             }
 
             if (! is_array($value) && ! ($value instanceof stdClass)) {

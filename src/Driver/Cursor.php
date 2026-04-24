@@ -21,6 +21,7 @@ use function count;
 use function interface_exists;
 use function is_array;
 use function is_string;
+use function sprintf;
 use function str_contains;
 use function str_ends_with;
 use function str_starts_with;
@@ -302,7 +303,7 @@ final class Cursor implements CursorInterface
         }
 
         if (! class_exists($value) && ! interface_exists($value)) {
-            throw new InvalidArgumentException('Class ' . $value . ' does not exist');
+            throw new InvalidArgumentException(sprintf('Class %s does not exist', $value));
         }
 
         $rc = new ReflectionClass($value);
@@ -316,7 +317,7 @@ final class Cursor implements CursorInterface
         if (! $rc->isInstantiable()) {
             $prefix = $rc->isInterface() ? 'Interface' : 'Class';
 
-            throw new InvalidArgumentException($prefix . ' ' . $value . ' is not instantiatable');
+            throw new InvalidArgumentException(sprintf('%s %s is not instantiatable', $prefix, $value));
         }
 
         throw new InvalidArgumentException(

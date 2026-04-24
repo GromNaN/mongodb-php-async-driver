@@ -15,6 +15,7 @@ use function in_array;
 use function is_array;
 use function is_object;
 use function is_string;
+use function sprintf;
 use function strtolower;
 use function trigger_error;
 
@@ -53,7 +54,7 @@ final class ReadPreference implements Serializable
     {
         $canonicalMode = self::MODE_MAP[strtolower($mode)] ?? null;
         if ($canonicalMode === null) {
-            throw new InvalidArgumentException("Unsupported readPreference value: '" . $mode . "'");
+            throw new InvalidArgumentException(sprintf("Unsupported readPreference value: '%s'", $mode));
         }
 
         $mode = $canonicalMode;
