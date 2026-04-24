@@ -230,6 +230,13 @@ return [
         => 'disableClientPersistence validation with keyVaultClient requires C extension client-persistence feature; not available in userland',
 
     // -------------------------------------------------------------------------
+    // WriteConcern: invalid $w type throws TypeError instead of InvalidArgumentException
+    // -------------------------------------------------------------------------
+
+    'writeConcern/writeconcern-ctor_error-002.phpt'
+        => 'C extension should throw TypeError for invalid $w types instead of throwing an InvalidArgumentException; tracked in PHPC-2704 (https://jira.mongodb.org/browse/PHPC-2704)',
+
+    // -------------------------------------------------------------------------
     // Manager: autoEncryption / client-side encryption — not implemented
     // -------------------------------------------------------------------------
 
