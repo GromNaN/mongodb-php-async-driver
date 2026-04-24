@@ -38,16 +38,12 @@ use const JSON_THROW_ON_ERROR;
  */
 final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringable
 {
-    /** Base64-encoded raw BSON bytes — public for get_object_vars() / var_export() compat. */
-    public readonly string $data;
-
     // ------------------------------------------------------------------
     // Private constructor
     // ------------------------------------------------------------------
 
-    private function __construct(string $bson)
+    private function __construct(private readonly string $data)
     {
-        $this->data = base64_encode($bson);
     }
 
     // ------------------------------------------------------------------
@@ -158,17 +154,17 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
         $rootTarget = $map['root'];
         $ignoreRoot = ($rootTarget === 'array' || $rootTarget === 'bsonArray');
 
-        return BsonDecoder::decode(base64_decode($this->data), $map, ignoreRootKeys: $ignoreRoot, preserveInt64: true);
+        return BsonDecoder::decode($this->data, $map, ignoreRootKeys: $ignoreRoot, preserveInt64: true);
     }
 
     final public function toCanonicalExtendedJSON(): string
     {
-        return ExtendedJson::toCanonical(BsonDecoder::decode(base64_decode($this->data), ['root' => 'array'], preserveInt64: true));
+        return ExtendedJson::toCanonical(BsonDecoder::decode($this->data, ['root' => 'array'], preserveInt64: true));
     }
 
     final public function toRelaxedExtendedJSON(): string
     {
-        return ExtendedJson::toRelaxed(BsonDecoder::decode(base64_decode($this->data), ['root' => 'array'], preserveInt64: true));
+        return ExtendedJson::toRelaxed(BsonDecoder::decode($this->data, ['root' => 'array'], preserveInt64: true));
     }
 
     // ------------------------------------------------------------------
@@ -177,7 +173,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
 
     final public function __toString(): string
     {
-        return base64_decode($this->data);
+        return $this->data;
     }
 
     // ------------------------------------------------------------------
@@ -235,14 +231,14 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
 
     final public function __serialize(): array
     {
-        return ['data' => $this->data];
+        return ['data' => base64_encode($this->data)];
     }
 
     final public function __unserialize(array $data): void
     {
         $bson = base64_decode($data['data'] ?? '');
         self::assertValidBson($bson, self::class);
-        $this->data = base64_encode($bson);
+        $this->data = $bson;
     }
 
     final public static function __set_state(array $properties): static
@@ -260,7 +256,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     public function __debugInfo(): array
     {
         return [
-            'data'  => $this->data,
+            'data'  => base64_encode($this->data),
             'value' => $this->toPHP(['root' => 'array', 'document' => 'bson', 'array' => 'bson']),
         ];
     }

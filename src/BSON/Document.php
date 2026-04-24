@@ -44,17 +44,12 @@ use const JSON_THROW_ON_ERROR;
  */
 final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
 {
-    /** Base64-encoded raw BSON bytes — public for get_object_vars() / var_export() compat. */
-    public readonly string $data;
-
-
     // ------------------------------------------------------------------
     // Private constructor
     // ------------------------------------------------------------------
 
-    private function __construct(string $bson)
+    private function __construct(private readonly string $data)
     {
-        $this->data = base64_encode($bson);
     }
 
     // ------------------------------------------------------------------
@@ -158,13 +153,13 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
             $map['root'] = 'bsonDocument';
         }
 
-        return BsonDecoder::decode(base64_decode($this->data), $map, handlePersistable: true, preserveInt64: true);
+        return BsonDecoder::decode($this->data, $map, handlePersistable: true, preserveInt64: true);
     }
 
     final public function toCanonicalExtendedJSON(): string
     {
         $decoded = BsonDecoder::decode(
-            base64_decode($this->data),
+            $this->data,
             ['root' => 'object', 'document' => 'object', 'array' => 'array'],
             preserveInt64: true,
         );
@@ -175,7 +170,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     final public function toRelaxedExtendedJSON(): string
     {
         $decoded = BsonDecoder::decode(
-            base64_decode($this->data),
+            $this->data,
             ['root' => 'object', 'document' => 'object', 'array' => 'array'],
             preserveInt64: true,
         );
@@ -190,7 +185,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     /** Returns the raw BSON bytes. */
     final public function __toString(): string
     {
-        return base64_decode($this->data);
+        return $this->data;
     }
 
     // ------------------------------------------------------------------
@@ -268,14 +263,14 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
 
     final public function __serialize(): array
     {
-        return ['data' => $this->data];
+        return ['data' => base64_encode($this->data)];
     }
 
     final public function __unserialize(array $data): void
     {
         $bson = base64_decode($data['data'] ?? '');
         self::assertValidBson($bson, self::class);
-        $this->data = base64_encode($bson);
+        $this->data = $bson;
     }
 
     final public static function __set_state(array $properties): static
@@ -293,8 +288,8 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     public function __debugInfo(): array
     {
         return [
-            'data'  => $this->data,
-            'value' => BsonDecoder::decode(base64_decode($this->data), ['document' => 'bson', 'array' => 'bson'], handlePersistable: true),
+            'data'  => base64_encode($this->data),
+            'value' => BsonDecoder::decode($this->data, ['document' => 'bson', 'array' => 'bson'], handlePersistable: true),
         ];
     }
 

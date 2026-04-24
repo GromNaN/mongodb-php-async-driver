@@ -348,4 +348,30 @@ return [
 
     'bson/typemap-007.phpt'
         => 'Nested wildcard fieldPath type maps (e.g. "field.$.$") in setTypeMap()/toPHP() require full field-path resolution logic; not yet implemented in userland driver',
+
+    // -------------------------------------------------------------------------
+    // Document/PackedArray::__set_state(): var_export() uses get_object_vars()
+    // which returns actual PHP properties.  Document and PackedArray store BSON
+    // as private raw bytes; there is no public $data property, so var_export()
+    // produces __set_state(array()) and the round-trip fails.
+    // The C extension exposes $data via a custom get_properties handler without
+    // an actual PHP property — not replicable in userland.
+    // -------------------------------------------------------------------------
+
+    'bson/bson-document-set_state-001.phpt'
+        => 'var_export() uses get_object_vars() on actual PHP properties; Document has no public $data property so var_export produces __set_state(array()) and the round-trip fails; C extension exposes $data via a custom get_properties handler',
+
+    'bson/bson-packedarray-set_state-001.phpt'
+        => 'var_export() uses get_object_vars() on actual PHP properties; PackedArray has no public $data property so var_export produces __set_state(array()) and the round-trip fails; C extension exposes $data via a custom get_properties handler',
+
+    // -------------------------------------------------------------------------
+    // Document/PackedArray get_properties: C extension exposes $data via a
+    // custom get_properties handler; userland has no public $data property
+    // -------------------------------------------------------------------------
+
+    'bson/bson-document-get_properties-001.phpt'
+        => 'C extension exposes $data via a custom get_properties handler; userland Document stores BSON as a private field, get_object_vars() returns empty array',
+
+    'bson/bson-packedarray-get_properties-001.phpt'
+        => 'C extension exposes $data via a custom get_properties handler; userland PackedArray stores BSON as a private field, get_object_vars() returns empty array',
 ];
