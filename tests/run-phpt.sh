@@ -21,7 +21,7 @@ foreach (array_keys(\$skip) as \$rel) {
 # so PHP_INI_SCAN_DIR="" would not propagate to child PHP processes.
 # Using a real directory path ensures the value is non-empty and gets passed,
 # and the ini file there enables OPcache and disables ext-mongodb.
-PHP_INI_SCAN_DIR_VALUE="$REPO_ROOT/tests/php-ini"
+PHP_INI_SCAN_DIR_VALUE="$REPO_ROOT/tests/Phpt/php-ini"
 mkdir -p /tmp/opcache-mongodb-driver-tests
 
 # Write filtered test list to a temp file
