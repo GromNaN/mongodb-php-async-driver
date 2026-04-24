@@ -9,6 +9,9 @@ use InvalidArgumentException;
 use function in_array;
 use function is_array;
 use function sprintf;
+use function trigger_error;
+
+use const E_USER_DEPRECATED;
 
 /**
  * Factory for creating {@see AuthMechanism} instances.
@@ -29,7 +32,7 @@ final class AuthMechanismFactory
     {
         return match ($mechanism) {
             'SCRAM-SHA-256' => new ScramSha256(),
-            'SCRAM-SHA-1'   => new ScramSha1(),
+            'SCRAM-SHA-1'   => self::deprecatedScramSha1('SCRAM-SHA-1 was explicitly requested'),
             default         => throw new InvalidArgumentException(
                 sprintf(
                     'Unsupported authentication mechanism "%s". Supported: SCRAM-SHA-256, SCRAM-SHA-1.',
@@ -69,7 +72,7 @@ final class AuthMechanismFactory
             }
 
             if (in_array('SCRAM-SHA-1', $supported, true)) {
-                return new ScramSha1();
+                return self::deprecatedScramSha1('server does not advertise SCRAM-SHA-256 support');
             }
 
             // The server responded with a list but neither mechanism is in it.
@@ -79,5 +82,28 @@ final class AuthMechanismFactory
 
         // Default: prefer SCRAM-SHA-256 (MongoDB 4.0+).
         return new ScramSha256();
+    }
+
+    /**
+     * Emit a deprecation warning and return a ScramSha1 instance.
+     *
+     * SCRAM-SHA-1 is a legacy mechanism retained only for compatibility with
+     * MongoDB servers older than 4.0. It relies on MD5 pre-hashing, which
+     * weakens the effective PBKDF2 input space compared to SCRAM-SHA-256.
+     * Upgrade the server (or explicitly configure SCRAM-SHA-256) to suppress
+     * this warning.
+     */
+    private static function deprecatedScramSha1(string $reason): ScramSha1
+    {
+        trigger_error(
+            sprintf(
+                'SCRAM-SHA-1 is a legacy authentication mechanism and should not be used (%s).'
+                . ' Upgrade to MongoDB 4.0+ and use SCRAM-SHA-256.',
+                $reason,
+            ),
+            E_USER_DEPRECATED,
+        );
+
+        return new ScramSha1();
     }
 }

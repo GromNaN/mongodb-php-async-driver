@@ -6,16 +6,19 @@ namespace MongoDB\Internal\Auth;
 
 use MongoDB\Internal\Connection\Connection;
 use Normalizer;
+use SensitiveParameter;
 
 use function base64_decode;
 use function base64_encode;
 use function class_exists;
 use function explode;
+use function function_exists;
 use function hash;
 use function hash_equals;
 use function hash_hmac;
 use function hash_pbkdf2;
 use function random_bytes;
+use function sodium_memzero;
 use function sprintf;
 use function str_replace;
 use function str_starts_with;
@@ -68,6 +71,7 @@ final class ScramSha256 implements AuthMechanism
     public function authenticate(
         Connection $connection,
         string $username,
+        #[SensitiveParameter]
         string $password,
         string $authSource,
     ): void {
@@ -130,10 +134,18 @@ final class ScramSha256 implements AuthMechanism
         // ------------------------------------------------------------------
         $preparedPassword = $this->saslPrep($password);
         $saltedPassword   = $this->hi($preparedPassword, $salt, $iterations);
+        // Zero plaintext password material from memory as soon as PBKDF2 is done.
+        if (function_exists('sodium_memzero')) {
+            sodium_memzero($preparedPassword);
+        }
 
-        $clientKey     = $this->hmac($saltedPassword, 'Client Key');
-        $storedKey     = $this->h($clientKey);
-        $serverKey     = $this->hmac($saltedPassword, 'Server Key');
+        $clientKey = $this->hmac($saltedPassword, 'Client Key');
+        $storedKey = $this->h($clientKey);
+        $serverKey = $this->hmac($saltedPassword, 'Server Key');
+        // Zero the derived key once all HMAC sub-keys have been extracted.
+        if (function_exists('sodium_memzero')) {
+            sodium_memzero($saltedPassword);
+        }
 
         // clientFinalMessageWithoutProof
         $channelBinding            = 'c=' . base64_encode('n,,');  // no channel binding
@@ -237,7 +249,8 @@ final class ScramSha256 implements AuthMechanism
      *
      * @return string Raw binary derived key
      */
-    private function hi(string $password, string $salt, int $iterations): string
+    private function hi(#[SensitiveParameter]
+    string $password, string $salt, int $iterations,): string
     {
         return hash_pbkdf2(self::HASH_ALGO, $password, $salt, $iterations, 0, true);
     }
