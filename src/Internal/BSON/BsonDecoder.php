@@ -557,9 +557,23 @@ final class BsonDecoder
     private static function readJavascriptWithScopeAsBson(string $bson, int &$offset): Javascript
     {
         self::readInt32Unsigned($bson, $offset); // consume outer length int32
-        $code     = self::readString($bson, $offset);
+        $code = self::readString($bson, $offset);
+
+        if ($offset + 4 > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes to read JavaScript scope length at offset %d', $offset),
+            );
+        }
+
         $scopeLen = (int) (unpack('V', substr($bson, $offset, 4))[1]);
-        $scope    = Document::fromBSON(substr($bson, $offset, $scopeLen));
+
+        if ($offset + $scopeLen > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes for JavaScript scope of length %d at offset %d', $scopeLen, $offset),
+            );
+        }
+
+        $scope = Document::fromBSON(substr($bson, $offset, $scopeLen));
 
         return new Javascript($code, $scope);
     }
