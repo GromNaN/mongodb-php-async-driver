@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Tests\Driver;
 
+use MongoDB\BSON\Document;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Serializable as BsonSerializable;
 use MongoDB\Driver\BulkWrite;
@@ -77,27 +78,26 @@ class BulkWriteTest extends TestCase
         $id  = $bw->insert(['x' => 1]);
         $doc = $bw->getOperations()[0][1];
 
-        $this->assertIsArray($doc);
-        $this->assertArrayHasKey('_id', $doc);
-        $this->assertSame((string) $id, (string) $doc['_id']);
+        $this->assertInstanceOf(Document::class, $doc);
+        $this->assertTrue($doc->has('_id'));
+        $this->assertSame((string) $id, (string) $doc->get('_id'));
     }
 
     public function testInsertStdClassWithoutIdInjectsId(): void
     {
-        $doc       = new stdClass();
-        $doc->x    = 1;
-        $bw        = new BulkWrite();
-        $id        = $bw->insert($doc);
-        $storedDoc = $bw->getOperations()[0][1];
+        $input  = new stdClass();
+        $input->x = 1;
+        $bw     = new BulkWrite();
+        $id     = $bw->insert($input);
+        $stored = $bw->getOperations()[0][1];
 
-        $this->assertInstanceOf(stdClass::class, $storedDoc);
-        $this->assertObjectHasProperty('_id', $storedDoc);
-        $this->assertSame((string) $id, (string) $storedDoc->_id);
+        $this->assertInstanceOf(Document::class, $stored);
+        $this->assertTrue($stored->has('_id'));
+        $this->assertSame((string) $id, (string) $stored->get('_id'));
     }
 
     public function testInsertGenericObjectWithoutIdConvertsToArrayWithId(): void
     {
-        // Plain PHP class (not stdClass) — cannot safely add dynamic properties.
         $doc    = new class {
             public int $x = 1;
         };
@@ -105,10 +105,10 @@ class BulkWriteTest extends TestCase
         $id     = $bw->insert($doc);
         $stored = $bw->getOperations()[0][1];
 
-        $this->assertIsArray($stored);
-        $this->assertArrayHasKey('_id', $stored);
-        $this->assertSame((string) $id, (string) $stored['_id']);
-        $this->assertSame(1, $stored['x']);
+        $this->assertInstanceOf(Document::class, $stored);
+        $this->assertTrue($stored->has('_id'));
+        $this->assertSame((string) $id, (string) $stored->get('_id'));
+        $this->assertSame(1, $stored->get('x'));
     }
 
     public function testInsertSerializableWithoutIdInjectsId(): void
@@ -124,10 +124,10 @@ class BulkWriteTest extends TestCase
         $id     = $bw->insert($serializable);
         $stored = $bw->getOperations()[0][1];
 
-        $this->assertIsArray($stored);
-        $this->assertArrayHasKey('_id', $stored);
-        $this->assertSame((string) $id, (string) $stored['_id']);
-        $this->assertSame(42, $stored['x']);
+        $this->assertInstanceOf(Document::class, $stored);
+        $this->assertTrue($stored->has('_id'));
+        $this->assertSame((string) $id, (string) $stored->get('_id'));
+        $this->assertSame(42, $stored->get('x'));
     }
 
     public function testInsertArrayWithExistingIdPreservesIt(): void
@@ -137,7 +137,8 @@ class BulkWriteTest extends TestCase
         $id         = $bw->insert(['_id' => $existingId, 'x' => 1]);
         $stored     = $bw->getOperations()[0][1];
 
+        $this->assertInstanceOf(Document::class, $stored);
         $this->assertSame((string) $existingId, (string) $id);
-        $this->assertSame((string) $existingId, (string) $stored['_id']);
+        $this->assertSame((string) $existingId, (string) $stored->get('_id'));
     }
 }

@@ -4,19 +4,19 @@ declare(strict_types=1);
 namespace MongoDB\Driver;
 
 use Countable;
-use MongoDB\BSON\Binary;
 use MongoDB\BSON\Document;
-use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\PackedArray;
 use MongoDB\BSON\Persistable;
 use MongoDB\BSON\Serializable as BsonSerializable;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Exception\UnexpectedValueException;
+use MongoDB\Internal\BSON\BsonEncoder;
 use stdClass;
 
 use function array_is_list;
 use function array_key_exists;
 use function array_keys;
+use function array_map;
 use function array_merge;
 use function bin2hex;
 use function count;
@@ -94,64 +94,10 @@ final class BulkWrite implements Countable
         self::checkEmptyKeys($docArr, 'invalid document for insert: Element key cannot be an empty string');
         self::checkUtf8($docArr, '');
 
-        // Extract or generate _id, and ensure the stored document includes it so
-        // the _id returned by insert() always matches the one sent to the server.
-        if (is_array($document)) {
-            if (! isset($document['_id'])) {
-                $document['_id'] = new ObjectId();
-            }
+        $bsonBytes = BsonEncoder::encodeDocumentWithId($document, $rawId);
+        $id        = self::normalizeId($rawId);
 
-            $id = self::normalizeId($document['_id']);
-        } elseif ($document instanceof Document) {
-            $data = (array) $document->toPHP(['root' => 'array', 'document' => 'array']);
-            if (isset($data['_id'])) {
-                $id = self::normalizeId($data['_id']);
-            } else {
-                $generatedId = new ObjectId();
-                $id          = self::normalizeId($generatedId);
-                $document    = Document::fromPHP(['_id' => $generatedId] + $data);
-            }
-        } elseif ($document instanceof Persistable) {
-            $serialized = $document->bsonSerialize();
-            $serialized = is_array($serialized) ? $serialized : (array) $serialized;
-            if (isset($serialized['_id'])) {
-                $id = self::normalizeId($serialized['_id']);
-            } else {
-                $generatedId = new ObjectId();
-                $id          = self::normalizeId($generatedId);
-                // Expand to array: __pclass first (mirrors BsonEncoder), then _id, then fields.
-                $document = [
-                    '__pclass' => new Binary($document::class, Binary::TYPE_USER_DEFINED),
-                    '_id'      => $generatedId,
-                ] + $serialized;
-            }
-        } elseif ($document instanceof BsonSerializable) {
-            $serialized = $document->bsonSerialize();
-            $serialized = is_array($serialized) ? $serialized : (array) $serialized;
-            if (isset($serialized['_id'])) {
-                $id = self::normalizeId($serialized['_id']);
-            } else {
-                $generatedId = new ObjectId();
-                $id          = self::normalizeId($generatedId);
-                $document    = ['_id' => $generatedId] + $serialized;
-            }
-        } else {
-            $vars = get_object_vars($document);
-            if (array_key_exists('_id', $vars)) {
-                $id = self::normalizeId($vars['_id']);
-            } elseif ($document instanceof stdClass) {
-                $document->_id = new ObjectId();
-                $id            = $document->_id;
-            } else {
-                // Cannot safely set dynamic properties on arbitrary objects;
-                // convert to array so _id is included in the encoded document.
-                $generatedId = new ObjectId();
-                $id          = self::normalizeId($generatedId);
-                $document    = ['_id' => $generatedId] + $vars;
-            }
-        }
-
-        $this->operations[] = ['insert', $document, null];
+        $this->operations[] = ['insert', Document::fromBson($bsonBytes), null];
 
         return $id;
     }
@@ -239,7 +185,11 @@ final class BulkWrite implements Countable
             throw new InvalidArgumentException("Invalid option 'sort'");
         }
 
-        $this->operations[] = ['update', $filter, $newObj, $options];
+        $encodedFilter  = Document::fromBson(BsonEncoder::encode($filter));
+        $encodedNewObj  = self::encodeUpdateMods($newObj);
+        $encodedOptions = self::encodeUpdateOptions($options);
+
+        $this->operations[] = ['update', $encodedFilter, $encodedNewObj, $encodedOptions];
     }
 
     public function delete(array|object $filter, ?array $deleteOptions = null): void
@@ -264,7 +214,10 @@ final class BulkWrite implements Countable
         self::checkNullBytesInKeys($filterArr);
         self::checkUtf8($filterArr, '');
 
-        $this->operations[] = ['delete', $filter, $options];
+        $encodedFilter  = Document::fromBson(BsonEncoder::encode($filter));
+        $encodedOptions = self::encodeDeleteOptions($options);
+
+        $this->operations[] = ['delete', $encodedFilter, $encodedOptions];
     }
 
     /** @internal */
@@ -527,5 +480,67 @@ final class BulkWrite implements Countable
         }
 
         return $id;
+    }
+
+    /**
+     * Encode an update/pipeline document to its BSON representation.
+     *
+     * For pipeline updates (PackedArray or PHP list array), returns a PackedArray.
+     * For regular update documents, returns a Document.
+     */
+    private static function encodeUpdateMods(array|object $update): Document|PackedArray
+    {
+        if ($update instanceof PackedArray) {
+            return $update;
+        }
+
+        if (is_array($update) && array_is_list($update)) {
+            return PackedArray::fromBSON(BsonEncoder::encodeList($update));
+        }
+
+        return Document::fromBson(BsonEncoder::encode($update));
+    }
+
+    /** Encode update options: convert document-valued options to BSON. */
+    private static function encodeUpdateOptions(array $options): array
+    {
+        if (isset($options['arrayFilters'])) {
+            $af = $options['arrayFilters'];
+            if (! ($af instanceof PackedArray)) {
+                $filters              = is_array($af) ? $af : (array) $af;
+                $options['arrayFilters'] = array_map(
+                    static fn ($f) => Document::fromBson(BsonEncoder::encode($f)),
+                    $filters,
+                );
+            }
+        }
+
+        if (isset($options['collation'])) {
+            $options['collation'] = Document::fromBson(BsonEncoder::encode($options['collation']));
+        }
+
+        if (isset($options['hint']) && ! is_string($options['hint'])) {
+            $options['hint'] = Document::fromBson(BsonEncoder::encode($options['hint']));
+        }
+
+        if (isset($options['sort'])) {
+            $options['sort'] = Document::fromBson(BsonEncoder::encode($options['sort']));
+        }
+
+        return $options;
+    }
+
+    /** Encode delete options: convert document-valued options to BSON. */
+    private static function encodeDeleteOptions(array $options): array
+    {
+        if (isset($options['collation'])) {
+            $options['collation'] = Document::fromBson(BsonEncoder::encode($options['collation']));
+        }
+
+        if (isset($options['hint']) && ! is_string($options['hint'])) {
+            $options['hint'] = Document::fromBson(BsonEncoder::encode($options['hint']));
+        }
+
+        return $options;
     }
 }
