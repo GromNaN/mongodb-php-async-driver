@@ -7,9 +7,7 @@ namespace MongoDB\Internal\Topology;
 use MongoDB\Driver\ReadPreference;
 
 use function array_filter;
-use function array_map;
 use function array_values;
-use function min;
 
 /**
  * Stateless server-selection logic (SDAM spec §Server Selection).
@@ -101,7 +99,7 @@ final class ServerSelector
                 $available = self::filterAvailable($servers);
                 $tagged    = self::filterByTagSets($available, $tagSets);
 
-                return array_values(self::filterByLatency($tagged, $localThresholdMs));
+                return self::filterByLatency($tagged, $localThresholdMs);
 
             default:
                 // Should never happen with a well-constructed ReadPreference.
@@ -148,7 +146,7 @@ final class ServerSelector
         $secondaries = self::filterByType($servers, InternalServerDescription::TYPE_RS_SECONDARY);
         $tagged      = self::filterByTagSets($secondaries, $tagSets);
 
-        return array_values(self::filterByLatency($tagged, $localThresholdMs));
+        return self::filterByLatency($tagged, $localThresholdMs);
     }
 
     /**
@@ -211,28 +209,36 @@ final class ServerSelector
      */
     private static function filterByLatency(array $servers, int $localThresholdMs): array
     {
-        // Collect servers that have a measured RTT.
-        $withRtt = array_filter(
-            $servers,
-            static fn (InternalServerDescription $sd) => $sd->roundTripTimeMs !== null,
-        );
+        // Single pass to find the minimum RTT (excludes servers with no measurement).
+        $minRtt = null;
+        foreach ($servers as $sd) {
+            if ($sd->roundTripTimeMs === null) {
+                continue;
+            }
 
-        if ($withRtt === []) {
+            if ($minRtt !== null && $sd->roundTripTimeMs >= $minRtt) {
+                continue;
+            }
+
+            $minRtt = $sd->roundTripTimeMs;
+        }
+
+        if ($minRtt === null) {
             return $servers; // No RTT data: cannot filter, return all candidates.
         }
 
-        $minRtt = min(
-            array_map(
-                static fn (InternalServerDescription $sd) => $sd->roundTripTimeMs,
-                $withRtt,
-            ),
-        );
-
         $threshold = $minRtt + $localThresholdMs;
 
-        return array_filter(
-            $withRtt,
-            static fn (InternalServerDescription $sd) => $sd->roundTripTimeMs <= $threshold,
-        );
+        // Second pass: keep only servers within the latency window.
+        $result = [];
+        foreach ($servers as $sd) {
+            if ($sd->roundTripTimeMs === null || $sd->roundTripTimeMs > $threshold) {
+                continue;
+            }
+
+            $result[] = $sd;
+        }
+
+        return $result;
     }
 }
