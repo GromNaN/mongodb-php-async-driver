@@ -76,7 +76,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     final public static function fromJSON(string $json): static
     {
         try {
-            $phpValue = json_decode($json, associative: true, flags: JSON_THROW_ON_ERROR);
+            $phpValue = json_decode($json, associative: false, flags: JSON_THROW_ON_ERROR);
         } catch (JsonException $e) {
             throw new DriverUnexpectedValueException(
                 sprintf('Got parse error at "%s", position 1: "SPECIAL_EXPECTED"', substr($json, 0, 1)),
@@ -102,7 +102,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
             $expected++;
         }
 
-        $decoded = ExtendedJson::fromValue($phpValue);
+        $decoded = ExtendedJson::fromValue(ExtendedJson::normalizeJson($phpValue));
         $bson    = BsonEncoder::encodeList(is_array($decoded) ? $decoded : (array) $decoded);
 
         return new static($bson);

@@ -6,6 +6,7 @@ namespace MongoDB\Tests\BSON;
 
 use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
+use MongoDB\BSON\PackedArray;
 use MongoDB\Driver\Exception\LogicException;
 use MongoDB\Internal\BSON\BsonEncoder;
 use PHPUnit\Framework\TestCase;
@@ -91,5 +92,29 @@ class DocumentTest extends TestCase
 
         $doc         = Document::fromPHP(['key' => 'val']);
         $doc['key']  = 'new_value';
+    }
+
+    /**
+     * A nested empty JSON array [] inside a document must be encoded as an
+     * empty BSON array, not as an empty BSON document.
+     */
+    public function testFromJSONNestedEmptyArrayBecomesPackedArray(): void
+    {
+        $doc = Document::fromJSON('{"items":[]}');
+
+        $result = $doc->toPHP(['root' => 'array', 'document' => 'bson', 'array' => 'bson']);
+        $this->assertInstanceOf(PackedArray::class, $result['items']);
+    }
+
+    /**
+     * A nested empty JSON object {} inside a document must be encoded as an
+     * empty BSON document, not as an empty BSON array.
+     */
+    public function testFromJSONNestedEmptyObjectBecomesDocument(): void
+    {
+        $doc = Document::fromJSON('{"sub":{}}');
+
+        $result = $doc->toPHP(['root' => 'array', 'document' => 'bson', 'array' => 'bson']);
+        $this->assertInstanceOf(Document::class, $result['sub']);
     }
 }
