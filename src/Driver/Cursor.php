@@ -317,9 +317,9 @@ final class Cursor implements CursorInterface
 
         $rc = new ReflectionClass($value);
 
-        if ($rc->implementsInterface(Unserializable::class)) {
-            // Unserializable classes are always allowed: newInstanceWithoutConstructor bypasses
-            // the constructor, so private constructors are valid (e.g. named constructors pattern).
+        if ($rc->implementsInterface(Unserializable::class) && ! $rc->isAbstract()) {
+            // Unserializable non-abstract classes are allowed: newInstanceWithoutConstructor
+            // bypasses the constructor, so private constructors are valid.
             return;
         }
 

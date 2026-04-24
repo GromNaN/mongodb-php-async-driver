@@ -158,7 +158,7 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
         $rootTarget = $map['root'];
         $ignoreRoot = ($rootTarget === 'array' || $rootTarget === 'bsonArray');
 
-        return BsonDecoder::decode(base64_decode($this->data), $map, ignoreRootKeys: $ignoreRoot);
+        return BsonDecoder::decode(base64_decode($this->data), $map, ignoreRootKeys: $ignoreRoot, preserveInt64: true);
     }
 
     final public function toCanonicalExtendedJSON(): string

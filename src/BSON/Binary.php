@@ -218,5 +218,19 @@ final class Binary implements BinaryInterface, JsonSerializable, Type, Stringabl
         if (strlen($data) < 2) {
             throw new InvalidArgumentException('Binary vector data is invalid');
         }
+
+        $dtype   = ord($data[0]);
+        $padding = ord($data[1]);
+
+        // PackedBit (dtype=0x10): padded bits in the last byte must be zero
+        if ($dtype !== 0x10 || $padding <= 0 || strlen($data) <= 2) {
+            return;
+        }
+
+        $lastByte   = ord($data[strlen($data) - 1]);
+        $paddedMask = (1 << $padding) - 1;
+        if (($lastByte & $paddedMask) !== 0) {
+            throw new InvalidArgumentException('Binary vector data is invalid');
+        }
     }
 }

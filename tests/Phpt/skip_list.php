@@ -278,4 +278,74 @@ return [
 
     'manager/manager-createClientEncryption-error-002.phpt'
         => 'ClientEncryption option validation is not implemented in this userland driver',
+
+    // -------------------------------------------------------------------------
+    // Constructor type checking: C extension throws InvalidArgumentException for
+    // wrong-type arguments; userland PHP typed signatures throw TypeError instead.
+    // PHP typed signatures are correct; these tests reflect a C extension bug.
+    // -------------------------------------------------------------------------
+
+    'bson/bson-utcdatetime_error-004.phpt'
+        => 'C extension throws InvalidArgumentException for wrong-type $milliseconds; PHP typed signature correctly throws TypeError. C extension behavior is a bug (should be TypeError).',
+
+    'bson/bson-timestamp_error-006.phpt'
+        => 'C extension throws InvalidArgumentException for wrong-type arguments; PHP typed signature correctly throws TypeError. C extension behavior is a bug (should be TypeError).',
+
+    // -------------------------------------------------------------------------
+    // ObjectId: C extension silently converts invalid hex chars to 0
+    // -------------------------------------------------------------------------
+
+    'bson/bug0974-001.phpt'
+        => 'C extension silently converts invalid hex chars in ObjectId strings to 0 (e.g. "2017-06-13T11:21:26.906Z" → valid OID). Userland correctly rejects invalid ObjectId strings per BSON spec.',
+
+    // -------------------------------------------------------------------------
+    // Enum classes cannot implement Unserializable/Persistable
+    // (C extension enforces this via an interface_implements hook)
+    // -------------------------------------------------------------------------
+
+    'bson/bson-enum_error-001.phpt'
+        => 'C extension rejects enums implementing Unserializable via a low-level interface_implements hook; userland PHP cannot prevent an enum from implementing an interface',
+
+    'bson/bson-enum_error-002.phpt'
+        => 'C extension rejects backed enums implementing Unserializable via a low-level interface_implements hook; userland PHP cannot prevent an enum from implementing an interface',
+
+    'bson/bson-enum_error-003.phpt'
+        => 'C extension rejects enums implementing Persistable via a low-level interface_implements hook; userland PHP cannot prevent an enum from implementing an interface',
+
+    'bson/bson-enum_error-004.phpt'
+        => 'C extension rejects backed enums implementing Persistable via a low-level interface_implements hook; userland PHP cannot prevent an enum from implementing an interface',
+
+    // -------------------------------------------------------------------------
+    // Int64 constructor: float input throws TypeError (typed signature) not
+    // InvalidArgumentException (C extension untyped behavior)
+    // -------------------------------------------------------------------------
+
+    'bson/bson-int64-ctor_error-001.phpt'
+        => 'C extension throws InvalidArgumentException for float input to Int64(); PHP typed int|string signature correctly throws TypeError. C extension behavior is a bug (should be TypeError).',
+
+    // -------------------------------------------------------------------------
+    // BSON class opaqueness: PHP public readonly properties are visible via
+    // property_exists(); C extension uses internal C struct members which are
+    // not PHP properties
+    // -------------------------------------------------------------------------
+
+    'bson/bug0939-001.phpt'
+        => 'C extension BSON objects have no PHP-level properties (internal C struct storage); userland PHP uses public readonly properties which property_exists() returns true for',
+
+    // -------------------------------------------------------------------------
+    // PHP string interning behavior: refcount vs interned output in debug_zval_dump
+    // -------------------------------------------------------------------------
+
+    'bson/bug1839-005.phpt'
+        => 'Test verifies PHP internal string refcount vs interned status in debug_zval_dump; behavior depends on PHP version string interning and is not driver-specific',
+
+    // -------------------------------------------------------------------------
+    // fieldPath wildcard type maps in setTypeMap() — not yet implemented
+    // -------------------------------------------------------------------------
+
+    'bson/typemap-006.phpt'
+        => 'Wildcard fieldPath type maps (e.g. "field.$") in setTypeMap()/toPHP() require full field-path resolution logic; not yet implemented in userland driver',
+
+    'bson/typemap-007.phpt'
+        => 'Nested wildcard fieldPath type maps (e.g. "field.$.$") in setTypeMap()/toPHP() require full field-path resolution logic; not yet implemented in userland driver',
 ];

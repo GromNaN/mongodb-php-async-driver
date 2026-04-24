@@ -34,7 +34,6 @@ final class CorpusTest extends TestCase
 {
     private static array $tests = [];
     private static array $skippedTests = [
-        'Double type (double.json)/-0.0'                                                                                       => 'PHP cannot represent negative zero',
         'Javascript Code (code.json)/Embedded nulls'                                                                           => 'Pure PHP rejects null bytes in Javascript code',
         'Javascript Code with Scope (code_w_scope.json)/Unicode and embedded null in code string, empty scope'                 => 'Pure PHP rejects null bytes in Javascript code',
     ];

@@ -169,6 +169,7 @@ final class TypeMapper
         $narrowed       = [];
 
         foreach ($fieldPaths as $path => $type) {
+            $path = (string) $path;
             if (str_starts_with($path, $prefix)) {
                 $narrowed[substr($path, strlen($prefix))] = $type;
             }

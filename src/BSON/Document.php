@@ -158,7 +158,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
             $map['root'] = 'bsonDocument';
         }
 
-        return BsonDecoder::decode(base64_decode($this->data), $map, handlePersistable: true);
+        return BsonDecoder::decode(base64_decode($this->data), $map, handlePersistable: true, preserveInt64: true);
     }
 
     final public function toCanonicalExtendedJSON(): string
@@ -294,7 +294,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     {
         return [
             'data'  => $this->data,
-            'value' => $this->toPHP(['document' => 'bson', 'array' => 'bson']),
+            'value' => BsonDecoder::decode(base64_decode($this->data), ['document' => 'bson', 'array' => 'bson'], handlePersistable: true),
         ];
     }
 

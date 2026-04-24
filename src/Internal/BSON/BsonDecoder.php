@@ -38,6 +38,7 @@ use function gmp_init;
 use function gmp_mul;
 use function gmp_pow;
 use function gmp_strval;
+use function mb_check_encoding;
 use function ord;
 use function sprintf;
 use function str_repeat;
@@ -136,7 +137,7 @@ final class BsonDecoder
             BsonType::Symbol      => self::readSymbol($bson, $o),
             BsonType::Int32       => self::readInt32($bson, $o),
             BsonType::Timestamp   => self::readTimestamp($bson, $o),
-            BsonType::Int64       => self::readInt64($bson, $o),
+            BsonType::Int64       => self::readInt64($bson, $o, true),
             BsonType::Decimal128  => self::readDecimal128($bson, $o),
             BsonType::Binary      => self::readBinary($bson, $o),
             BsonType::Document    => self::readSubDocumentAsBson($bson, $o),
@@ -182,15 +183,23 @@ final class BsonDecoder
 
         $endOffset = $startOffset + $totalLen;
 
+        if ($endOffset > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('BSON document length %d at offset %d exceeds input length %d', $totalLen, $startOffset, strlen($bson)),
+            );
+        }
+
         $isArray = ($context === 'array') || ($context === 'root' && $ignoreRootKeys);
 
-        $fields = [];
+        $fields          = [];
+        $foundTerminator = false;
 
-        while ($offset < $endOffset - 1) {
+        while ($offset < $endOffset) {
             $typeByte = ord($bson[$offset]);
             $offset++;
 
             if ($typeByte === 0x00) {
+                $foundTerminator = true;
                 break;
             }
 
@@ -208,7 +217,11 @@ final class BsonDecoder
             }
         }
 
-        $offset = $endOffset;
+        if (! $foundTerminator || $offset !== $endOffset) {
+            throw new RuntimeException(
+                sprintf('BSON document at offset %d is missing its terminator or has extra data (offset %d, expected %d)', $startOffset, $offset, $endOffset),
+            );
+        }
 
         $targetType = match ($context) {
             'root'  => $typeMap['root']     ?? 'object',
@@ -326,6 +339,12 @@ final class BsonDecoder
 
     private static function readInt32Unsigned(string $bson, int &$offset): int
     {
+        if ($offset + 4 > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes to read int32 at offset %d', $offset),
+            );
+        }
+
         /** @var array{1: int} $u */
         $u = unpack('V', substr($bson, $offset, 4));
         $offset += 4;
@@ -346,6 +365,12 @@ final class BsonDecoder
 
     private static function readInt64(string $bson, int &$offset, bool $preserveInt64 = false): int|Int64
     {
+        if ($offset + 8 > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes to read int64 at offset %d', $offset),
+            );
+        }
+
         /** @var array{1: int} $u */
         $u = unpack('P', substr($bson, $offset, 8));
         $offset += 8;
@@ -359,6 +384,12 @@ final class BsonDecoder
 
     private static function readDouble(string $bson, int &$offset): float
     {
+        if ($offset + 8 > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes to read double at offset %d', $offset),
+            );
+        }
+
         /** @var array{1: float} $u */
         $u = unpack('e', substr($bson, $offset, 8));
         $offset += 8;
@@ -368,9 +399,35 @@ final class BsonDecoder
 
     private static function readString(string $bson, int &$offset): string
     {
-        $len    = self::readInt32Unsigned($bson, $offset);
-        $str    = substr($bson, $offset, $len - 1);
+        $lenOffset = $offset;
+        $len       = self::readInt32Unsigned($bson, $offset);
+
+        if ($len < 1) {
+            throw new RuntimeException(
+                sprintf('Invalid BSON string length %d at offset %d', $len, $lenOffset),
+            );
+        }
+
+        if ($offset + $len > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes for string of length %d at offset %d', $len, $offset),
+            );
+        }
+
+        if (ord($bson[$offset + $len - 1]) !== 0) {
+            throw new RuntimeException(
+                sprintf('BSON string at offset %d is not null-terminated', $offset),
+            );
+        }
+
+        $str     = substr($bson, $offset, $len - 1);
         $offset += $len;
+
+        if (! mb_check_encoding($str, 'UTF-8')) {
+            throw new RuntimeException(
+                sprintf('BSON string at offset %d contains invalid UTF-8', $lenOffset),
+            );
+        }
 
         return $str;
     }
@@ -378,13 +435,45 @@ final class BsonDecoder
     private static function readBinary(string $bson, int &$offset): Binary
     {
         $len     = self::readInt32Unsigned($bson, $offset);
+        $bsonLen = strlen($bson);
+
+        if ($offset >= $bsonLen) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes for binary subtype at offset %d', $offset),
+            );
+        }
+
         $subtype = ord($bson[$offset]);
         $offset++;
+
+        if ($offset + $len > $bsonLen) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes for binary data of length %d at offset %d', $len, $offset),
+            );
+        }
+
         $data    = substr($bson, $offset, $len);
         $offset += $len;
 
-        // Subtype 0x02 (old binary) has a redundant int32 length prefix inside the data
+        // Subtype 0x02 (old binary) has a redundant int32 length prefix inside the data;
+        // the inner length must equal the outer length minus the 4-byte header.
         if ($subtype === Binary::TYPE_OLD_BINARY) {
+            if ($len < 4) {
+                throw new RuntimeException(
+                    sprintf('Binary subtype 0x02 requires at least 4 bytes for inner length, got %d', $len),
+                );
+            }
+
+            /** @var array{1: int} $inner */
+            $inner    = unpack('V', substr($data, 0, 4));
+            $innerLen = $inner[1];
+
+            if ($innerLen !== $len - 4) {
+                throw new RuntimeException(
+                    sprintf('Binary subtype 0x02 inner length %d does not match expected %d', $innerLen, $len - 4),
+                );
+            }
+
             $data = substr($data, 4);
         }
 
