@@ -271,6 +271,7 @@ final class OperationExecutor
         $totalUpserted  = 0;
         $upsertedIds    = [];
         $writeErrors    = [];
+        $errorReplies   = [];
         $wcError        = null;
         $acknowledged   = $writeConcern === null || $writeConcern->getW() !== 0;
 
@@ -348,6 +349,11 @@ final class OperationExecutor
                             code:    (int) ($wce['code']   ?? 0),
                             message: (string) ($wce['errmsg'] ?? ''),
                         );
+                    }
+                } catch (CommandException $e) {
+                    $errorReplies[] = $e->getResultDocument();
+                    if ($ordered) {
+                        break;
                     }
                 } catch (Throwable $e) {
                     if ($ordered) {
@@ -440,6 +446,11 @@ final class OperationExecutor
                             message: (string) ($wce['errmsg'] ?? ''),
                         );
                     }
+                } catch (CommandException $e) {
+                    $errorReplies[] = $e->getResultDocument();
+                    if ($ordered) {
+                        break;
+                    }
                 } catch (Throwable $e) {
                     if ($ordered) {
                         throw $e;
@@ -502,6 +513,11 @@ final class OperationExecutor
                             message: (string) ($wce['errmsg'] ?? ''),
                         );
                     }
+                } catch (CommandException $e) {
+                    $errorReplies[] = $e->getResultDocument();
+                    if ($ordered) {
+                        break;
+                    }
                 } catch (Throwable $e) {
                     if ($ordered) {
                         throw $e;
@@ -528,7 +544,18 @@ final class OperationExecutor
             writeErrors:     $writeErrors,
             acknowledged:    $acknowledged,
             writeConcern:    $writeConcern,
+            errorReplies:    $errorReplies,
         );
+
+        if ($errorReplies !== []) {
+            $reply = (array) $errorReplies[0];
+
+            throw new BulkWriteException(
+                message:     (string) ($reply['errmsg'] ?? ''),
+                code:        (int) ($reply['code'] ?? 0),
+                writeResult: $writeResult,
+            );
+        }
 
         if ($writeErrors !== []) {
             $firstError = $writeErrors[0];

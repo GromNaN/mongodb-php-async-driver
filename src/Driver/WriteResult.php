@@ -19,6 +19,8 @@ final class WriteResult
     private array $writeErrors;
     private bool $acknowledged;
     private WriteConcern $writeConcern;
+    /** @var object[] */
+    private array $errorReplies;
 
     /**
      * Private constructor. Use the internal factory to create instances.
@@ -45,6 +47,7 @@ final class WriteResult
         array $writeErrors,
         bool $acknowledged,
         ?WriteConcern $writeConcern = null,
+        array $errorReplies = [],
     ): static {
         $instance = new static();
         $instance->insertedCount = $insertedCount;
@@ -58,6 +61,7 @@ final class WriteResult
         $instance->writeErrors = $writeErrors;
         $instance->acknowledged = $acknowledged;
         $instance->writeConcern = $writeConcern ?? WriteConcern::createDefault();
+        $instance->errorReplies = $errorReplies;
 
         return $instance;
     }
@@ -133,7 +137,7 @@ final class WriteResult
 
     public function getErrorReplies(): array
     {
-        return [];
+        return $this->errorReplies;
     }
 
     public function isAcknowledged(): bool
@@ -158,7 +162,7 @@ final class WriteResult
             'writeErrors'       => $this->writeErrors,
             'writeConcernError' => $this->writeConcernError,
             'writeConcern'      => $this->writeConcern,
-            'errorReplies'      => [],
+            'errorReplies'      => $this->errorReplies,
         ];
     }
 }
