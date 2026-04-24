@@ -153,11 +153,11 @@ final class WriteResult
         }
 
         return [
-            'nInserted'         => $this->acknowledged ? $this->insertedCount : null,
-            'nMatched'          => $this->acknowledged ? $this->matchedCount : null,
-            'nModified'         => $this->acknowledged ? $this->modifiedCount : null,
-            'nRemoved'          => $this->acknowledged ? $this->deletedCount : null,
-            'nUpserted'         => $this->acknowledged ? $this->upsertedCount : null,
+            'nInserted'         => $this->insertedCount,
+            'nMatched'          => $this->matchedCount,
+            'nModified'         => $this->modifiedCount,
+            'nRemoved'          => $this->deletedCount,
+            'nUpserted'         => $this->upsertedCount,
             'upsertedIds'       => $upsertedIdsList,
             'writeErrors'       => $this->writeErrors,
             'writeConcernError' => $this->writeConcernError,
