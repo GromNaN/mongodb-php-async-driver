@@ -6,6 +6,7 @@ namespace MongoDB\Internal\Protocol;
 
 use MongoDB\Internal\BSON\BsonEncoder;
 
+use function implode;
 use function pack;
 use function strlen;
 
@@ -92,11 +93,13 @@ final class OpMsgEncoder
             $identifier = (string) $seq['id'];
             $docs       = (array) $seq['docs'];
 
-            // Encode all documents in this sequence
-            $docsBytes = '';
+            // Encode all documents in this sequence — collect into array to avoid O(n²) copies.
+            $docParts = [];
             foreach ($docs as $doc) {
-                $docsBytes .= BsonEncoder::encode($doc);
+                $docParts[] = BsonEncoder::encode($doc);
             }
+
+            $docsBytes = implode('', $docParts);
 
             // Section size = 4 (size field) + strlen(identifier) + 1 (null) + strlen(docsBytes)
             $sectionSize = 4 + strlen($identifier) + 1 + strlen($docsBytes);
