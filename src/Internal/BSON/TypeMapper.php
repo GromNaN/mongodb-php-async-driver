@@ -221,7 +221,7 @@ final class TypeMapper
             }
         }
 
-        if ($targetType === 'object' || $targetType === 'stdClass') {
+        if ($targetType === 'object' || $targetType === 'stdClass' || $targetType === 'stdclass') {
             return self::fieldsToStdClass($fields);
         }
 

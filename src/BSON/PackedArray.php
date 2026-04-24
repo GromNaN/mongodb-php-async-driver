@@ -146,13 +146,16 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
     final public function toPHP(?array $typeMap = null): array|object
     {
         $map = $typeMap ?? ['root' => 'array'];
+        // Default root to 'array' when the caller only provided fieldPaths (or other keys) but no 'root'
+        $map['root'] ??= 'array';
+
         // Resolve 'bson' root to PackedArray
-        if (($map['root'] ?? null) === 'bson') {
+        if ($map['root'] === 'bson') {
             $map['root'] = 'bsonArray';
         }
 
         // For array root, ignore degenerate BSON keys (reindex by insertion order)
-        $rootTarget = $map['root'] ?? 'array';
+        $rootTarget = $map['root'];
         $ignoreRoot = ($rootTarget === 'array' || $rootTarget === 'bsonArray');
 
         return BsonDecoder::decode(base64_decode($this->data), $map, ignoreRootKeys: $ignoreRoot);

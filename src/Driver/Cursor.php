@@ -298,7 +298,7 @@ final class Cursor implements CursorInterface
         }
 
         // Built-in type tokens are always valid.
-        if ($value === 'array' || $value === 'object' || $value === stdClass::class || $value === 'bson') {
+        if ($value === 'array' || $value === 'object' || $value === 'stdclass' || $value === stdClass::class || $value === 'bson') {
             return;
         }
 
