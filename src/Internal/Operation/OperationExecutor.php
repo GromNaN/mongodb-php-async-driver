@@ -379,6 +379,10 @@ final class OperationExecutor
                         $spec['collation'] = $opts['collation'];
                     }
 
+                    if (isset($opts['sort'])) {
+                        $spec['sort'] = $opts['sort'];
+                    }
+
                     return $spec;
                 }, $batchOps);
 

@@ -164,10 +164,6 @@ final class BulkWrite implements Countable
                     );
                 }
 
-                if (array_key_exists('sort', $options)) {
-                    throw new InvalidArgumentException("Invalid option 'sort'");
-                }
-
                 self::checkNullBytesInKeys($newObjArr);
                 self::checkEmptyKeys($newObjArr, 'invalid argument for replace: Element key cannot be an empty string');
                 self::checkUtf8($newObjArr, '');
