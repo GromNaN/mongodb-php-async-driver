@@ -14,6 +14,7 @@ use function array_values;
 use function count;
 use function ctype_digit;
 use function explode;
+use function filter_var;
 use function implode;
 use function in_array;
 use function sprintf;
@@ -25,6 +26,8 @@ use function strtolower;
 use function substr;
 use function trim;
 use function urldecode;
+
+use const FILTER_VALIDATE_INT;
 
 /**
  * Parses a MongoDB connection string URI.
@@ -515,17 +518,11 @@ final class ConnectionString
             );
         }
 
-        if (! ctype_digit($portStr) || $portStr === '') {
+        $port = filter_var($portStr, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 65535]]);
+
+        if ($port === false) {
             throw new InvalidArgumentException(
                 sprintf('Invalid port "%s" in URI host "%s".', $portStr, $context),
-            );
-        }
-
-        $port = (int) $portStr;
-
-        if ($port < 1 || $port > 65535) {
-            throw new InvalidArgumentException(
-                sprintf('Port %d is out of the valid range 1–65535 in URI.', $port),
             );
         }
 
