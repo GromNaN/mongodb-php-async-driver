@@ -43,6 +43,11 @@ final class ServerSelector
         // Special topology handling
         // ----------------------------------------------------------------
 
+        if ($topologyType === TopologyType::Unknown) {
+            // Unknown topology: discovery not yet complete — no server is suitable.
+            return [];
+        }
+
         if ($topologyType === TopologyType::Single) {
             // Single topology: return the sole available server regardless of RP.
             $available = self::filterAvailable($servers);
@@ -58,8 +63,10 @@ final class ServerSelector
         }
 
         if ($topologyType === TopologyType::Sharded) {
-            // Sharded: all available mongos servers.
-            return array_values(self::filterByType($servers, InternalServerDescription::TYPE_MONGOS));
+            // Sharded: mongos servers within the latency window.
+            $mongos = self::filterByType($servers, InternalServerDescription::TYPE_MONGOS);
+
+            return self::filterByLatency($mongos, $localThresholdMs);
         }
 
         // ----------------------------------------------------------------
@@ -224,7 +231,7 @@ final class ServerSelector
         }
 
         if ($minRtt === null) {
-            return $servers; // No RTT data: cannot filter, return all candidates.
+            return array_values($servers); // No RTT data: cannot filter, return all candidates.
         }
 
         $threshold = $minRtt + $localThresholdMs;
