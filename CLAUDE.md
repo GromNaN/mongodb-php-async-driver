@@ -68,6 +68,7 @@ These failures are expected and should not block commits:
 | **`Int64` comparison** (`$result->insertedCount == 0`) | PHP operator overloading limitation; use `(int)` cast or `==` with int literal |
 | **Change stream resume token iteration** | Cursor iteration edge case; known open issue |
 | **`killAllSessions` test isolation** | `UnifiedTestRunner::doSetUp()` calls `killAllSessions` before each test, which can invalidate pooled sessions from other tests running in the same suite |
+| **`logging-addSubscriber-004.phpt`** | Uses `mongodb.debug` INI — controls C extension trace output; not implemented in userland driver. Skipped via `tests/Phpt/skip_list.php`. |
 
 ## Commit discipline
 

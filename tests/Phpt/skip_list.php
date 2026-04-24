@@ -182,6 +182,13 @@ return [
         => 'Session::createFromManager() not yet implemented; requires client session support',
 
     // -------------------------------------------------------------------------
+    // Logging: mongodb.debug INI — C extension feature
+    // -------------------------------------------------------------------------
+
+    'logging/logging-addSubscriber-004.phpt'
+        => 'Uses mongodb.debug INI setting which controls C extension trace output; not implemented in userland driver',
+
+    // -------------------------------------------------------------------------
     // Manager: C extension internal debug output (PHONGO: DEBUG lines)
     // -------------------------------------------------------------------------
 

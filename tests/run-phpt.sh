@@ -16,6 +16,14 @@ foreach (array_keys(\$skip) as \$rel) {
 }
 ")
 
+# PHP_INI_SCAN_DIR: point to our committed overrides directory.
+# run-tests.php uses proc_open() which silently drops env vars with empty values,
+# so PHP_INI_SCAN_DIR="" would not propagate to child PHP processes.
+# Using a real directory path ensures the value is non-empty and gets passed,
+# and the ini file there enables OPcache and disables ext-mongodb.
+PHP_INI_SCAN_DIR_VALUE="$REPO_ROOT/tests/php-ini"
+mkdir -p /tmp/opcache-mongodb-driver-tests
+
 # Write filtered test list to a temp file
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
@@ -57,7 +65,7 @@ SKIPPED=$(printf '%s\n' "$SKIP_PATHS" | grep -c . || true)
 echo "Running $TOTAL phpt tests ($SKIPPED skipped)"
 
 TEST_PHP_EXECUTABLE=$(which php) \
-PHP_INI_SCAN_DIR="" php "$RUN_TESTS" \
+PHP_INI_SCAN_DIR="$PHP_INI_SCAN_DIR_VALUE" php "$RUN_TESTS" \
     -P \
     -q \
     -d "auto_prepend_file=$PREPEND_FILE" \

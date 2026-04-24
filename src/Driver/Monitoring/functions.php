@@ -10,9 +10,13 @@ declare(strict_types=1);
 
 namespace MongoDB\Driver\Monitoring;
 
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 
 use function function_exists;
+use function sprintf;
+use function str_contains;
+use function strstr;
 
 if (! function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
     function addSubscriber(Subscriber $subscriber): void
@@ -27,6 +31,24 @@ if (! function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
 
     function mongoc_log(int $level, string $domain, string $message): void
     {
+        if ($level < 0 || $level > 6) {
+            throw new InvalidArgumentException(
+                sprintf('Expected level to be >= 0 and <= 6, %d given', $level),
+            );
+        }
+
+        if (str_contains($domain, "\0")) {
+            throw new InvalidArgumentException(
+                sprintf('Domain cannot contain null bytes. Unexpected null byte after "%s".', strstr($domain, "\0", true)),
+            );
+        }
+
+        if (str_contains($message, "\0")) {
+            throw new InvalidArgumentException(
+                sprintf('Message cannot contain null bytes. Unexpected null byte after "%s".', strstr($message, "\0", true)),
+            );
+        }
+
         GlobalSubscriberRegistry::dispatch(
             [],
             LogSubscriber::class,
