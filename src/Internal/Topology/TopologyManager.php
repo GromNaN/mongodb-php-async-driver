@@ -29,6 +29,7 @@ use function array_values;
 use function count;
 use function implode;
 use function microtime;
+use function min;
 use function sprintf;
 
 /**
@@ -340,8 +341,14 @@ final class TopologyManager
     {
         $deadline = microtime(true) + $timeoutMs / 1_000.0;
 
+        // Poll with exponential back-off starting at 10 ms, capped at 500 ms.
+        // This lets us return immediately after the first hello from a local
+        // server instead of always waiting a full 500 ms.
+        $intervalSec = 0.010;
+
         while (microtime(true) < $deadline) {
-            delay(0.5); // wait 500 ms before re-checking
+            delay($intervalSec);
+            $intervalSec = min($intervalSec * 2, 0.5);
 
             $candidates = ServerSelector::select(
                 $this->servers,
