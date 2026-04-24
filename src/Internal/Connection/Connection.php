@@ -4,15 +4,20 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Connection;
 
+use Amp\Socket\Certificate;
+use Amp\Socket\ClientTlsContext;
+use Amp\Socket\ConnectContext;
 use Amp\Socket\Socket;
 use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Driver\Exception\ConnectionException;
+use MongoDB\Driver\Exception\LogicException;
 use MongoDB\Internal\Protocol\MessageHeader;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
 use MongoDB\Internal\Uri\UriOptions;
 
 use function Amp\Socket\connect;
+use function Amp\Socket\connectTls;
 use function is_array;
 use function min;
 use function sprintf;
@@ -65,21 +70,58 @@ final class Connection
      */
     public function connect(?UriOptions $options = null): void
     {
-        $this->state  = self::STATE_CONNECTING;
-        $uri          = 'tcp://' . $this->host . ':' . $this->port;
+        $this->state = self::STATE_CONNECTING;
 
-        // amphp/socket connect() suspends the fiber internally.
-        $this->socket = connect($uri);
+        $tlsEnabled = $options !== null && (
+            ($options->tls ?? false) ||
+            ($options->ssl ?? false) ||
+            isset($options->tlsCAFile) ||
+            isset($options->tlsCertificateKeyFile)
+        );
+
+        if ($tlsEnabled) {
+            // Build TLS context from URI options.
+            $tlsContext = new ClientTlsContext($this->host);
+
+            if (isset($options->tlsCAFile)) {
+                $tlsContext = $tlsContext->withCaFile($options->tlsCAFile);
+            }
+
+            if (isset($options->tlsCertificateKeyFile)) {
+                $tlsContext = $tlsContext->withCertificate(new Certificate($options->tlsCertificateKeyFile));
+            }
+
+            // Both tlsAllowInvalidCertificates and tlsAllowInvalidHostnames disable
+            // peer verification. amphp/socket ties verify_peer and verify_peer_name
+            // together so we cannot disable hostname checks independently.
+            if (
+                ($options->tlsAllowInvalidCertificates ?? false) ||
+                ($options->tlsAllowInvalidHostnames ?? false)
+            ) {
+                $tlsContext = $tlsContext->withoutPeerVerification();
+            }
+
+            // connectTls() establishes the TCP connection and performs the TLS
+            // handshake, suspending the fiber until both complete.
+            $this->socket = connectTls(
+                $this->host . ':' . $this->port,
+                (new ConnectContext())->withTlsContext($tlsContext),
+            );
+        } else {
+            // amphp/socket connect() suspends the fiber internally.
+            $this->socket = connect('tcp://' . $this->host . ':' . $this->port);
+        }
+
         $this->state  = self::STATE_CONNECTED;
 
         // Run server handshake (hello / isMaster).
         $this->runHello();
 
         // Authenticate if credentials were supplied.
-        if ($options !== null && isset($options->authMechanism)) {
+        if ($options?->authMechanism ?? null) {
             $this->state = self::STATE_AUTHENTICATING;
-            // Authentication is mechanism-specific and handled by a higher
-            // layer; here we simply advance the state.
+
+            throw new LogicException('Authentication is not yet supported by the async driver');
         }
 
         $this->state = self::STATE_READY;

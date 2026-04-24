@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Monitoring;
 
+use Closure;
 use MongoDB\Driver\Monitoring\Subscriber;
 use SplObjectStorage;
+use Throwable;
 
 /** @internal */
 final class GlobalSubscriberRegistry
@@ -21,6 +23,39 @@ final class GlobalSubscriberRegistry
     public static function remove(Subscriber $subscriber): void
     {
         self::$subscribers?->offsetUnset($subscriber);
+    }
+
+    /**
+     * @param class-string<TSubscriber> $subscriberClass
+     * @param callable(TSubscriber)     $callSubsciber
+     *
+     * @template TSubscriber = object
+     */
+    public static function dispatch(array $managerSubscribers, string $subscriberClass, Closure $callSubsciber): void
+    {
+        foreach ($managerSubscribers as $subscriber) {
+            if (! ($subscriber instanceof $subscriberClass)) {
+                continue;
+            }
+
+            try {
+                $callSubsciber($subscriber);
+            } catch (Throwable) {
+                // Subscribers must not interfere with operation execution.
+            }
+        }
+
+        foreach (self::$subscribers ?? [] as $subscriber) {
+            if (! ($subscriber instanceof $subscriberClass)) {
+                continue;
+            }
+
+            try {
+                $callSubsciber($subscriber);
+            } catch (Throwable) {
+                // Subscribers must not interfere with operation execution.
+            }
+        }
     }
 
     /** @return Subscriber[] */

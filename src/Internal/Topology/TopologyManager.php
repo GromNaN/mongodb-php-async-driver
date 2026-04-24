@@ -141,6 +141,7 @@ final class TopologyManager
                 heartbeatFrequencyMs:    $this->options->heartbeatFrequencyMS,
                 minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
                 onHeartbeat:             fn (string $method, object $event) => $this->fireSdamEvent($method, $event),
+                options:                 $this->options,
             );
 
             $this->monitors[$address] = $monitor;
@@ -315,6 +316,7 @@ final class TopologyManager
                 heartbeatFrequencyMs:    $this->options->heartbeatFrequencyMS,
                 minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
                 onHeartbeat:             fn (string $method, object $event) => $this->fireSdamEvent($method, $event),
+                options:                 $this->options,
             );
 
             $this->monitors[$addr] = $monitor;

@@ -30,6 +30,11 @@ manually edit a file, run `phpcbf` on it before committing to ensure the style i
 # Integration tests (MongoDB on localhost:27017)
 ./vendor/bin/phpunit --testdox --testsuite integration
 
+# TLS integration tests (requires a TLS-enabled MongoDB server)
+MONGODB_TLS_CA_FILE=/path/to/ca.pem \
+MONGODB_TLS_URI="mongodb://localhost:27017/?replicaSet=rs" \
+./vendor/bin/phpunit --testdox --testsuite integration --filter TlsConnection
+
 # ext-mongodb phpt compatibility tests (all)
 tests/run-phpt.sh
 

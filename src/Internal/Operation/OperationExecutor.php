@@ -1117,29 +1117,23 @@ final class OperationExecutor
         ?int $serverConnectionId = null,
         int $operationId = 0,
     ): void {
-        $event = CommandStartedEvent::create(
-            commandName:         $cmdName,
-            command:             $cmd,
-            databaseName:        $db,
-            requestId:           $requestId,
-            operationId:         $operationId ?: $requestId,
-            host:                $host,
-            port:                $port,
-            serverConnectionId:  $serverConnectionId,
+        $event = null;
+        GlobalSubscriberRegistry::dispatch(
+            $this->subscribers,
+            CommandSubscriber::class,
+            static fn (object $subscriber) => $subscriber->commandStarted(
+                $event ??= CommandStartedEvent::create(
+                    commandName:         $cmdName,
+                    command:             $cmd,
+                    databaseName:        $db,
+                    requestId:           $requestId,
+                    operationId:         $operationId ?: $requestId,
+                    host:                $host,
+                    port:                $port,
+                    serverConnectionId:  $serverConnectionId,
+                ),
+            ),
         );
-
-        $allSubscribers = array_merge($this->subscribers, GlobalSubscriberRegistry::getAll());
-        foreach ($allSubscribers as $subscriber) {
-            if (! ($subscriber instanceof CommandSubscriber)) {
-                continue;
-            }
-
-            try {
-                $subscriber->commandStarted($event);
-            } catch (Throwable) {
-                // Subscribers must not interfere with operation execution.
-            }
-        }
     }
 
     private function fireCommandSucceeded(

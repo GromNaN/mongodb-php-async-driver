@@ -13,6 +13,7 @@ use MongoDB\Driver\Monitoring\ServerHeartbeatSucceededEvent;
 use MongoDB\Internal\Connection\Connection;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
+use MongoDB\Internal\Uri\UriOptions;
 use RuntimeException;
 use Throwable;
 
@@ -54,6 +55,7 @@ final class ServerMonitor
         private int $heartbeatFrequencyMs = 10_000,
         private int $minHeartbeatFrequencyMs = 500,
         private ?Closure $onHeartbeat = null,
+        private ?UriOptions $options = null,
     ) {
     }
 
@@ -234,7 +236,7 @@ final class ServerMonitor
         }
 
         $conn = new Connection($this->host, $this->port);
-        $conn->connect();
+        $conn->connect($this->options);
 
         $this->connection = $conn;
 
