@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MongoDB\Tests\BSON;
 
 use MongoDB\BSON\Binary;
+use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
 use MongoDB\BSON\MaxKey;
 use MongoDB\BSON\MinKey;
@@ -14,7 +15,10 @@ use MongoDB\BSON\UTCDateTime;
 use MongoDB\Internal\BSON\BsonDecoder;
 use MongoDB\Internal\BSON\BsonEncoder;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 use stdClass;
+
+use function pack;
 
 use const PHP_INT_MAX;
 
@@ -215,6 +219,89 @@ class BsonEncoderDecoderTest extends TestCase
         $this->assertIsArray($result);
         $this->assertInstanceOf(stdClass::class, $result['sub']);
         $this->assertSame(1, $result['sub']->x);
+    }
+
+    // -------------------------------------------------------------------------
+    // Bounds-check: truncated BSON fields
+    // -------------------------------------------------------------------------
+
+    /**
+     * A BSON document where the string length prefix claims more bytes than the
+     * document actually contains must throw, not silently return truncated data.
+     */
+    public function testDecodeThrowsOnTruncatedString(): void
+    {
+        // {"s": <string claiming 200 bytes>}, total doc = 12 bytes
+        // offset layout: [4 doc-len][1 type=0x02][2 key "s\0"][4 str-len=200][1 doc-term]
+        $bson = pack('V', 12) . "\x02s\x00" . pack('V', 200) . "\x00";
+
+        $this->expectException(RuntimeException::class);
+        BsonDecoder::decode($bson, ['root' => 'array']);
+    }
+
+    /**
+     * A BSON document where the binary data length prefix claims more bytes
+     * than the document actually contains must throw.
+     */
+    public function testDecodeThrowsOnTruncatedBinary(): void
+    {
+        // {"b": <binary, subtype 0, claiming 200 bytes>}, total doc = 13 bytes
+        // offset layout: [4 doc-len][1 type=0x05][2 key "b\0"][4 bin-len=200][1 subtype=0][1 doc-term]
+        $bson = pack('V', 13) . "\x05b\x00" . pack('V', 200) . "\x00\x00";
+
+        $this->expectException(RuntimeException::class);
+        BsonDecoder::decode($bson, ['root' => 'array']);
+    }
+
+    /**
+     * A CodeWithScope field where there are fewer than 4 bytes remaining for
+     * the scope document length must throw when the field value is accessed.
+     *
+     * Layout (21 bytes):
+     *   [4 doc-len=21][1 type=0x0F][3 key "js\0"]
+     *   [4 cws-outer=12][4 code-len=4][4 code="var\0"]
+     *   [1 doc-term]   ← only 1 byte left, need 4 for scope length
+     */
+    public function testDecodeThrowsOnCodeWithScopeMissingScopeLength(): void
+    {
+        $bson = pack('V', 21)    // doc total
+            . "\x0Fjs\x00"       // type + key
+            . pack('V', 12)      // cws outer int32 (4 outer + 4 code-len + 4 code-bytes)
+            . pack('V', 4)       // code string length (4 = "var\0")
+            . "var\x00"          // code string
+            . "\x00";            // doc terminator
+
+        $doc = Document::fromBSON($bson);
+
+        $this->expectException(RuntimeException::class);
+        $doc->get('js');
+    }
+
+    /**
+     * A CodeWithScope field where the scope document length prefix claims more
+     * bytes than the document actually contains must throw.
+     *
+     * Layout (30 bytes):
+     *   [4 doc-len=30][1 type=0x0F][3 key "js\0"]
+     *   [4 cws-outer=21][4 code-len=4][4 code="var\0"]
+     *   [4 scope-len=100][5 scope-data (only 5 bytes, not 100)]
+     *   [1 doc-term]
+     */
+    public function testDecodeThrowsOnCodeWithScopeOversizedScope(): void
+    {
+        $bson = pack('V', 30)         // doc total
+            . "\x0Fjs\x00"            // type + key
+            . pack('V', 21)           // cws outer int32
+            . pack('V', 4)            // code string length
+            . "var\x00"               // code string
+            . pack('V', 100)          // scope length claiming 100 bytes
+            . "\x05\x00\x00\x00\x00" // only 5 bytes of scope data
+            . "\x00";                 // doc terminator
+
+        $doc = Document::fromBSON($bson);
+
+        $this->expectException(RuntimeException::class);
+        $doc->get('js');
     }
 
     // -------------------------------------------------------------------------

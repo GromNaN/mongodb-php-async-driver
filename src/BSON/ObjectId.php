@@ -16,6 +16,7 @@ use function preg_match;
 use function random_bytes;
 use function random_int;
 use function sprintf;
+use function strlen;
 use function strtolower;
 use function substr;
 use function time;
@@ -35,7 +36,7 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
         if ($id === null) {
             $this->oid = bin2hex(self::generate());
         } else {
-            if (! preg_match('/^[0-9a-fA-F]{24}$/', $id)) {
+            if (strlen($id) !== 24 || ! preg_match('/^[0-9a-fA-F]{24}$/', $id)) {
                 throw new InvalidArgumentException(
                     sprintf('Error parsing ObjectId string: %s', $id),
                 );
