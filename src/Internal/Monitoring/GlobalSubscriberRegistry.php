@@ -59,6 +59,11 @@ final class GlobalSubscriberRegistry
                 continue;
             }
 
+            // Skip if already notified via the manager subscriber list.
+            if (in_array($subscriber, $managerSubscribers, true)) {
+                continue;
+            }
+
             try {
                 $callSubsciber($subscriber);
             } catch (Throwable) {

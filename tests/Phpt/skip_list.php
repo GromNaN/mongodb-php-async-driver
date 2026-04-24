@@ -237,6 +237,13 @@ return [
         => 'C extension should throw TypeError for invalid $w types instead of throwing an InvalidArgumentException; tracked in PHPC-2704 (https://jira.mongodb.org/browse/PHPC-2704)',
 
     // -------------------------------------------------------------------------
+    // Manager: subscriber sharing across Managers via libmongoc client persistence
+    // -------------------------------------------------------------------------
+
+    'manager/manager-addSubscriber-002.phpt'
+        => 'Expects subscribers on Manager A to be notified when Manager B (same URI) executes commands; relies on libmongoc persistent-client sharing which is not available in userland',
+
+    // -------------------------------------------------------------------------
     // Manager: autoEncryption / client-side encryption — not implemented
     // -------------------------------------------------------------------------
 
