@@ -136,7 +136,7 @@ final class Server
         $writeConcern   = $options['writeConcern'] ?? null;
         $session        = $options['session'] ?? null;
 
-        return $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, $writeConcern);
+        return $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, $writeConcern, $this);
     }
 
     public function executeReadCommand(string $db, Command $command, ?array $options = null): CursorInterface
@@ -148,7 +148,7 @@ final class Server
         $readConcern    = $options['readConcern'] ?? null;
         $session        = $options['session'] ?? null;
 
-        return $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern);
+        return $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, null, $this);
     }
 
     public function executeWriteCommand(string $db, Command $command, ?array $options = null): CursorInterface
@@ -159,7 +159,7 @@ final class Server
         $writeConcern = $options['writeConcern'] ?? null;
         $session      = $options['session'] ?? null;
 
-        return $this->executor->executeCommand($db, $command, null, $session, null, $writeConcern);
+        return $this->executor->executeCommand($db, $command, null, $session, null, $writeConcern, $this);
     }
 
     public function executeReadWriteCommand(string $db, Command $command, ?array $options = null): CursorInterface
@@ -172,7 +172,7 @@ final class Server
         $writeConcern   = $options['writeConcern'] ?? null;
         $session        = $options['session'] ?? null;
 
-        return $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, $writeConcern);
+        return $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, $writeConcern, $this);
     }
 
     public function executeQuery(string $namespace, Query $query, ?array $options = null): CursorInterface
@@ -183,7 +183,7 @@ final class Server
         $readPreference = $this->type === self::TYPE_STANDALONE ? null : ($options['readPreference'] ?? null);
         $session        = $options['session'] ?? null;
 
-        return $this->executor->executeQuery($namespace, $query, $readPreference, $session);
+        return $this->executor->executeQuery($namespace, $query, $readPreference, $session, $this);
     }
 
     public function executeBulkWrite(string $namespace, BulkWrite $bulkWrite, ?array $options = null): WriteResult

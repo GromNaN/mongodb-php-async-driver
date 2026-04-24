@@ -153,6 +153,7 @@ final class OperationExecutor
         ?Session $session = null,
         ?ReadConcern $readConcern = null,
         ?WriteConcern $writeConcern = null,
+        ?Server $callingServer = null,
     ): CursorInterface {
         $this->ensureStarted();
 
@@ -180,7 +181,7 @@ final class OperationExecutor
 
         $maxAwaitTimeMS = (int) ($command->getOptions()['maxAwaitTimeMS'] ?? 0);
 
-        return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session);
+        return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer);
     }
 
     /**
@@ -191,6 +192,7 @@ final class OperationExecutor
         Query $query,
         ?ReadPreference $readPreference = null,
         ?Session $session = null,
+        ?Server $callingServer = null,
     ): CursorInterface {
         $this->ensureStarted();
 
@@ -233,7 +235,7 @@ final class OperationExecutor
 
         $maxAwaitTimeMS = isset($opts['maxAwaitTimeMS']) ? (int) $opts['maxAwaitTimeMS'] : 0;
 
-        return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session);
+        return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer);
     }
 
     /**
@@ -1026,6 +1028,7 @@ final class OperationExecutor
         int $maxAwaitTimeMS = 0,
         ?Command $debugCommand = null,
         ?Session $session = null,
+        ?Server $callingServer = null,
     ): CursorInterface {
         $body = $this->doSendCommand($pool, $db, $cmdName, $prepared, $server);
 
@@ -1039,7 +1042,7 @@ final class OperationExecutor
             : (int) ((is_array($cursorOpt) ? ($cursorOpt['batchSize'] ?? 0) : 0));
         $comment = $prepared['comment'] ?? null;
 
-        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand, $session, $batchSize, $comment);
+        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand, $session, $batchSize, $comment, $callingServer);
     }
 
     /**
@@ -1089,8 +1092,9 @@ final class OperationExecutor
         ?Session $session = null,
         int $batchSize = 0,
         mixed $comment = null,
+        ?Server $callingServer = null,
     ): CursorInterface {
-        $publicServer = $this->buildPublicServer($server);
+        $publicServer = $callingServer ?? $this->buildPublicServer($server);
 
         // Commands that return a cursor sub-document (find, aggregate, …).
         $rawCursor = $body['cursor'] ?? null;
