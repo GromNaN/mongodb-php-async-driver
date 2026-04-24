@@ -200,6 +200,15 @@ final class Cursor implements CursorInterface
         }
 
         $this->position = 0;
+
+        // When the server returns an empty first batch (e.g. batchSize:0 on aggregate),
+        // there are documents to retrieve but they live on subsequent getMore pages.
+        // Fetch the first page now so that valid()/current() work correctly.
+        if ($this->items !== [] || $this->exhausted || $this->getMoreFn === null || $this->cursorId === 0) {
+            return;
+        }
+
+        $this->fetchMore();
     }
 
     public function setTypeMap(array $typemap): void

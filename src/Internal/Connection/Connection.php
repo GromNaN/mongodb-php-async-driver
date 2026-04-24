@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Connection;
 
+use Amp\CancelledException;
 use Amp\Socket\Certificate;
 use Amp\Socket\ClientTlsContext;
 use Amp\Socket\ConnectContext;
 use Amp\Socket\Socket;
+use Amp\TimeoutCancellation;
 use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Driver\Exception\ConnectionException;
+use MongoDB\Driver\Exception\ConnectionTimeoutException;
 use MongoDB\Driver\Exception\LogicException;
 use MongoDB\Internal\Protocol\MessageHeader;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
@@ -47,6 +50,8 @@ final class Connection
     private int $minWireVersion = 0;
     private ?string $serviceId     = null;
     private int $lastUsedAt;
+    /** Socket read/write timeout in seconds (0 = no timeout). */
+    private float $socketTimeoutSecs = 0.0;
 
     /**
      * Create a new (not yet connected) Connection.
@@ -110,6 +115,10 @@ final class Connection
         } else {
             // amphp/socket connect() suspends the fiber internally.
             $this->socket = connect('tcp://' . $this->host . ':' . $this->port);
+        }
+
+        if (isset($options->socketTimeoutMS) && $options->socketTimeoutMS > 0) {
+            $this->socketTimeoutSecs = $options->socketTimeoutMS / 1000.0;
         }
 
         $this->state  = self::STATE_CONNECTED;
@@ -310,11 +319,19 @@ final class Connection
      */
     private function readExactly(int $length): string
     {
-        $buffer    = '';
-        $remaining = $length;
+        $buffer      = '';
+        $remaining   = $length;
+        $cancellation = $this->socketTimeoutSecs > 0.0
+            ? new TimeoutCancellation($this->socketTimeoutSecs)
+            : null;
 
         while ($remaining > 0) {
-            $chunk = $this->socket->read(limit: min($remaining, 65536));
+            try {
+                $chunk = $this->socket->read(limit: min($remaining, 65536), cancellation: $cancellation);
+            } catch (CancelledException $e) {
+                throw new ConnectionTimeoutException('socket error or timeout', 0, $e);
+            }
+
             if ($chunk === null) {
                 throw new ConnectionException(
                     sprintf(

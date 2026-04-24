@@ -18,6 +18,9 @@ use MongoDB\Driver\CursorInterface;
 use MongoDB\Driver\Exception\BulkWriteCommandException;
 use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Driver\Exception\CommandException;
+use MongoDB\Driver\Exception\ConnectionException;
+use MongoDB\Driver\Exception\ConnectionTimeoutException;
+use MongoDB\Driver\Exception\ExecutionTimeoutException;
 use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
 use MongoDB\Driver\Exception\ServerException;
@@ -942,6 +945,10 @@ final class OperationExecutor
 
                 $pool->release($conn);
 
+                if ($code === 50) {
+                    throw new ExecutionTimeoutException($errmsg, $code, (object) $body);
+                }
+
                 throw new CommandException($errmsg, $code, (object) $body);
             }
 
@@ -971,6 +978,28 @@ final class OperationExecutor
             return $body;
         } catch (CommandException $e) {
             throw $e;
+        } catch (ConnectionTimeoutException $e) {
+            $durationUs = intdiv(hrtime(true) - $startNs, 1_000);
+            $wrapped    = new ConnectionTimeoutException(
+                sprintf('Failed to send "%s" command with database "%s": %s', $cmdName, $db, $e->getMessage()),
+                $e->getCode(),
+                $e,
+            );
+            $this->fireCommandFailed($cmdName, $wrapped, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
+            $pool->release($conn);
+
+            throw $wrapped;
+        } catch (ConnectionException $e) {
+            $durationUs = intdiv(hrtime(true) - $startNs, 1_000);
+            $wrapped    = new ConnectionException(
+                sprintf('Failed to send "%s" command with database "%s": %s', $cmdName, $db, $e->getMessage()),
+                $e->getCode(),
+                $e,
+            );
+            $this->fireCommandFailed($cmdName, $wrapped, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
+            $pool->release($conn);
+
+            throw $wrapped;
         } catch (Throwable $e) {
             $durationUs = intdiv(hrtime(true) - $startNs, 1_000);
             $this->fireCommandFailed($cmdName, $e, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
