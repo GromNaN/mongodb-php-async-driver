@@ -12,9 +12,6 @@ use Throwable;
 
 use function Amp\async;
 use function Amp\delay;
-use function array_search;
-use function array_shift;
-use function array_splice;
 use function assert;
 use function max;
 use function sprintf;
@@ -35,8 +32,8 @@ final class ConnectionPool
     /** Number of connections currently checked out by callers. */
     private int $inUse = 0;
 
-    /** @var list<DeferredFuture<Connection>> */
-    private array $waiters = [];
+    /** @var SplQueue<DeferredFuture<Connection>> */
+    private SplQueue $waiters;
 
     /** Whether the pool has been permanently closed. */
     private bool $closed = false;
@@ -50,6 +47,7 @@ final class ConnectionPool
         private ?UriOptions $options = null,
     ) {
         $this->idle    = new SplQueue();
+        $this->waiters = new SplQueue();
     }
 
     // -------------------------------------------------------------------------
@@ -92,21 +90,19 @@ final class ConnectionPool
 
         // 3. Pool is at capacity – enqueue the caller as a waiter.
         $deferred = new DeferredFuture();
-        $this->waiters[] = $deferred;
+        $this->waiters->enqueue($deferred);
 
         if ($this->waitQueueTimeoutMS > 0) {
-            // Schedule a timeout that rejects the waiter if it is still pending.
+            // Schedule a timeout that rejects the waiter if still pending.
+            // Lazy deletion: the deferred stays in the queue but is skipped when
+            // dequeued in release() because isComplete() will return true.
             $timeoutMs = $this->waitQueueTimeoutMS;
-            async(function () use ($deferred, $timeoutMs): void {
+            async(static function () use ($deferred, $timeoutMs): void {
                 delay($timeoutMs / 1000.0);
-                // If this deferred is still in the waiters list it has not been
-                // resolved yet; remove it and throw a timeout.
-                $key = array_search($deferred, $this->waiters, true);
-                if ($key === false) {
-                    return;
+                if ($deferred->isComplete()) {
+                    return; // Already resolved by release() — nothing to do.
                 }
 
-                array_splice($this->waiters, (int) $key, 1);
                 $deferred->error(
                     new ConnectionException(
                         sprintf(
@@ -145,10 +141,15 @@ final class ConnectionPool
 
         $this->inUse = max(0, $this->inUse - 1);
 
-        // Hand off to the oldest waiter, if any.
-        if ($this->waiters !== []) {
+        // Hand off to the oldest pending waiter, skipping any that already
+        // timed out (lazy deletion — they stay in the queue until dequeued here).
+        while (! $this->waiters->isEmpty()) {
             /** @var DeferredFuture<Connection> $deferred */
-            $deferred      = array_shift($this->waiters);
+            $deferred = $this->waiters->dequeue();
+            if ($deferred->isComplete()) {
+                continue; // Timed out — discard and try the next waiter.
+            }
+
             $this->inUse++;
             $deferred->complete($conn);
 
@@ -174,10 +175,14 @@ final class ConnectionPool
             $conn->close();
         }
 
-        // Reject all waiters.
-        $waiters       = $this->waiters;
-        $this->waiters = [];
-        foreach ($waiters as $deferred) {
+        // Reject all pending waiters.
+        while (! $this->waiters->isEmpty()) {
+            /** @var DeferredFuture<Connection> $deferred */
+            $deferred = $this->waiters->dequeue();
+            if ($deferred->isComplete()) {
+                continue;
+            }
+
             $deferred->error(new ConnectionException('Connection pool has been closed'));
         }
     }
