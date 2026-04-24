@@ -33,6 +33,7 @@ use MongoDB\Driver\Query;
 use MongoDB\Driver\ReadConcern;
 use MongoDB\Driver\ReadPreference;
 use MongoDB\Driver\Server;
+use MongoDB\Driver\ServerApi;
 use MongoDB\Driver\ServerDescription;
 use MongoDB\Driver\Session;
 use MongoDB\Driver\WriteConcern;
@@ -102,6 +103,7 @@ final class OperationExecutor
         private UriOptions $options,
         private SessionPool $sessionPool,
         private array $subscribers = [],
+        private ?ServerApi $serverApi = null,
     ) {
     }
 
@@ -177,6 +179,7 @@ final class OperationExecutor
             readConcern:    $readConcern,
             writeConcern:   $writeConcern,
             session:        $session,
+            serverApi:      $this->serverApi,
         );
 
         $maxAwaitTimeMS = (int) ($command->getOptions()['maxAwaitTimeMS'] ?? 0);
@@ -231,6 +234,7 @@ final class OperationExecutor
             db:             $db,
             readPreference: $readPreference,
             session:        $session,
+            serverApi:      $this->serverApi,
         );
 
         $maxAwaitTimeMS = isset($opts['maxAwaitTimeMS']) ? (int) $opts['maxAwaitTimeMS'] : 0;
@@ -328,6 +332,7 @@ final class OperationExecutor
                     db:           $db,
                     writeConcern: $writeConcern,
                     session:      $session,
+                    serverApi:    $this->serverApi,
                 );
 
                 try {
@@ -415,6 +420,7 @@ final class OperationExecutor
                     db:           $db,
                     writeConcern: $writeConcern,
                     session:      $session,
+                    serverApi:    $this->serverApi,
                 );
 
                 try {
@@ -492,6 +498,7 @@ final class OperationExecutor
                     db:           $db,
                     writeConcern: $writeConcern,
                     session:      $session,
+                    serverApi:    $this->serverApi,
                 );
 
                 try {
@@ -730,6 +737,7 @@ final class OperationExecutor
                 db:           'admin',
                 writeConcern: $writeConcern,
                 session:      $session,
+                serverApi:    $this->serverApi,
             );
 
             // Send this batch using 'ops' as a kind-1 OP_MSG document sequence so that
@@ -1123,7 +1131,7 @@ final class OperationExecutor
                     $getMoreCmd['maxTimeMS'] = $maxAwaitTimeMS;
                 }
 
-                $prepared  = CommandHelper::prepareCommand(command: $getMoreCmd, db: $db, session: $session);
+                $prepared  = CommandHelper::prepareCommand(command: $getMoreCmd, db: $db, session: $session, serverApi: $this->serverApi);
                 $body      = $this->doSendCommand($pool, $db, 'getMore', $prepared, $server);
                 $cursorDoc = (array) ($body['cursor'] ?? []);
                 $cursorIdRaw = $cursorDoc['id'] ?? 0;

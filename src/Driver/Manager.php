@@ -133,6 +133,7 @@ final class Manager
             $this->uriOptions,
             $this->sessionPool,
             $this->subscribers,
+            $driverOptions['serverApi'] ?? null,
         );
 
         // Topology start is deferred until first operation so that subscribers
