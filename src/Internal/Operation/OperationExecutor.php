@@ -560,12 +560,14 @@ final class OperationExecutor
         );
 
         if ($errorReplies !== []) {
-            $reply = (array) $errorReplies[0];
+            $reply   = (array) $errorReplies[0];
+            $replyObj = is_object($errorReplies[0]) ? $errorReplies[0] : (object) $reply;
 
             throw new BulkWriteException(
-                message:     (string) ($reply['errmsg'] ?? ''),
-                code:        (int) ($reply['code'] ?? 0),
-                writeResult: $writeResult,
+                message:        (string) ($reply['errmsg'] ?? ''),
+                code:           (int) ($reply['code'] ?? 0),
+                resultDocument: $replyObj,
+                writeResult:    $writeResult,
             );
         }
 

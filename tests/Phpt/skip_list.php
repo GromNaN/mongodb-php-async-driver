@@ -244,6 +244,20 @@ return [
         => 'Expects subscribers on Manager A to be notified when Manager B (same URI) executes commands; relies on libmongoc persistent-client sharing which is not available in userland',
 
     // -------------------------------------------------------------------------
+    // Logging: combined CommandSubscriber+LogSubscriber — PHONGO debug messages
+    // -------------------------------------------------------------------------
+
+    'logging/logging-addSubscriber-005.phpt'
+        => 'Test expects PHONGO debug log messages (e.g. "PHONGO: Connection string") emitted by libmongoc during Manager construction; userland driver does not produce these logs',
+
+    // -------------------------------------------------------------------------
+    // Int64 comparison with integer using != operator (PHP 8.5 notice)
+    // -------------------------------------------------------------------------
+
+    'functional/cursorid-001.phpt'
+        => 'Test uses $cursorId != 0 (Int64 vs int) which emits a Notice in PHP 8.5; C extension handles this via custom compare handler (operator overloading not available in userland)',
+
+    // -------------------------------------------------------------------------
     // Manager: autoEncryption / client-side encryption — not implemented
     // -------------------------------------------------------------------------
 
