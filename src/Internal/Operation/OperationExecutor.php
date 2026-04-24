@@ -50,7 +50,6 @@ use stdClass;
 use Throwable;
 
 use function array_map;
-use function array_merge;
 use function array_search;
 use function array_values;
 use function assert;
@@ -1121,7 +1120,7 @@ final class OperationExecutor
         GlobalSubscriberRegistry::dispatch(
             $this->subscribers,
             CommandSubscriber::class,
-            static fn (object $subscriber) => $subscriber->commandStarted(
+            static fn (CommandSubscriber $subscriber) => $subscriber->commandStarted(
                 $event ??= CommandStartedEvent::create(
                     commandName:         $cmdName,
                     command:             $cmd,
@@ -1147,30 +1146,24 @@ final class OperationExecutor
         ?int $serverConnectionId = null,
         int $operationId = 0,
     ): void {
-        $event = CommandSucceededEvent::create(
-            commandName:         $cmdName,
-            reply:               $reply,
-            databaseName:        $db,
-            requestId:           $requestId,
-            operationId:         $operationId ?: $requestId,
-            durationMicros:      $durationMicros,
-            host:                $host,
-            port:                $port,
-            serverConnectionId:  $serverConnectionId,
+        $event = null;
+        GlobalSubscriberRegistry::dispatch(
+            $this->subscribers,
+            CommandSubscriber::class,
+            static fn (CommandSubscriber $subscriber) => $subscriber->commandSucceeded(
+                $event ??= CommandSucceededEvent::create(
+                    commandName:         $cmdName,
+                    reply:               $reply,
+                    databaseName:        $db,
+                    requestId:           $requestId,
+                    operationId:         $operationId ?: $requestId,
+                    durationMicros:      $durationMicros,
+                    host:                $host,
+                    port:                $port,
+                    serverConnectionId:  $serverConnectionId,
+                ),
+            ),
         );
-
-        $allSubscribers = array_merge($this->subscribers, GlobalSubscriberRegistry::getAll());
-        foreach ($allSubscribers as $subscriber) {
-            if (! ($subscriber instanceof CommandSubscriber)) {
-                continue;
-            }
-
-            try {
-                $subscriber->commandSucceeded($event);
-            } catch (Throwable) {
-                // Subscribers must not interfere with operation execution.
-            }
-        }
     }
 
     private function fireCommandFailed(
@@ -1186,31 +1179,25 @@ final class OperationExecutor
         int $operationId = 0,
     ): void {
         $exception = $e instanceof Exception ? $e : new RuntimeException($e->getMessage(), $e->getCode(), $e);
-        $event     = CommandFailedEvent::create(
-            commandName:         $cmdName,
-            databaseName:        $db,
-            error:               $exception,
-            requestId:           $requestId,
-            operationId:         $operationId ?: $requestId,
-            durationMicros:      $durationMicros,
-            host:                $host,
-            port:                $port,
-            serverConnectionId:  $serverConnectionId,
-            reply:               $reply,
+        $event     = null;
+        GlobalSubscriberRegistry::dispatch(
+            $this->subscribers,
+            CommandSubscriber::class,
+            static fn (CommandSubscriber $subscriber) => $subscriber->commandFailed(
+                $event ??= CommandFailedEvent::create(
+                    commandName:         $cmdName,
+                    databaseName:        $db,
+                    error:               $exception,
+                    requestId:           $requestId,
+                    operationId:         $operationId ?: $requestId,
+                    durationMicros:      $durationMicros,
+                    host:                $host,
+                    port:                $port,
+                    serverConnectionId:  $serverConnectionId,
+                    reply:               $reply,
+                ),
+            ),
         );
-
-        $allSubscribers = array_merge($this->subscribers, GlobalSubscriberRegistry::getAll());
-        foreach ($allSubscribers as $subscriber) {
-            if (! ($subscriber instanceof CommandSubscriber)) {
-                continue;
-            }
-
-            try {
-                $subscriber->commandFailed($event);
-            } catch (Throwable) {
-                // Subscribers must not interfere with operation execution.
-            }
-        }
     }
 
     // -------------------------------------------------------------------------

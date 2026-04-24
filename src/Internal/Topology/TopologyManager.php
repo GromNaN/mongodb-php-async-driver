@@ -19,18 +19,15 @@ use MongoDB\Driver\ReadPreference;
 use MongoDB\Driver\ServerDescription;
 use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Internal\Uri\UriOptions;
-use Throwable;
 
 use function Amp\delay;
 use function array_filter;
 use function array_keys;
 use function array_map;
-use function array_merge;
 use function array_rand;
 use function array_values;
 use function count;
 use function implode;
-use function method_exists;
 use function microtime;
 use function sprintf;
 
@@ -417,17 +414,10 @@ final class TopologyManager
      */
     private function fireSdamEvent(string $method, object $event): void
     {
-        $allSubscribers = array_merge($this->subscribers, GlobalSubscriberRegistry::getAll());
-        foreach ($allSubscribers as $subscriber) {
-            if (! ($subscriber instanceof SDAMSubscriber) || ! method_exists($subscriber, $method)) {
-                continue;
-            }
-
-            try {
-                $subscriber->{$method}($event);
-            } catch (Throwable) {
-                // Subscribers must not interfere with topology management.
-            }
-        }
+        GlobalSubscriberRegistry::dispatch(
+            $this->subscribers,
+            SDAMSubscriber::class,
+            static fn (object $subscriber) => $subscriber->{$method}($event),
+        );
     }
 }

@@ -6,23 +6,32 @@ namespace MongoDB\Internal\Monitoring;
 
 use Closure;
 use MongoDB\Driver\Monitoring\Subscriber;
-use SplObjectStorage;
 use Throwable;
+
+use function array_filter;
+use function array_values;
+use function in_array;
 
 /** @internal */
 final class GlobalSubscriberRegistry
 {
-    /** @var SplObjectStorage<Subscriber, null> */
-    private static ?SplObjectStorage $subscribers = null;
+    /** @var Subscriber[] */
+    private static array $subscribers = [];
 
     public static function add(Subscriber $subscriber): void
     {
-        (self::$subscribers ??= new SplObjectStorage())->offsetSet($subscriber);
+        if (in_array($subscriber, self::$subscribers, true)) {
+            return;
+        }
+
+        self::$subscribers[] = $subscriber;
     }
 
     public static function remove(Subscriber $subscriber): void
     {
-        self::$subscribers?->offsetUnset($subscriber);
+        self::$subscribers = array_values(
+            array_filter(self::$subscribers, static fn ($s) => $s !== $subscriber),
+        );
     }
 
     /**
@@ -34,7 +43,7 @@ final class GlobalSubscriberRegistry
     public static function dispatch(array $managerSubscribers, string $subscriberClass, Closure $callSubsciber): void
     {
         foreach ($managerSubscribers as $subscriber) {
-            if (! ($subscriber instanceof $subscriberClass)) {
+            if (! $subscriber instanceof $subscriberClass) {
                 continue;
             }
 
@@ -45,8 +54,8 @@ final class GlobalSubscriberRegistry
             }
         }
 
-        foreach (self::$subscribers ?? [] as $subscriber) {
-            if (! ($subscriber instanceof $subscriberClass)) {
+        foreach (self::$subscribers as $subscriber) {
+            if (! $subscriber instanceof $subscriberClass) {
                 continue;
             }
 
@@ -56,16 +65,5 @@ final class GlobalSubscriberRegistry
                 // Subscribers must not interfere with operation execution.
             }
         }
-    }
-
-    /** @return Subscriber[] */
-    public static function getAll(): array
-    {
-        $result = [];
-        foreach (self::$subscribers ?? [] as $subscriber) {
-            $result[] = $subscriber;
-        }
-
-        return $result;
     }
 }

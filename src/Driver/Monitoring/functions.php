@@ -27,12 +27,10 @@ if (! function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
 
     function mongoc_log(int $level, string $domain, string $message): void
     {
-        foreach (GlobalSubscriberRegistry::getAll() as $subscriber) {
-            if (! ($subscriber instanceof LogSubscriber)) {
-                continue;
-            }
-
-            $subscriber->log($level, $domain, $message);
-        }
+        GlobalSubscriberRegistry::dispatch(
+            [],
+            LogSubscriber::class,
+            static fn (LogSubscriber $subscriber) => $subscriber->log($level, $domain, $message),
+        );
     }
 }

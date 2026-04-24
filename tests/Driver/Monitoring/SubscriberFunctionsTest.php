@@ -19,7 +19,7 @@ class SubscriberFunctionsTest extends TestCase
 
     protected function setUp(): void
     {
-        new ReflectionProperty(GlobalSubscriberRegistry::class, 'subscribers')->setValue(null, null);
+        new ReflectionProperty(GlobalSubscriberRegistry::class, 'subscribers')->setValue(null, []);
 
         $this->subscriberA = $this->createStub(Subscriber::class);
         $this->subscriberB = $this->createStub(Subscriber::class);
@@ -29,7 +29,7 @@ class SubscriberFunctionsTest extends TestCase
     {
         addSubscriber($this->subscriberA);
 
-        $this->assertContains($this->subscriberA, GlobalSubscriberRegistry::getAll());
+        $this->assertContains($this->subscriberA, $this->collectDispatched());
     }
 
     public function testAddSubscriberIsIdempotent(): void
@@ -37,7 +37,7 @@ class SubscriberFunctionsTest extends TestCase
         addSubscriber($this->subscriberA);
         addSubscriber($this->subscriberA);
 
-        $this->assertCount(1, GlobalSubscriberRegistry::getAll());
+        $this->assertCount(1, $this->collectDispatched());
     }
 
     public function testAddMultipleSubscribers(): void
@@ -45,7 +45,7 @@ class SubscriberFunctionsTest extends TestCase
         addSubscriber($this->subscriberA);
         addSubscriber($this->subscriberB);
 
-        $all = GlobalSubscriberRegistry::getAll();
+        $all = $this->collectDispatched();
         $this->assertContains($this->subscriberA, $all);
         $this->assertContains($this->subscriberB, $all);
         $this->assertCount(2, $all);
@@ -56,7 +56,7 @@ class SubscriberFunctionsTest extends TestCase
         addSubscriber($this->subscriberA);
         removeSubscriber($this->subscriberA);
 
-        $this->assertNotContains($this->subscriberA, GlobalSubscriberRegistry::getAll());
+        $this->assertNotContains($this->subscriberA, $this->collectDispatched());
     }
 
     public function testRemoveSubscriberIsIdempotent(): void
@@ -65,7 +65,7 @@ class SubscriberFunctionsTest extends TestCase
         removeSubscriber($this->subscriberA);
         removeSubscriber($this->subscriberA); // should not throw
 
-        $this->assertEmpty(GlobalSubscriberRegistry::getAll());
+        $this->assertEmpty($this->collectDispatched());
     }
 
     public function testRemoveDoesNotAffectOtherSubscribers(): void
@@ -74,7 +74,7 @@ class SubscriberFunctionsTest extends TestCase
         addSubscriber($this->subscriberB);
         removeSubscriber($this->subscriberA);
 
-        $all = GlobalSubscriberRegistry::getAll();
+        $all = $this->collectDispatched();
         $this->assertNotContains($this->subscriberA, $all);
         $this->assertContains($this->subscriberB, $all);
     }
@@ -83,6 +83,17 @@ class SubscriberFunctionsTest extends TestCase
     {
         removeSubscriber($this->subscriberA); // never added
 
-        $this->assertEmpty(GlobalSubscriberRegistry::getAll());
+        $this->assertEmpty($this->collectDispatched());
+    }
+
+    /** @return Subscriber[] */
+    private function collectDispatched(): array
+    {
+        $collected = [];
+        GlobalSubscriberRegistry::dispatch([], Subscriber::class, static function (Subscriber $s) use (&$collected): void {
+            $collected[] = $s;
+        });
+
+        return $collected;
     }
 }
