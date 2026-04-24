@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace MongoDB\Driver;
 
 use MongoDB\BSON\Document;
+use MongoDB\Driver\Exception\LogicException;
+
+use function sprintf;
 
 final class BulkWriteCommandResult
 {
@@ -50,26 +53,36 @@ final class BulkWriteCommandResult
 
     public function getInsertedCount(): int
     {
+        $this->assertAcknowledged(__FUNCTION__);
+
         return $this->insertedCount;
     }
 
     public function getMatchedCount(): int
     {
+        $this->assertAcknowledged(__FUNCTION__);
+
         return $this->matchedCount;
     }
 
     public function getModifiedCount(): int
     {
+        $this->assertAcknowledged(__FUNCTION__);
+
         return $this->modifiedCount;
     }
 
     public function getUpsertedCount(): int
     {
+        $this->assertAcknowledged(__FUNCTION__);
+
         return $this->upsertedCount;
     }
 
     public function getDeletedCount(): int
     {
+        $this->assertAcknowledged(__FUNCTION__);
+
         return $this->deletedCount;
     }
 
@@ -83,6 +96,8 @@ final class BulkWriteCommandResult
      */
     public function getInsertResults(): ?Document
     {
+        $this->assertAcknowledged(__FUNCTION__);
+
         return $this->insertResults;
     }
 
@@ -91,6 +106,8 @@ final class BulkWriteCommandResult
      */
     public function getUpdateResults(): ?Document
     {
+        $this->assertAcknowledged(__FUNCTION__);
+
         return $this->updateResults;
     }
 
@@ -99,6 +116,35 @@ final class BulkWriteCommandResult
      */
     public function getDeleteResults(): ?Document
     {
+        $this->assertAcknowledged(__FUNCTION__);
+
         return $this->deleteResults;
+    }
+
+    private function assertAcknowledged(string $method): void
+    {
+        if (! $this->acknowledged) {
+            throw new LogicException(
+                sprintf(
+                    'MongoDB\Driver\BulkWriteCommandResult::%s() should not be called for an unacknowledged write result',
+                    $method,
+                ),
+            );
+        }
+    }
+
+    public function __debugInfo(): array
+    {
+        return [
+            'isAcknowledged' => $this->acknowledged,
+            'insertedCount'  => $this->insertedCount,
+            'matchedCount'   => $this->matchedCount,
+            'modifiedCount'  => $this->modifiedCount,
+            'upsertedCount'  => $this->upsertedCount,
+            'deletedCount'   => $this->deletedCount,
+            'insertResults'  => $this->insertResults,
+            'updateResults'  => $this->updateResults,
+            'deleteResults'  => $this->deleteResults,
+        ];
     }
 }

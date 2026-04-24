@@ -35,8 +35,8 @@ use function substr;
  * Supported type strings:
  *   'array'        - PHP array
  *   'object'       - stdClass
- *   'bsonDocument' - MongoDB\BSON\Document
- *   'bsonArray'    - MongoDB\BSON\PackedArray
+ *   'bson'(object) - MongoDB\BSON\Document
+ *   'bson'(array)  - MongoDB\BSON\PackedArray
  *   <class-name>   - user class (bsonUnserialize called if implements Unserializable)
  *
  * @internal
@@ -64,10 +64,15 @@ final class TypeMapper
             $targetType = $context === 'array' ? 'bsonArray' : 'bsonDocument';
         }
 
+        // Persistable reconstruction is disabled only when the typeMap EXPLICITLY specifies
+        // 'object' (or 'array') for this context level. When the key is absent (default), Persistable
+        // reconstruction is enabled — matching ext-mongodb behaviour.
+        $noPersistable = isset($typeMap[$context]) && ($typeMap[$context] === 'object' || $typeMap[$context] === 'array');
+
         // Recursively apply typeMap to children before converting the container
         $value = self::applyToChildren($value, $typeMap);
 
-        return self::convertToType($value, $targetType);
+        return self::convertToType($value, $targetType, $noPersistable);
     }
 
     // -------------------------------------------------------------------------
@@ -182,8 +187,12 @@ final class TypeMapper
 
     /**
      * Convert $value to the target type.
+     *
+     * @param bool $noPersistable When true, __pclass Persistable reconstruction is suppressed.
+     *                            This is set when the typeMap EXPLICITLY specifies 'object' or
+     *                            'array' for the current context level.
      */
-    private static function convertToType(array|object $value, string $targetType): array|object
+    private static function convertToType(array|object $value, string $targetType, bool $noPersistable = false): array|object
     {
         // Normalise to array for manipulation
         $fields = is_array($value) ? $value : (array) $value;
@@ -192,24 +201,11 @@ final class TypeMapper
             return $fields;
         }
 
-        if ($targetType === 'object' || $targetType === 'stdClass') {
-            return self::fieldsToStdClass($fields);
-        }
-
-        if ($targetType === 'bsonDocument') {
-            return Document::fromPHP($fields);
-        }
-
-        if ($targetType === 'bsonArray') {
-            return PackedArray::fromPHP(array_values($fields));
-        }
-
-        // For explicit class targets: check __pclass Persistable first.
-        // A document with __pclass pointing to a Persistable class is deserialized
-        // into that class regardless of the typeMap target class, matching ext-mongodb behavior.
-        // (Exception: when targetType is 'object'/stdClass above, Persistable is suppressed.)
+        // Check __pclass Persistable reconstruction before applying target type.
+        // This happens unless the typeMap explicitly disabled Persistable for this level.
         if (
-            isset($fields['__pclass'])
+            ! $noPersistable
+            && isset($fields['__pclass'])
             && $fields['__pclass'] instanceof Binary
             && $fields['__pclass']->getType() === Binary::TYPE_USER_DEFINED
         ) {
@@ -223,6 +219,18 @@ final class TypeMapper
                     return $obj;
                 }
             }
+        }
+
+        if ($targetType === 'object' || $targetType === 'stdClass') {
+            return self::fieldsToStdClass($fields);
+        }
+
+        if ($targetType === 'bsonDocument') {
+            return Document::fromPHP($fields);
+        }
+
+        if ($targetType === 'bsonArray') {
+            return PackedArray::fromPHP(array_values($fields));
         }
 
         return self::instantiateClass($targetType, $fields);

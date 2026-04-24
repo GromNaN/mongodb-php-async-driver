@@ -29,6 +29,7 @@ final class Server
     private array $info;
     private array $tags;
     private ?OperationExecutor $executor;
+    private ?WriteConcern $writeConcern;
 
     /**
      * Private constructor. Use the internal factory to create instances.
@@ -49,6 +50,7 @@ final class Server
         array $info = [],
         array $tags = [],
         ?OperationExecutor $executor = null,
+        ?WriteConcern $writeConcern = null,
     ): static {
         $instance = new static();
         $instance->host = $host;
@@ -59,6 +61,7 @@ final class Server
         $instance->info = $info;
         $instance->tags = $tags;
         $instance->executor = $executor;
+        $instance->writeConcern = $writeConcern;
 
         return $instance;
     }
@@ -201,10 +204,14 @@ final class Server
         $options ??= [];
         self::validateOptions($options, ['session', 'writeConcern']);
 
-        $writeConcern = $options['writeConcern'] ?? null;
+        $writeConcern = $options['writeConcern'] ?? $this->writeConcern;
         $session      = $options['session'] ?? null;
 
-        return $this->executor->executeBulkWriteCommand($bulkWriteCommand, $writeConcern, $session);
+        $result = $this->executor->executeBulkWriteCommand($bulkWriteCommand, $writeConcern, $session);
+
+        $bulkWriteCommand->setSession($session);
+
+        return $result;
     }
 
     public function __debugInfo(): array

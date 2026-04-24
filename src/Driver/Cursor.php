@@ -126,7 +126,7 @@ final class Cursor implements CursorInterface
 
         $item = $this->items[$this->position];
 
-        return $this->typeMap !== [] ? TypeMapper::apply($item, $this->typeMap, 'root') : $item;
+        return TypeMapper::apply($item, $this->typeMap, 'root');
     }
 
     public function getId(): Int64

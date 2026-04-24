@@ -206,9 +206,13 @@ final class Manager
         $writeConcern = $this->extractWriteConcern($options) ?? $this->writeConcern;
         $session      = $this->extractSession($options);
 
-        return SyncRunner::run(
+        $result = SyncRunner::run(
             fn () => $this->executor->executeBulkWriteCommand($bulkWriteCommand, $writeConcern, $session),
         );
+
+        $bulkWriteCommand->setSession($session);
+
+        return $result;
     }
 
     public function executeCommand(
@@ -337,6 +341,7 @@ final class Manager
                 info:              $sd->helloResponse,
                 tags:              $sd->tags,
                 executor:          $this->executor,
+                writeConcern:      $this->writeConcern->isDefault() ? null : $this->writeConcern,
             );
         });
     }

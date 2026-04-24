@@ -27,6 +27,7 @@ use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueEx
 use UnitEnum;
 
 use function array_is_list;
+use function array_key_exists;
 use function chr;
 use function get_debug_type;
 use function get_object_vars;
@@ -87,9 +88,71 @@ final class BsonEncoder
         return self::encodeDocument($document, 0);
     }
 
+    /**
+     * Encode a document to BSON, injecting a new ObjectId as _id if missing.
+     *
+     * Sets $outId to the raw _id value used (existing or newly generated).
+     * The caller is responsible for any further normalization of $outId (e.g. arrays → stdClass).
+     *
+     * @return string Raw BSON bytes with _id guaranteed to be present
+     */
+    public static function encodeDocumentWithId(array|object $document, mixed &$outId): string
+    {
+        // Document already carries BSON bytes; avoid a full decode when _id is present.
+        if ($document instanceof Document) {
+            if ($document->has('_id')) {
+                $outId = $document->get('_id');
+
+                return (string) $document;
+            }
+
+            // _id absent: decode, inject, re-encode.
+            $fields = (array) $document->toPHP(['root' => 'array']);
+            $outId  = new ObjectId();
+            $fields = ['_id' => $outId] + $fields;
+
+            return self::encodeDocument($fields, 0);
+        }
+
+        $fields = self::normalizeToFieldArray($document);
+
+        if (array_key_exists('_id', $fields)) {
+            $outId = $fields['_id'];
+        } else {
+            $outId  = new ObjectId();
+            $fields = ['_id' => $outId] + $fields;
+        }
+
+        return self::encodeDocument($fields, 0);
+    }
+
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Normalize a document to a flat PHP field array suitable for direct encoding.
+     *
+     * Handles Persistable (__pclass injection), BsonSerializable, array, and plain objects.
+     * Does NOT handle Document — callers must deal with Document before calling this method.
+     */
+    private static function normalizeToFieldArray(array|object $document): array
+    {
+        if ($document instanceof Persistable) {
+            $serialized = $document->bsonSerialize();
+            $fields     = is_array($serialized) ? $serialized : (array) $serialized;
+
+            return ['__pclass' => new Binary($document::class, Binary::TYPE_USER_DEFINED)] + $fields;
+        }
+
+        if ($document instanceof Serializable) {
+            $serialized = $document->bsonSerialize();
+
+            return is_array($serialized) ? $serialized : (array) $serialized;
+        }
+
+        return is_array($document) ? $document : get_object_vars($document);
+    }
 
     /**
      * Encode an associative array or object as a BSON document (type 0x03).

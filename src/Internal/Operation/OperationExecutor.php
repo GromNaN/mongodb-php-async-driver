@@ -7,6 +7,7 @@ namespace MongoDB\Internal\Operation;
 use Exception;
 use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
+use MongoDB\BSON\PackedArray;
 use MongoDB\BSON\Timestamp;
 use MongoDB\Driver\BulkWrite;
 use MongoDB\Driver\BulkWriteCommand;
@@ -63,7 +64,6 @@ use function is_array;
 use function is_object;
 use function is_string;
 use function iterator_to_array;
-use function reset;
 use function sprintf;
 use function strlen;
 use function strpos;
@@ -558,6 +558,12 @@ final class OperationExecutor
             throw new DriverRuntimeException('BulkWriteCommand cannot be empty');
         }
 
+        if ($session !== null && $writeConcern !== null && $writeConcern->getW() === 0) {
+            throw new DriverInvalidArgumentException(
+                'Cannot combine "session" option with an unacknowledged write concern',
+            );
+        }
+
         $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
         $pool   = $this->getOrCreatePool($server->host, $server->port);
 
@@ -731,7 +737,7 @@ final class OperationExecutor
                         code:    (int) ($doc['code']   ?? 0),
                         index:   $globalIdx,
                         message: (string) ($doc['errmsg'] ?? ''),
-                        info:    isset($doc['errInfo']) ? (object) $doc['errInfo'] : null,
+                        info:    isset($doc['errInfo']) ? (object) $doc['errInfo'] : new stdClass(),
                     );
                     continue;
                 }
@@ -748,8 +754,8 @@ final class OperationExecutor
                     }
                 } elseif (isset($op['update'])) {
                     $res = (object) [
-                        'matchedCount'  => (int) ($doc['n'] ?? 0),
-                        'modifiedCount' => (int) ($doc['nModified'] ?? 0),
+                        'matchedCount'  => new Int64($doc['n'] ?? 0),
+                        'modifiedCount' => new Int64($doc['nModified'] ?? 0),
                     ];
                     $upserted = $doc['upserted'] ?? null;
                     if ($upserted !== null) {
@@ -759,7 +765,7 @@ final class OperationExecutor
 
                     $updateResultsMap[(string) $globalIdx] = $res;
                 } elseif (isset($op['delete'])) {
-                    $deleteResultsMap[(string) $globalIdx] = (object) ['deletedCount' => (int) ($doc['n'] ?? 0)];
+                    $deleteResultsMap[(string) $globalIdx] = (object) ['deletedCount' => new Int64($doc['n'] ?? 0)];
                 }
             }
 
@@ -788,11 +794,11 @@ final class OperationExecutor
             ? Document::fromPHP((object) $deleteResultsMap) : null;
 
         $result = BulkWriteCommandResult::createFromInternal(
-            insertedCount: $nInserted,
-            matchedCount:  $nMatched,
-            modifiedCount: $nModified,
-            upsertedCount: $nUpserted,
-            deletedCount:  $nDeleted,
+            insertedCount: $acknowledged ? $nInserted : 0,
+            matchedCount:  $acknowledged ? $nMatched : 0,
+            modifiedCount: $acknowledged ? $nModified : 0,
+            upsertedCount: $acknowledged ? $nUpserted : 0,
+            deletedCount:  $acknowledged ? $nDeleted : 0,
             acknowledged:  $acknowledged,
             insertResults: $insertResultsDoc,
             updateResults: $updateResultsDoc,
@@ -800,13 +806,11 @@ final class OperationExecutor
         );
 
         if ($writeErrors !== [] || $writeConcernErrors !== []) {
-            $firstError = reset($writeErrors);
-
             throw BulkWriteCommandException::create(
-                message:            $firstError !== false ? $firstError->getMessage() : 'Write concern error occurred',
-                code:               $firstError !== false ? $firstError->getCode()    : 0,
+                message:            'Bulk write failed',
+                code:               0,
                 partialResult:      $result,
-                writeErrors:        array_values($writeErrors),
+                writeErrors:        $writeErrors,
                 writeConcernErrors: $writeConcernErrors,
             );
         }
@@ -872,7 +876,10 @@ final class OperationExecutor
         $commandDoc = Document::fromPHP($bodyForEncoding)->toPHP(['root' => 'object', 'document' => 'object']);
         assert($commandDoc instanceof stdClass);
         foreach ($docSequences as $seq) {
-            $commandDoc->{$seq['id']} = $prepared[$seq['id']] ?? [];
+            $items = $prepared[$seq['id']] ?? [];
+            // Decode each item as an object (matching ext-mongodb APM behaviour).
+            $commandDoc->{$seq['id']} = PackedArray::fromPHP($items)
+                ->toPHP(['root' => 'array', 'document' => 'object']);
         }
 
         // Sensitive commands must have their command body replaced with {} in APM events.
@@ -1304,6 +1311,11 @@ final class OperationExecutor
      */
     private static function estimateBsonSize(array|object $doc): int
     {
+        // Document/PackedArray already carry their BSON bytes — exact size in O(1).
+        if ($doc instanceof Document || $doc instanceof PackedArray) {
+            return strlen((string) $doc);
+        }
+
         $fields = is_object($doc) ? get_object_vars($doc) : $doc;
         $size   = 5; // 4-byte document length + 1-byte terminator
 
