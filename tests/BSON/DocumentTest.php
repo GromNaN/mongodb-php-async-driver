@@ -8,10 +8,12 @@ use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
 use MongoDB\BSON\PackedArray;
 use MongoDB\Driver\Exception\LogicException;
+use MongoDB\Driver\Exception\UnexpectedValueException;
 use MongoDB\Internal\BSON\BsonEncoder;
 use PHPUnit\Framework\TestCase;
 
 use function json_decode;
+use function str_repeat;
 
 class DocumentTest extends TestCase
 {
@@ -116,5 +118,27 @@ class DocumentTest extends TestCase
 
         $result = $doc->toPHP(['root' => 'array', 'document' => 'bson', 'array' => 'bson']);
         $this->assertInstanceOf(Document::class, $result['sub']);
+    }
+
+    /**
+     * JSON nested exactly 100 levels deep must be accepted.
+     * PHP json_decode depth:101 allows exactly 100 levels (depth is exclusive upper-bound).
+     * 99 repetitions of {"a": nested inside each other, plus one inner {}, = 100 total levels.
+     */
+    public function testFromJSONAccepts100LevelsOfNesting(): void
+    {
+        $json = str_repeat('{"a":', 99) . '{}' . str_repeat('}', 99);
+
+        $doc = Document::fromJSON($json);
+        $this->assertInstanceOf(Document::class, $doc);
+    }
+
+    /** JSON nested more than 100 levels deep must be rejected. */
+    public function testFromJSONRejects101LevelsOfNesting(): void
+    {
+        $this->expectException(UnexpectedValueException::class);
+
+        $json = str_repeat('{"a":', 100) . '{}' . str_repeat('}', 100);
+        Document::fromJSON($json);
     }
 }

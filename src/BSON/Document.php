@@ -88,7 +88,7 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
     final public static function fromJSON(string $json): static
     {
         try {
-            $phpValue = json_decode($json, associative: false, flags: JSON_THROW_ON_ERROR);
+            $phpValue = json_decode($json, associative: false, depth: 101, flags: JSON_THROW_ON_ERROR);
         } catch (JsonException $e) {
             throw new DriverUnexpectedValueException(
                 sprintf('Got parse error at "%s", position 1: "SPECIAL_EXPECTED"', substr($json, 0, 1)),
