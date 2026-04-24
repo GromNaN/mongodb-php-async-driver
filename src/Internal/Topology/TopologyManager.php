@@ -29,8 +29,8 @@ use function array_map;
 use function array_rand;
 use function array_values;
 use function count;
+use function hrtime;
 use function implode;
-use function microtime;
 use function sprintf;
 
 /**
@@ -361,7 +361,7 @@ final class TopologyManager
      */
     private function waitForServer(ReadPreference $rp, int $timeoutMs): InternalServerDescription
     {
-        $deadline = microtime(true) + $timeoutMs / 1_000.0;
+        $deadlineNs = hrtime(true) + $timeoutMs * 1_000_000;
 
         // Request an immediate check from all monitors (they may be sleeping
         // between heartbeats) — mirrors _mongoc_topology_request_scan().
@@ -370,11 +370,13 @@ final class TopologyManager
         }
 
         while (true) {
-            $remaining = $deadline - microtime(true);
+            $remainingNs = $deadlineNs - hrtime(true);
 
-            if ($remaining <= 0) {
+            if ($remainingNs <= 0) {
                 break;
             }
+
+            $remaining = $remainingNs / 1_000_000_000.0;
 
             // Register the condition variable and await the next topology update.
             $this->selectionWaiter = new DeferredFuture();

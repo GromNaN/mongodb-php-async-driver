@@ -56,12 +56,13 @@ use function assert;
 use function count;
 use function explode;
 use function get_object_vars;
+use function hrtime;
 use function in_array;
+use function intdiv;
 use function is_array;
 use function is_object;
 use function is_string;
 use function iterator_to_array;
-use function microtime;
 use function reset;
 use function sprintf;
 use function strlen;
@@ -850,7 +851,7 @@ final class OperationExecutor
 
         $conn      = $pool->acquire();
         $requestId = RequestIdGenerator::next();
-        $startUs   = (int) (microtime(true) * 1_000_000);
+        $startNs = hrtime(true);
 
         // Use the server's hello-response connectionId as the serverConnectionId for monitoring events.
         $serverConnId = isset($server->helloResponse['connectionId'])
@@ -882,7 +883,7 @@ final class OperationExecutor
             [$bytes] = OpMsgEncoder::encodeWithRequestId($bodyForEncoding, $docSequences);
 
             $responseBytes = $conn->sendMessage($bytes);
-            $durationUs    = (int) (microtime(true) * 1_000_000) - $startUs;
+            $durationUs    = intdiv(hrtime(true) - $startNs, 1_000);
 
             // Decode without automatic error checking so we can capture the
             // reply body for CommandFailedEvent even when ok != 1.
@@ -933,7 +934,7 @@ final class OperationExecutor
         } catch (CommandException $e) {
             throw $e;
         } catch (Throwable $e) {
-            $durationUs = (int) (microtime(true) * 1_000_000) - $startUs;
+            $durationUs = intdiv(hrtime(true) - $startNs, 1_000);
             $this->fireCommandFailed($cmdName, $e, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
 
             $pool->release($conn);

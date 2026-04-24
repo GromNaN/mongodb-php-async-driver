@@ -100,6 +100,7 @@ src/functions.php            Global Monitoring functions (not autoloadable)
 - **`WriteConcern::isDefault()`**: returns `true` only for driver-internal defaults, never for user-constructed instances. Use `WriteConcern::createDefault()` internally.
 - **`SyncRunner::run()`**: wraps async operations so they block when called from non-fiber context (plain PHP scripts) and suspend-only when called from inside a Revolt fiber.
 - **No class_exists guards**: classes are plain PSR-4 files. The Composer autoloader won't load a file for an already-defined class, so no guards are needed.
+- **Use `hrtime(true)` for durations, `microtime(true)` for wall-clock timestamps**: `hrtime` is monotonic (no clock skew) and returns nanoseconds as an integer — convert with `intdiv($ns, 1_000)` for µs or `intdiv($ns, 1_000_000)` for ms. Keep `microtime` only for absolute timestamps (e.g. `lastUpdateTime`, `UTCDateTime` constructor).
 
 ## References
 

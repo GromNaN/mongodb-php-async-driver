@@ -19,8 +19,9 @@ use Throwable;
 
 use function Amp\async;
 use function Amp\delay;
+use function hrtime;
+use function intdiv;
 use function is_array;
-use function microtime;
 
 /**
  * Background monitor that periodically sends hello to a single MongoDB server
@@ -153,7 +154,7 @@ final class ServerMonitor
      */
     private function checkServer(): InternalServerDescription
     {
-        $startUs = (int) (microtime(true) * 1_000_000);
+        $startNs = hrtime(true);
 
         $this->fireHeartbeat('serverHeartbeatStarted', ServerHeartbeatStartedEvent::create(
             host:    $this->host,
@@ -168,9 +169,9 @@ final class ServerMonitor
             [$bytes] = OpMsgEncoder::encodeWithRequestId($helloCmd);
 
             $responseBytes = $conn->sendMessage($bytes);
-            $endUs         = (int) (microtime(true) * 1_000_000);
-            $rttMs         = (int) (($endUs - $startUs) / 1_000);
-            $durationUs    = $endUs - $startUs;
+            $elapsedNs     = hrtime(true) - $startNs;
+            $rttMs         = intdiv($elapsedNs, 1_000_000);
+            $durationUs    = intdiv($elapsedNs, 1_000);
 
             $decoded  = OpMsgDecoder::decode($responseBytes);
             $body     = $decoded['body'];
@@ -186,8 +187,7 @@ final class ServerMonitor
 
             return InternalServerDescription::fromHello($this->host, $this->port, $response, $rttMs);
         } catch (Throwable $e) {
-            $endUs      = (int) (microtime(true) * 1_000_000);
-            $durationUs = $endUs - $startUs;
+            $durationUs = intdiv(hrtime(true) - $startNs, 1_000);
             $exception  = $e instanceof Exception ? $e : new RuntimeException($e->getMessage(), $e->getCode(), $e);
 
             $this->fireHeartbeat('serverHeartbeatFailed', ServerHeartbeatFailedEvent::create(
