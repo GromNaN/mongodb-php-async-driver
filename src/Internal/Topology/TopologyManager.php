@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Topology;
 
+use Amp\CancelledException;
+use Amp\DeferredFuture;
+use Amp\TimeoutCancellation;
 use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\ConnectionTimeoutException as DriverConnectionTimeoutException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
@@ -20,7 +23,6 @@ use MongoDB\Driver\ServerDescription;
 use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Internal\Uri\UriOptions;
 
-use function Amp\delay;
 use function array_filter;
 use function array_keys;
 use function array_map;
@@ -29,7 +31,6 @@ use function array_values;
 use function count;
 use function implode;
 use function microtime;
-use function min;
 use function sprintf;
 
 /**
@@ -61,6 +62,12 @@ final class TopologyManager
     private array $subscribers = [];
 
     private bool $started = false;
+
+    /**
+     * Fulfilled by onServerUpdate() to wake a fiber blocked in waitForServer().
+     * Mirrors the condition variable used in libmongoc (mongoc_cond_broadcast).
+     */
+    private ?DeferredFuture $selectionWaiter = null;
 
     /**
      * @param array<array{host: string, port: int}> $seeds   Seed server list.
@@ -330,10 +337,25 @@ final class TopologyManager
             $this->monitors[$addr]->stop();
             unset($this->monitors[$addr]);
         }
+
+        // Wake any fiber blocked in waitForServer() — mirrors mongoc_cond_broadcast().
+        if ($this->selectionWaiter === null) {
+            return;
+        }
+
+        $waiter                = $this->selectionWaiter;
+        $this->selectionWaiter = null;
+        $waiter->complete();
     }
 
     /**
-     * Poll until a suitable server is found or the timeout expires.
+     * Block until a suitable server is available or the timeout expires.
+     *
+     * Mirrors the libmongoc approach: instead of polling, we register a
+     * DeferredFuture as a "condition variable".  onServerUpdate() completes it
+     * (mongoc_cond_broadcast) whenever a topology change arrives, waking this
+     * fiber immediately.  We also request an immediate check from every monitor
+     * so that one sleeping between heartbeats is woken up at once.
      *
      * @throws DriverRuntimeException on timeout.
      */
@@ -341,14 +363,28 @@ final class TopologyManager
     {
         $deadline = microtime(true) + $timeoutMs / 1_000.0;
 
-        // Poll with exponential back-off starting at 10 ms, capped at 500 ms.
-        // This lets us return immediately after the first hello from a local
-        // server instead of always waiting a full 500 ms.
-        $intervalSec = 0.010;
+        // Request an immediate check from all monitors (they may be sleeping
+        // between heartbeats) — mirrors _mongoc_topology_request_scan().
+        foreach ($this->monitors as $monitor) {
+            $monitor->requestImmediateCheck();
+        }
 
-        while (microtime(true) < $deadline) {
-            delay($intervalSec);
-            $intervalSec = min($intervalSec * 2, 0.5);
+        while (true) {
+            $remaining = $deadline - microtime(true);
+
+            if ($remaining <= 0) {
+                break;
+            }
+
+            // Register the condition variable and await the next topology update.
+            $this->selectionWaiter = new DeferredFuture();
+
+            try {
+                $this->selectionWaiter->getFuture()->await(new TimeoutCancellation($remaining));
+            } catch (CancelledException) {
+                $this->selectionWaiter = null;
+                break;
+            }
 
             $candidates = ServerSelector::select(
                 $this->servers,
