@@ -6,7 +6,9 @@ namespace MongoDB\Internal\Topology;
 
 use MongoDB\Driver\ReadPreference;
 
+use function array_any;
 use function array_filter;
+use function array_intersect_assoc;
 use function array_values;
 
 /**
@@ -172,32 +174,11 @@ final class ServerSelector
 
         return array_values(array_filter(
             $servers,
-            static function (InternalServerDescription $sd) use ($tagSets): bool {
-                foreach ($tagSets as $tagSet) {
-                    if (self::serverMatchesTagSet($sd, $tagSet)) {
-                        return true;
-                    }
-                }
-
-                return false;
-            },
+            static fn (InternalServerDescription $sd) => array_any(
+                $tagSets,
+                static fn (array $tagSet) => array_intersect_assoc($tagSet, $sd->tags) === $tagSet,
+            ),
         ));
-    }
-
-    /**
-     * Return true when $sd has every key→value pair in $tagSet.
-     *
-     * @param array<string, string> $tagSet
-     */
-    private static function serverMatchesTagSet(InternalServerDescription $sd, array $tagSet): bool
-    {
-        foreach ($tagSet as $key => $value) {
-            if (! isset($sd->tags[$key]) || $sd->tags[$key] !== $value) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /**
