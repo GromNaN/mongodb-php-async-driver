@@ -25,6 +25,7 @@ use function is_array;
 use function min;
 use function sprintf;
 use function strlen;
+use function substr;
 use function time;
 use function unpack;
 
@@ -38,6 +39,13 @@ use function unpack;
  */
 final class Connection
 {
+    /**
+     * Initial read buffer size (bytes).  Sized to cover the vast majority of
+     * MongoDB responses for short commands (ping, insert ack, findOne, etc.)
+     * in a single socket->read() call, reducing fiber suspensions from 2 to 1.
+     */
+    private const INITIAL_READ_SIZE = 512;
+
     public const STATE_CONNECTING    = 'connecting';
     public const STATE_CONNECTED     = 'connected';
     public const STATE_AUTHENTICATING = 'authenticating';
@@ -173,9 +181,14 @@ final class Connection
     /**
      * Write raw wire-protocol bytes to the socket and read the full response.
      *
-     * The MongoDB response always starts with a 4-byte little-endian length
-     * field that includes the length field itself, so we read that first and
-     * then read the remainder of the message.
+     * **Fast path (common case):** reads {@see INITIAL_READ_SIZE} bytes in a
+     * single socket->read() call.  Because most MongoDB responses for short
+     * commands (ping, insert ack, find with small result set, …) fit well
+     * within that budget and are typically delivered in one TCP segment, the
+     * full message is available immediately and no second suspension is needed.
+     *
+     * **Slow path:** if the initial chunk does not yet contain the complete
+     * message, the remaining bytes are read via {@see readExactly()}.
      *
      * @throws ConnectionException on I/O / framing errors.
      */
@@ -188,11 +201,31 @@ final class Connection
         // Write the outgoing frame.
         $this->socket->write($bytes);
 
-        // Read the first 4 bytes to determine total message length.
-        $lengthBytes = $this->readExactly(4);
+        // Read the first chunk — large enough to capture the entire response
+        // for typical short commands in one suspension.
+        $cancellation = $this->socketTimeoutSecs > 0.0
+            ? new TimeoutCancellation($this->socketTimeoutSecs)
+            : null;
+
+        $buffer = '';
+
+        try {
+            // Loop until we have at least 4 bytes (the length prefix).
+            // In virtually all cases this loop body executes exactly once.
+            while (strlen($buffer) < 4) {
+                $chunk = $this->socket->read(limit: self::INITIAL_READ_SIZE, cancellation: $cancellation);
+                if ($chunk === null) {
+                    throw new ConnectionException('Connection closed while reading message length');
+                }
+
+                $buffer .= $chunk;
+            }
+        } catch (CancelledException $e) {
+            throw new ConnectionTimeoutException('socket error or timeout', 0, $e);
+        }
 
         /** @var array{1: int} $u */
-        $u             = unpack('V', $lengthBytes);
+        $u             = unpack('V', substr($buffer, 0, 4));
         $messageLength = $u[1];
 
         if ($messageLength < MessageHeader::HEADER_SIZE) {
@@ -201,12 +234,19 @@ final class Connection
             );
         }
 
-        // Read the rest of the message (messageLength already includes the 4 bytes we read).
-        $rest = $this->readExactly($messageLength - 4);
+        // Fast path: the initial chunk already holds the complete message.
+        if (strlen($buffer) >= $messageLength) {
+            $this->markUsed();
+
+            return substr($buffer, 0, $messageLength);
+        }
+
+        // Slow path: read the remaining bytes.
+        $buffer .= $this->readExactly($messageLength - strlen($buffer));
 
         $this->markUsed();
 
-        return $lengthBytes . $rest;
+        return $buffer;
     }
 
     // -------------------------------------------------------------------------
