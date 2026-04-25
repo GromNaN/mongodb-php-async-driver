@@ -23,6 +23,7 @@ use MongoDB\Driver\ReadPreference;
 use MongoDB\Driver\ServerDescription;
 use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Internal\Uri\UriOptions;
+use WeakReference;
 
 use function array_filter;
 use function array_first;
@@ -64,6 +65,8 @@ final class TopologyManager
     private array $subscribers = [];
 
     private bool $started = false;
+
+    private bool $stopped = false;
 
     /**
      * Fulfilled by onServerUpdate() to wake a fiber blocked in waitForServer().
@@ -144,15 +147,7 @@ final class TopologyManager
                 $this->topologyId,
             ));
 
-            $monitor = new ServerMonitor(
-                host:                    $host,
-                port:                    $port,
-                onUpdate:                fn (InternalServerDescription $sd) => $this->onServerUpdate($sd),
-                heartbeatFrequencyMs:    $this->options->heartbeatFrequencyMS,
-                minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
-                onHeartbeat:             fn (string $method, object $event) => $this->fireSdamEvent($method, static fn () => $event),
-                options:                 $this->options,
-            );
+            $monitor = $this->createMonitor($host, $port);
 
             $this->monitors[$address] = $monitor;
             $monitor->start();
@@ -176,6 +171,7 @@ final class TopologyManager
         }
 
         $this->monitors = [];
+        $this->stopped  = true;
         $this->fireSdamEvent('topologyClosed', fn () => TopologyClosedEvent::create($this->topologyId));
     }
 
@@ -258,6 +254,10 @@ final class TopologyManager
      */
     private function onServerUpdate(InternalServerDescription $sd): void
     {
+        if ($this->stopped) {
+            return;
+        }
+
         $address     = $sd->getAddress();
         $previousSd  = $this->servers[$address] ?? new InternalServerDescription(
             host: $sd->host,
@@ -319,15 +319,7 @@ final class TopologyManager
                 $this->topologyId,
             ));
 
-            $monitor = new ServerMonitor(
-                host:                    $knownSd->host,
-                port:                    $knownSd->port,
-                onUpdate:                fn (InternalServerDescription $s) => $this->onServerUpdate($s),
-                heartbeatFrequencyMs:    $this->options->heartbeatFrequencyMS,
-                minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
-                onHeartbeat:             fn (string $method, object $event) => $this->fireSdamEvent($method, static fn () => $event),
-                options:                 $this->options,
-            );
+            $monitor = $this->createMonitor($knownSd->host, $knownSd->port);
 
             $this->monitors[$addr] = $monitor;
             $monitor->start();
@@ -430,6 +422,38 @@ final class TopologyManager
 
         // Random selection among eligible secondaries / nearest servers.
         return $candidates[array_rand($candidates)];
+    }
+
+    // -------------------------------------------------------------------------
+    // Private — monitor factory
+    // -------------------------------------------------------------------------
+
+    /**
+     * Create a {@see ServerMonitor} for the given host and port.
+     *
+     * The onUpdate and onHeartbeat callbacks hold a {@see \WeakReference} to
+     * $this instead of a strong reference.  This breaks the reference cycle
+     * TopologyManager → monitors[ServerMonitor] → closure → TopologyManager
+     * so that PHP's refcount can free the topology immediately when the Manager
+     * is no longer referenced, without waiting for the cyclic GC.
+     */
+    private function createMonitor(string $host, int $port): ServerMonitor
+    {
+        $weak = WeakReference::create($this);
+
+        return new ServerMonitor(
+            host:                    $host,
+            port:                    $port,
+            onUpdate:                static function (InternalServerDescription $sd) use ($weak): void {
+                $weak->get()?->onServerUpdate($sd);
+            },
+            heartbeatFrequencyMs:    $this->options->heartbeatFrequencyMS,
+            minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
+            onHeartbeat:             static function (string $method, object $event) use ($weak): void {
+                $weak->get()?->fireSdamEvent($method, static fn () => $event);
+            },
+            options:                 $this->options,
+        );
     }
 
     // -------------------------------------------------------------------------
