@@ -79,8 +79,8 @@ final class OpMsgDecoder
                 // Kind 0: body BSON document.
                 // Persistable reconstruction is suppressed here: the Cursor applies
                 // TypeMapper (which handles __pclass detection) when items are iterated.
-                $body    = BsonDecoder::decode(substr($bytes, $offset), $typeMap, handlePersistable: false);
                 $docLen  = self::readDocumentLength($bytes, $offset);
+                $body    = BsonDecoder::decode(substr($bytes, $offset, $docLen), $typeMap, handlePersistable: false);
                 $offset += $docLen;
             } elseif ($kind === 1) {
                 // Kind 1: document sequence.
@@ -103,8 +103,8 @@ final class OpMsgDecoder
                 // Read BSON documents until end of section.
                 $seqDocs = [];
                 while ($offset < $sectionEnd) {
-                    $seqDocs[] = BsonDecoder::decode(substr($bytes, $offset), $typeMap, handlePersistable: false);
                     $docLen    = self::readDocumentLength($bytes, $offset);
+                    $seqDocs[] = BsonDecoder::decode(substr($bytes, $offset, $docLen), $typeMap, handlePersistable: false);
                     $offset   += $docLen;
                 }
 
@@ -140,13 +140,14 @@ final class OpMsgDecoder
         $body   = $result['body'];
 
         // Normalise: support both array and object bodies.
-        $ok = is_array($body) ? ($body['ok'] ?? null) : ($body->ok ?? null);
+        $isArray = is_array($body);
+        $ok      = $isArray ? ($body['ok'] ?? null) : ($body->ok ?? null);
 
         if ((int) $ok !== 1) {
-            $errmsg = is_array($body)
+            $errmsg = $isArray
                 ? ($body['errmsg'] ?? 'Unknown error')
                 : ($body->errmsg ?? 'Unknown error');
-            $code   = is_array($body)
+            $code   = $isArray
                 ? (int) ($body['code'] ?? 0)
                 : (int) ($body->code ?? 0);
 

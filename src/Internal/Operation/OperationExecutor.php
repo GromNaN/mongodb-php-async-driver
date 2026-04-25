@@ -55,19 +55,18 @@ use stdClass;
 use Throwable;
 
 use function array_map;
-use function array_search;
 use function array_values;
 use function assert;
 use function count;
 use function explode;
 use function get_object_vars;
 use function hrtime;
-use function in_array;
 use function intdiv;
 use function is_array;
 use function is_object;
 use function is_string;
 use function iterator_to_array;
+use function spl_object_id;
 use function sprintf;
 use function strlen;
 use function strpos;
@@ -92,6 +91,9 @@ final class OperationExecutor
     /** @var array<string, ConnectionPool> Keyed by "host:port". */
     private array $pools = [];
 
+    /** @var array<int, Subscriber> Keyed by spl_object_id(). */
+    private array $subscribers = [];
+
     /**
      * @param TopologyManager  $topology    Live topology manager.
      * @param UriOptions       $options     Parsed URI options.
@@ -102,29 +104,22 @@ final class OperationExecutor
         private TopologyManager $topology,
         private UriOptions $options,
         private SessionPool $sessionPool,
-        private array $subscribers = [],
+        array $subscribers = [],
         private ?ServerApi $serverApi = null,
     ) {
+        foreach ($subscribers as $subscriber) {
+            $this->subscribers[spl_object_id($subscriber)] = $subscriber;
+        }
     }
 
     public function addSubscriber(Subscriber $subscriber): void
     {
-        if (in_array($subscriber, $this->subscribers, true)) {
-            return;
-        }
-
-        $this->subscribers[] = $subscriber;
+        $this->subscribers[spl_object_id($subscriber)] = $subscriber;
     }
 
     public function removeSubscriber(Subscriber $subscriber): void
     {
-        $key = array_search($subscriber, $this->subscribers, true);
-        if ($key === false) {
-            return;
-        }
-
-        unset($this->subscribers[$key]);
-        $this->subscribers = array_values($this->subscribers);
+        unset($this->subscribers[spl_object_id($subscriber)]);
     }
 
     // -------------------------------------------------------------------------

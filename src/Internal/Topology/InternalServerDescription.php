@@ -69,8 +69,10 @@ final class InternalServerDescription
         );
     }
 
-    public function withHelloResponse(array $response, int $rttMs): self
+    public function withHelloResponse(array $response, int $rttMs, ?int $now = null): self
     {
+        $now ??= (int) (microtime(true) * 1000);
+
         return new self(
             host:            $this->host,
             port:            $this->port,
@@ -80,13 +82,15 @@ final class InternalServerDescription
             setName:         $this->setName,
             tags:            $this->tags,
             primary:         $this->primary,
-            lastUpdateTime:  (int) (microtime(true) * 1000),
+            lastUpdateTime:  $now,
             error:           null,
         );
     }
 
-    public function withError(Throwable $error): self
+    public function withError(Throwable $error, ?int $now = null): self
     {
+        $now ??= (int) (microtime(true) * 1000);
+
         return new self(
             host:            $this->host,
             port:            $this->port,
@@ -96,7 +100,7 @@ final class InternalServerDescription
             setName:         null,
             tags:            [],
             primary:         false,
-            lastUpdateTime:  (int) (microtime(true) * 1000),
+            lastUpdateTime:  $now,
             error:           $error,
         );
     }
@@ -143,7 +147,9 @@ final class InternalServerDescription
         int $port,
         array $response,
         int $rttMs,
+        ?int $now = null,
     ): self {
+        $now ??= (int) (microtime(true) * 1000);
         $type    = self::TYPE_UNKNOWN;
         $setName = null;
         $tags    = [];
@@ -195,7 +201,7 @@ final class InternalServerDescription
             setName:         $setName,
             tags:            $tags,
             primary:         $primary,
-            lastUpdateTime:  (int) (microtime(true) * 1000),
+            lastUpdateTime:  $now,
             error:           null,
         );
     }

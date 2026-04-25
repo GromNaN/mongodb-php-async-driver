@@ -66,7 +66,7 @@ final class ServerSelector
             // Sharded: mongos servers within the latency window.
             $mongos = self::filterByType($servers, InternalServerDescription::TYPE_MONGOS);
 
-            return self::filterByLatency($mongos, $localThresholdMs);
+            return array_values(self::filterByLatency($mongos, $localThresholdMs));
         }
 
         // ----------------------------------------------------------------
@@ -106,7 +106,7 @@ final class ServerSelector
                 $available = self::filterAvailable($servers);
                 $tagged    = self::filterByTagSets($available, $tagSets);
 
-                return self::filterByLatency($tagged, $localThresholdMs);
+                return array_values(self::filterByLatency($tagged, $localThresholdMs));
 
             default:
                 // Should never happen with a well-constructed ReadPreference.
@@ -153,7 +153,7 @@ final class ServerSelector
         $secondaries = self::filterByType($servers, InternalServerDescription::TYPE_RS_SECONDARY);
         $tagged      = self::filterByTagSets($secondaries, $tagSets);
 
-        return self::filterByLatency($tagged, $localThresholdMs);
+        return array_values(self::filterByLatency($tagged, $localThresholdMs));
     }
 
     /**
@@ -209,6 +209,7 @@ final class ServerSelector
      *   min(RTT across candidates) + $localThresholdMs
      *
      * Servers with no RTT measurement are excluded.
+     * Preserves the associative keys of $servers; callers re-index with array_values().
      *
      * @param array<string, InternalServerDescription> $servers
      *
@@ -231,19 +232,19 @@ final class ServerSelector
         }
 
         if ($minRtt === null) {
-            return array_values($servers); // No RTT data: cannot filter, return all candidates.
+            return $servers; // No RTT data: cannot filter, return all candidates.
         }
 
         $threshold = $minRtt + $localThresholdMs;
 
         // Second pass: keep only servers within the latency window.
         $result = [];
-        foreach ($servers as $sd) {
+        foreach ($servers as $key => $sd) {
             if ($sd->roundTripTimeMs === null || $sd->roundTripTimeMs > $threshold) {
                 continue;
             }
 
-            $result[] = $sd;
+            $result[$key] = $sd;
         }
 
         return $result;

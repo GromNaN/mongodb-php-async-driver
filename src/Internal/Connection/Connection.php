@@ -296,19 +296,15 @@ final class Connection
         $body   = $result['body'];
 
         // Extract wire version bounds.
-        if (is_array($body)) {
-            $this->maxWireVersion = (int) ($body['maxWireVersion'] ?? 0);
-            $this->minWireVersion = (int) ($body['minWireVersion'] ?? 0);
-            $this->serviceId      = isset($body['serviceId'])
-                ? (string) $body['serviceId']
-                : null;
-        } else {
-            $this->maxWireVersion = (int) ($body->maxWireVersion ?? 0);
-            $this->minWireVersion = (int) ($body->minWireVersion ?? 0);
-            $this->serviceId      = isset($body->serviceId)
-                ? (string) $body->serviceId
-                : null;
-        }
+        $this->maxWireVersion = (int) self::extractHelloField($body, 'maxWireVersion', 0);
+        $this->minWireVersion = (int) self::extractHelloField($body, 'minWireVersion', 0);
+        $serviceId            = self::extractHelloField($body, 'serviceId', null);
+        $this->serviceId      = $serviceId !== null ? (string) $serviceId : null;
+    }
+
+    private static function extractHelloField(array|object $body, string $key, mixed $default): mixed
+    {
+        return is_array($body) ? ($body[$key] ?? $default) : ($body->$key ?? $default);
     }
 
     /**
