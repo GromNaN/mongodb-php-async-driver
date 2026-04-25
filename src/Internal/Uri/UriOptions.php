@@ -71,6 +71,7 @@ final class UriOptions
     public readonly int $minHeartbeatFrequencyMS;     // default 500
     public readonly int $maxPoolSize;                 // default 100
     public readonly int $minPoolSize;                 // default 0
+    public readonly int $maxConnecting;               // default 2
     public readonly int $waitQueueTimeoutMS;          // default 0
 
     // -------------------------------------------------------------------------
@@ -167,6 +168,7 @@ final class UriOptions
             'minHeartbeatFrequencyMS'  => 500,
             'maxPoolSize'              => 100,
             'minPoolSize'              => 0,
+            'maxConnecting'            => 2,
             'waitQueueTimeoutMS'       => 0,
         ];
         foreach ($intDefaults as $key => $default) {

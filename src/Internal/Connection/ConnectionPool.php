@@ -32,6 +32,9 @@ final class ConnectionPool
     /** Number of connections currently checked out by callers. */
     private int $inUse = 0;
 
+    /** Number of connections currently being established (pending). */
+    private int $pendingConnections = 0;
+
     /** @var SplQueue<DeferredFuture<Connection>> */
     private SplQueue $waiters;
 
@@ -43,6 +46,7 @@ final class ConnectionPool
         private readonly int $port,
         private readonly int $maxPoolSize = 100,
         private readonly int $minPoolSize = 0,
+        private readonly int $maxConnecting = 2,
         private readonly int $waitQueueTimeoutMS = 0,
         private ?UriOptions $options = null,
     ) {
@@ -83,12 +87,12 @@ final class ConnectionPool
             return $conn;
         }
 
-        // 2. Create a new connection if the pool has remaining capacity.
-        if ($this->totalConnections() < $this->maxPoolSize) {
+        // 2. Create a new connection if both pool capacity and connecting limit allow it.
+        if ($this->totalConnections() < $this->maxPoolSize && $this->pendingConnections < $this->maxConnecting) {
             return $this->createAndConnect();
         }
 
-        // 3. Pool is at capacity – enqueue the caller as a waiter.
+        // 3. Pool is at capacity or maxConnecting is reached – enqueue the caller as a waiter.
         $deferred = new DeferredFuture();
         $this->waiters->enqueue($deferred);
 
@@ -132,17 +136,17 @@ final class ConnectionPool
     {
         $conn->markUsed();
 
-        // If the connection has gone bad, just account for its removal.
+        $this->inUse = max(0, $this->inUse - 1);
+
+        // If the connection has gone bad, open a slot for a waiter to create a fresh one.
         if ($conn->isClosed()) {
-            $this->inUse = max(0, $this->inUse - 1);
+            $this->scheduleWaiter();
 
             return;
         }
 
-        $this->inUse = max(0, $this->inUse - 1);
-
-        // Hand off to the oldest pending waiter, skipping any that already
-        // timed out (lazy deletion — they stay in the queue until dequeued here).
+        // Hand off to the oldest pending waiter (blocked due to maxPoolSize), skipping any
+        // that already timed out (lazy deletion).
         while (! $this->waiters->isEmpty()) {
             /** @var DeferredFuture<Connection> $deferred */
             $deferred = $this->waiters->dequeue();
@@ -156,7 +160,7 @@ final class ConnectionPool
             return;
         }
 
-        // Otherwise push back onto the idle queue.
+        // No waiters — push back onto the idle queue.
         $this->idle->enqueue($conn);
     }
 
@@ -190,14 +194,15 @@ final class ConnectionPool
     /**
      * Return a snapshot of pool statistics.
      *
-     * @return array{idle: int, inUse: int, total: int}
+     * @return array{idle: int, inUse: int, pending: int, total: int}
      */
     public function getStats(): array
     {
         return [
-            'idle'  => $this->idle->count(),
-            'inUse' => $this->inUse,
-            'total' => $this->totalConnections(),
+            'idle'    => $this->idle->count(),
+            'inUse'   => $this->inUse,
+            'pending' => $this->pendingConnections,
+            'total'   => $this->totalConnections(),
         ];
     }
 
@@ -206,27 +211,31 @@ final class ConnectionPool
     // -------------------------------------------------------------------------
 
     /**
-     * Total number of connections owned by this pool (idle + in-use).
+     * Total number of connections owned by this pool (idle + in-use + pending).
      */
     private function totalConnections(): int
     {
-        return $this->idle->count() + $this->inUse;
+        return $this->idle->count() + $this->inUse + $this->pendingConnections;
     }
 
     /**
      * Create a brand-new Connection, run the hello handshake, and mark it as
      * in-use before returning it to the caller.
      *
+     * Increments {@see $pendingConnections} for the duration of the handshake
+     * and decrements it when done (success or failure), then attempts to serve
+     * any waiter that was blocked because maxConnecting was reached.
+     *
      * @throws ConnectionException on connection/handshake failure.
      */
     private function createAndConnect(): Connection
     {
-        $conn = new Connection($this->host, $this->port);
+        $this->pendingConnections++;
 
         try {
+            $conn = new Connection($this->host, $this->port);
             $conn->connect($this->options);
         } catch (Throwable $e) {
-            // Do not increment inUse for a connection that never became ready.
             throw new ConnectionException(
                 sprintf(
                     'Failed to connect to %s:%d: %s',
@@ -237,10 +246,84 @@ final class ConnectionPool
                 (int) $e->getCode(),
                 $e,
             );
+        } finally {
+            $this->pendingConnections--;
+            // A maxConnecting slot just freed up — let a waiter proceed.
+            $this->scheduleWaiter();
         }
 
         $this->inUse++;
 
         return $conn;
+    }
+
+    /**
+     * After a pending-connection slot frees up, check whether a queued waiter
+     * can now start establishing a new connection.
+     *
+     * Waiters blocked by maxPoolSize are served by {@see release()} (they
+     * receive a recycled connection).  This method serves waiters that were
+     * blocked solely because maxConnecting was reached while the pool still had
+     * capacity — they need a brand-new connection created for them.
+     *
+     * A background fiber is used so that the connecting handshake does not
+     * block the caller of scheduleWaiter().
+     */
+    private function scheduleWaiter(): void
+    {
+        // Nothing to do if neither limit allows creating a new connection.
+        if ($this->totalConnections() >= $this->maxPoolSize || $this->pendingConnections >= $this->maxConnecting) {
+            return;
+        }
+
+        // Drain completed (timed-out) waiters and grab the first live one.
+        while (! $this->waiters->isEmpty()) {
+            /** @var DeferredFuture<Connection> $deferred */
+            $deferred = $this->waiters->dequeue();
+            if ($deferred->isComplete()) {
+                continue; // Already timed out — skip.
+            }
+
+            // Establish a connection for this waiter in a background fiber so
+            // that the current fiber (which called scheduleWaiter) is not blocked.
+            $this->pendingConnections++;
+
+            async(function () use ($deferred): void {
+                try {
+                    $conn = new Connection($this->host, $this->port);
+                    $conn->connect($this->options);
+
+                    if (! $deferred->isComplete()) {
+                        $this->inUse++;
+                        $deferred->complete($conn);
+                    } else {
+                        // Waiter timed out while we were connecting; recycle the connection.
+                        $this->inUse++;
+                        $this->release($conn);
+                    }
+                } catch (Throwable $e) {
+                    if (! $deferred->isComplete()) {
+                        $deferred->error(
+                            new ConnectionException(
+                                sprintf(
+                                    'Failed to connect to %s:%d: %s',
+                                    $this->host,
+                                    $this->port,
+                                    $e->getMessage(),
+                                ),
+                                (int) $e->getCode(),
+                                $e,
+                            ),
+                        );
+                    }
+                } finally {
+                    $this->pendingConnections--;
+                    // Cascade: try to serve the next waiter if another slot opened.
+                    $this->scheduleWaiter();
+                }
+            });
+
+            return; // One background connection started — stop here.
+        }
     }
 }

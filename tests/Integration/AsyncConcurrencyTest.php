@@ -234,6 +234,74 @@ class AsyncConcurrencyTest extends IntegrationTestCase
         $this->assertSame($increments, (int) $doc['counter']);
     }
 
+    /**
+     * maxPoolSize=3 with 10 concurrent workers: all operations must complete
+     * successfully even though only 3 connections can be open simultaneously.
+     * Workers 4–10 wait in the pool queue until a connection is released.
+     */
+    public function testMaxPoolSizeEnforced(): void
+    {
+        $workers = 10;
+        $maxPool = 3;
+        $uri     = $_ENV['MONGODB_URI'] ?? 'mongodb://127.0.0.1:27017';
+
+        // Separate Manager with a small pool — warm up topology before going async.
+        $manager = new Manager($uri, ['maxPoolSize' => $maxPool]);
+        $manager->executeCommand('admin', new Command(['ping' => 1]));
+
+        [$errors] = async(function () use ($workers, $manager): array {
+            $futures = [];
+            for ($i = 0; $i < $workers; $i++) {
+                $futures[$i] = async(function () use ($i, $manager): void {
+                    $bw = new BulkWrite();
+                    $bw->insert(['worker' => $i]);
+                    $manager->executeBulkWrite($this->ns, $bw);
+                });
+            }
+
+            return awaitAll($futures);
+        })->await();
+
+        $this->assertEmpty($errors, 'Some workers failed under maxPoolSize=3: ' . $this->formatErrors($errors));
+
+        $docs = iterator_to_array($manager->executeQuery($this->ns, new Query([])));
+        $this->assertCount($workers, $docs, 'All workers must have inserted a document');
+    }
+
+    /**
+     * maxConnecting=1 serialises connection establishment: only one TCP handshake
+     * at a time, all other concurrent callers wait.  All operations must still
+     * complete and produce the correct result.
+     */
+    public function testMaxConnectingEnforced(): void
+    {
+        $workers     = 10;
+        $uri         = $_ENV['MONGODB_URI'] ?? 'mongodb://127.0.0.1:27017';
+
+        // maxConnecting=1 forces sequential handshakes; maxPoolSize is large enough
+        // that pool capacity is never the bottleneck.  Warm up topology first.
+        $manager = new Manager($uri, ['maxConnecting' => 1, 'maxPoolSize' => $workers]);
+        $manager->executeCommand('admin', new Command(['ping' => 1]));
+
+        [$errors] = async(function () use ($workers, $manager): array {
+            $futures = [];
+            for ($i = 0; $i < $workers; $i++) {
+                $futures[$i] = async(function () use ($i, $manager): void {
+                    $bw = new BulkWrite();
+                    $bw->insert(['worker' => $i]);
+                    $manager->executeBulkWrite($this->ns, $bw);
+                });
+            }
+
+            return awaitAll($futures);
+        })->await();
+
+        $this->assertEmpty($errors, 'Some workers failed under maxConnecting=1: ' . $this->formatErrors($errors));
+
+        $docs = iterator_to_array($manager->executeQuery($this->ns, new Query([])));
+        $this->assertCount($workers, $docs, 'All workers must have inserted a document');
+    }
+
     // -------------------------------------------------------------------------
 
     /** @param array<int|string, Throwable> $errors */

@@ -1174,6 +1174,7 @@ final class OperationExecutor
                 port:               $port,
                 maxPoolSize:        $this->options->maxPoolSize,
                 minPoolSize:        $this->options->minPoolSize,
+                maxConnecting:      $this->options->maxConnecting,
                 waitQueueTimeoutMS: $this->options->waitQueueTimeoutMS,
                 options:            $this->options,
             );
