@@ -23,7 +23,6 @@ use function range;
 use function sort;
 use function sprintf;
 
-/** @group integration */
 class AsyncConcurrencyTest extends IntegrationTestCase
 {
     private Manager $manager;

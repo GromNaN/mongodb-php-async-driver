@@ -12,7 +12,6 @@ use function is_dir;
 use function scandir;
 use function sprintf;
 
-/** @group integration */
 class ConnectionLifecycleTest extends IntegrationTestCase
 {
     /**

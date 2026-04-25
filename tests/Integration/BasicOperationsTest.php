@@ -14,7 +14,6 @@ use function bin2hex;
 use function iterator_to_array;
 use function random_bytes;
 
-/** @group integration */
 class BasicOperationsTest extends IntegrationTestCase
 {
     private Manager $manager;
