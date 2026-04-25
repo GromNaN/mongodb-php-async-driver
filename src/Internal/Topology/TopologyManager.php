@@ -7,6 +7,7 @@ namespace MongoDB\Internal\Topology;
 use Amp\CancelledException;
 use Amp\DeferredFuture;
 use Amp\TimeoutCancellation;
+use Closure;
 use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\ConnectionTimeoutException as DriverConnectionTimeoutException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
@@ -101,7 +102,7 @@ final class TopologyManager
         }
 
         $this->started = true;
-        $this->fireSdamEvent('topologyOpening', TopologyOpeningEvent::create($this->topologyId));
+        $this->fireSdamEvent('topologyOpening', fn () => TopologyOpeningEvent::create($this->topologyId));
 
         // Register all seed servers as Unknown placeholders so the initial
         // topologyChanged event can include them in newServers.
@@ -123,11 +124,10 @@ final class TopologyManager
             fn (InternalServerDescription $s) => $this->buildPublicServerDescription($s),
             $this->servers,
         ));
-        $this->fireSdamEvent('topologyChanged', TopologyChangedEvent::create(
+        $this->fireSdamEvent('topologyChanged', fn () => TopologyChangedEvent::create(
             topologyId:           $this->topologyId,
             previousTopologyType: TopologyType::Unknown->value,
             newTopologyType:      $this->topologyType->value,
-            previousServers:      [],
             newServers:           $initialServers,
         ));
 
@@ -137,7 +137,11 @@ final class TopologyManager
             $port    = (int) ($seed['port'] ?? 27017);
             $address = $host . ':' . $port;
 
-            $this->fireSdamEvent('serverOpening', ServerOpeningEvent::create($host, $port, $this->topologyId));
+            $this->fireSdamEvent('serverOpening', fn () => ServerOpeningEvent::create(
+                $host,
+                $port,
+                $this->topologyId,
+            ));
 
             $monitor = new ServerMonitor(
                 host:                    $host,
@@ -145,7 +149,7 @@ final class TopologyManager
                 onUpdate:                fn (InternalServerDescription $sd) => $this->onServerUpdate($sd),
                 heartbeatFrequencyMs:    $this->options->heartbeatFrequencyMS,
                 minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
-                onHeartbeat:             fn (string $method, object $event) => $this->fireSdamEvent($method, $event),
+                onHeartbeat:             fn (string $method, object $event) => $this->fireSdamEvent($method, static fn () => $event),
                 options:                 $this->options,
             );
 
@@ -163,7 +167,7 @@ final class TopologyManager
             $monitor->stop();
 
             $sd = $this->servers[$address] ?? null;
-            $this->fireSdamEvent('serverClosed', ServerClosedEvent::create(
+            $this->fireSdamEvent('serverClosed', fn () => ServerClosedEvent::create(
                 $sd?->host ?? '',
                 $sd?->port ?? 0,
                 $this->topologyId,
@@ -171,7 +175,7 @@ final class TopologyManager
         }
 
         $this->monitors = [];
-        $this->fireSdamEvent('topologyClosed', TopologyClosedEvent::create($this->topologyId));
+        $this->fireSdamEvent('topologyClosed', fn () => TopologyClosedEvent::create($this->topologyId));
     }
 
     // -------------------------------------------------------------------------
@@ -277,7 +281,7 @@ final class TopologyManager
             $previousSd->type !== ($this->servers[$address]->type ?? InternalServerDescription::TYPE_UNKNOWN)
             || $previousSd->roundTripTimeMs !== ($this->servers[$address]->roundTripTimeMs ?? null)
         ) {
-            $this->fireSdamEvent('serverChanged', ServerChangedEvent::create(
+            $this->fireSdamEvent('serverChanged', fn () => ServerChangedEvent::create(
                 host:                $sd->host,
                 port:                $sd->port,
                 topologyId:          $this->topologyId,
@@ -293,7 +297,7 @@ final class TopologyManager
                 $this->servers,
             ));
 
-            $this->fireSdamEvent('topologyChanged', TopologyChangedEvent::create(
+            $this->fireSdamEvent('topologyChanged', fn () => TopologyChangedEvent::create(
                 topologyId:           $this->topologyId,
                 previousTopologyType: $previousType->value,
                 newTopologyType:      $this->topologyType->value,
@@ -308,7 +312,7 @@ final class TopologyManager
                 continue;
             }
 
-            $this->fireSdamEvent('serverOpening', ServerOpeningEvent::create(
+            $this->fireSdamEvent('serverOpening', fn () => ServerOpeningEvent::create(
                 $knownSd->host,
                 $knownSd->port,
                 $this->topologyId,
@@ -320,7 +324,7 @@ final class TopologyManager
                 onUpdate:                fn (InternalServerDescription $s) => $this->onServerUpdate($s),
                 heartbeatFrequencyMs:    $this->options->heartbeatFrequencyMS,
                 minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
-                onHeartbeat:             fn (string $method, object $event) => $this->fireSdamEvent($method, $event),
+                onHeartbeat:             fn (string $method, object $event) => $this->fireSdamEvent($method, static fn () => $event),
                 options:                 $this->options,
             );
 
@@ -454,15 +458,22 @@ final class TopologyManager
      * Dispatch a SDAM monitoring event to all registered subscribers that
      * implement {@see SDAMSubscriber}.
      *
-     * @param string $method Method name on SDAMSubscriber (e.g. 'serverChanged').
-     * @param object $event  The event object.
+     * The event is created lazily: $factory is only called when at least one
+     * SDAMSubscriber is registered, avoiding object allocation in the common
+     * case where no monitoring is active.
+     *
+     * @param string  $method  Method name on SDAMSubscriber (e.g. 'serverChanged').
+     * @param Closure $factory Returns the event object when invoked.
      */
-    private function fireSdamEvent(string $method, object $event): void
+    private function fireSdamEvent(string $method, Closure $eventFactory): void
     {
+        $event = null;
         GlobalSubscriberRegistry::dispatch(
             $this->subscribers,
             SDAMSubscriber::class,
-            static fn (object $subscriber) => $subscriber->{$method}($event),
+            static function (SDAMSubscriber $subscriber) use ($method, &$event, $eventFactory): void {
+                $subscriber->{$method}($event ??= $eventFactory());
+            },
         );
     }
 }

@@ -1205,18 +1205,30 @@ final class OperationExecutor
         GlobalSubscriberRegistry::dispatch(
             $this->subscribers,
             CommandSubscriber::class,
-            static fn (CommandSubscriber $subscriber) => $subscriber->commandStarted(
-                $event ??= CommandStartedEvent::create(
-                    commandName:         $cmdName,
-                    command:             $cmd,
-                    databaseName:        $db,
-                    requestId:           $requestId,
-                    operationId:         $operationId ?: $requestId,
-                    host:                $host,
-                    port:                $port,
-                    serverConnectionId:  $serverConnectionId,
-                ),
-            ),
+            static function (CommandSubscriber $subscriber) use (
+                &$event,
+                $cmdName,
+                $cmd,
+                $db,
+                $requestId,
+                $operationId,
+                $host,
+                $port,
+                $serverConnectionId,
+            ): void {
+                $subscriber->commandStarted(
+                    $event ??= CommandStartedEvent::create(
+                        commandName:        $cmdName,
+                        command:            $cmd,
+                        databaseName:       $db,
+                        requestId:          $requestId,
+                        operationId:        $operationId ?: $requestId,
+                        host:               $host,
+                        port:               $port,
+                        serverConnectionId: $serverConnectionId,
+                    ),
+                );
+            },
         );
     }
 
@@ -1235,25 +1247,38 @@ final class OperationExecutor
         GlobalSubscriberRegistry::dispatch(
             $this->subscribers,
             CommandSubscriber::class,
-            static fn (CommandSubscriber $subscriber) => $subscriber->commandSucceeded(
-                $event ??= CommandSucceededEvent::create(
-                    commandName:         $cmdName,
-                    reply:               $reply,
-                    databaseName:        $db,
-                    requestId:           $requestId,
-                    operationId:         $operationId ?: $requestId,
-                    durationMicros:      $durationMicros,
-                    host:                $host,
-                    port:                $port,
-                    serverConnectionId:  $serverConnectionId,
-                ),
-            ),
+            static function (CommandSubscriber $subscriber) use (
+                &$event,
+                $cmdName,
+                $reply,
+                $db,
+                $requestId,
+                $operationId,
+                $durationMicros,
+                $host,
+                $port,
+                $serverConnectionId,
+            ): void {
+                $subscriber->commandSucceeded(
+                    $event ??= CommandSucceededEvent::create(
+                        commandName:        $cmdName,
+                        reply:              $reply,
+                        databaseName:       $db,
+                        requestId:          $requestId,
+                        operationId:        $operationId ?: $requestId,
+                        durationMicros:     $durationMicros,
+                        host:               $host,
+                        port:               $port,
+                        serverConnectionId: $serverConnectionId,
+                    ),
+                );
+            },
         );
     }
 
     private function fireCommandFailed(
         string $cmdName,
-        Throwable $e,
+        Throwable $exception,
         string $db,
         int $requestId,
         int $durationMicros,
@@ -1263,25 +1288,38 @@ final class OperationExecutor
         ?int $serverConnectionId = null,
         int $operationId = 0,
     ): void {
-        $exception = $e instanceof Exception ? $e : new RuntimeException($e->getMessage(), $e->getCode(), $e);
         $event     = null;
         GlobalSubscriberRegistry::dispatch(
             $this->subscribers,
             CommandSubscriber::class,
-            static fn (CommandSubscriber $subscriber) => $subscriber->commandFailed(
-                $event ??= CommandFailedEvent::create(
-                    commandName:         $cmdName,
-                    databaseName:        $db,
-                    error:               $exception,
-                    requestId:           $requestId,
-                    operationId:         $operationId ?: $requestId,
-                    durationMicros:      $durationMicros,
-                    host:                $host,
-                    port:                $port,
-                    serverConnectionId:  $serverConnectionId,
-                    reply:               $reply,
-                ),
-            ),
+            static function (CommandSubscriber $subscriber) use (
+                &$event,
+                $cmdName,
+                $db,
+                $exception,
+                $requestId,
+                $operationId,
+                $durationMicros,
+                $host,
+                $port,
+                $serverConnectionId,
+                $reply,
+            ): void {
+                $subscriber->commandFailed(
+                    $event ??= CommandFailedEvent::create(
+                        commandName:        $cmdName,
+                        databaseName:       $db,
+                        error:              $exception instanceof Exception ? $exception : new RuntimeException($exception->getMessage(), $exception->getCode(), $exception),
+                        requestId:          $requestId,
+                        operationId:        $operationId ?: $requestId,
+                        durationMicros:     $durationMicros,
+                        host:               $host,
+                        port:               $port,
+                        serverConnectionId: $serverConnectionId,
+                        reply:              $reply,
+                    ),
+                );
+            },
         );
     }
 
@@ -1421,29 +1459,24 @@ final class OperationExecutor
      */
     private static function isSensitiveCommand(string $cmdName, object $cmd): bool
     {
-        static $unconditional = [
-            'authenticate'   => true,
-            'saslstart'      => true,
-            'saslcontinue'   => true,
-            'getnonce'       => true,
-            'createuser'     => true,
-            'updateuser'     => true,
-            'copydbgetnonce' => true,
-            'copydbsaslstart' => true,
-            'copydb'         => true,
-        ];
+        return match (strtolower($cmdName)) {
+            // Inconditional sensitive commands (body and reply always redacted)
+            'authenticate',
+            'saslstart',
+            'saslcontinue',
+            'getnonce',
+            'createuser',
+            'updateuser',
+            'copydbgetnonce',
+            'copydbsaslstart',
+            'copydb' => true,
 
-        $lower = strtolower($cmdName);
+            // hello (and legacy hello variants) are sensitive only when speculativeAuthenticate is present
+            'hello',
+            'ismaster',
+            'isMaster' => isset($cmd->speculativeAuthenticate),
 
-        if (isset($unconditional[$lower])) {
-            return true;
-        }
-
-        // hello (and legacy hello variants) are sensitive only when speculativeAuthenticate is present.
-        if ($lower === 'hello' || $lower === 'ismaster' || $lower === 'ismaster') {
-            return isset($cmd->speculativeAuthenticate);
-        }
-
-        return false;
+            default => false,
+        };
     }
 }
