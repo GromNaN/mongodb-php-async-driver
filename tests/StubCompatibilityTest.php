@@ -176,8 +176,9 @@ class StubCompatibilityTest extends TestCase
                 sprintf('%s::%s() static mismatch', $className, $methodName),
             );
 
-            // Return type
-            if ($stubSig['returnType'] !== null) {
+            // Return type — skip for methods inherited from a parent class: built-in
+            // parent classes (e.g. ArrayIterator) often omit explicit return types.
+            if ($stubSig['returnType'] !== null && $method->getDeclaringClass()->getName() === $className) {
                 $actualReturn = $this->reflectTypeString($method->getReturnType());
                 // `static` return type is valid for final classes and means the class itself
                 if ($actualReturn === 'static') {

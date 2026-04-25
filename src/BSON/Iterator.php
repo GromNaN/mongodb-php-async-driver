@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace MongoDB\BSON;
 
+use ArrayIterator;
 use Exception;
-use Iterator as IteratorInterface;
 use MongoDB\Driver\Exception\LogicException;
-
-use function array_keys;
+use MongoDB\Internal\BSON\Index\Field;
 
 /**
  * A forward-only iterator over a decoded BSON document or array.
@@ -16,47 +15,39 @@ use function array_keys;
  * Instances are created exclusively by internal decoder code via
  * {@see self::createFromDecodedData()}.  The constructor is private to
  * prevent userland instantiation.
+ *
+ * @method void next()
+ * @method void rewind()
+ * @method bool valid()
  */
-final class Iterator implements IteratorInterface
+final class Iterator extends ArrayIterator
 {
-    public readonly Document|PackedArray $bson;
-
-    /** @var list<string|int> Ordered list of keys. */
-    private array $keys;
-
-    private int $position;
-
     /**
      * Private constructor – use {@see self::createFromDecodedData()} instead.
      *
-     * @param array<string|int, mixed> $data
+     * @param array<string|int, Field> $fields
      */
-    private function __construct(Document|PackedArray $bson, private array $data)
-    {
-        $this->bson     = $bson;
-        $this->keys     = array_keys($data);
-        $this->position = 0;
+    private function __construct(
+        public readonly Document|PackedArray $bson,
+        array $fields,
+    ) {
+        parent::__construct($fields);
     }
 
     // ------------------------------------------------------------------
-    // Internal factory (called by BsonDecoder)
+    // Internal factory (called by Document / PackedArray)
     // ------------------------------------------------------------------
 
     /**
-     * Factory method intended for use by {@see \MongoDB\Internal\BSON\BsonDecoder}.
+     * Factory method intended for use by {@see Document} and {@see PackedArray}.
      *
      * @internal
      *
-     * @param array<string|int, mixed> $data
+     * @param array<string|int, Field> $fields
      */
-    public static function createFromDecodedData(Document|PackedArray $bson, array $data): static
+    public static function createFromDecodedData(Document|PackedArray $bson, array $fields): static
     {
-        return new static($bson, $data);
-    }
-
-    public function __clone(): void
-    {
-        $this->position = 0;
+        return new static($bson, $fields);
     }
 
     public function __serialize(): array
@@ -79,7 +70,7 @@ final class Iterator implements IteratorInterface
             throw new LogicException('Cannot call current() on an exhausted iterator');
         }
 
-        return $this->data[$this->keys[$this->position]];
+        return parent::current()->getValue();
     }
 
     final public function key(): string|int
@@ -88,21 +79,6 @@ final class Iterator implements IteratorInterface
             throw new LogicException('Cannot call key() on an exhausted iterator');
         }
 
-        return $this->keys[$this->position];
-    }
-
-    final public function next(): void
-    {
-        ++$this->position;
-    }
-
-    final public function rewind(): void
-    {
-        $this->position = 0;
-    }
-
-    final public function valid(): bool
-    {
-        return isset($this->keys[$this->position]);
+        return parent::key();
     }
 }

@@ -198,12 +198,9 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
 
     final public function getIterator(): Iterator
     {
-        $data = [];
-        foreach (PackedArrayIndex::forBson($this)->fields as $i => $field) {
-            $data[$i] = $field->getValue();
-        }
+        $index = PackedArrayIndex::forBson($this);
 
-        return Iterator::createFromDecodedData($this, $data);
+        return Iterator::createFromDecodedData($this, $index->fields);
     }
 
     // ------------------------------------------------------------------

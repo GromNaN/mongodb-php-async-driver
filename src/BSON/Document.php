@@ -19,6 +19,7 @@ use MongoDB\Internal\BSON\Index\DocumentIndex;
 use OutOfBoundsException;
 use Stringable;
 
+use function array_keys;
 use function base64_decode;
 use function base64_encode;
 use function get_debug_type;
@@ -194,12 +195,12 @@ final class Document implements IteratorAggregate, ArrayAccess, Type, Stringable
 
     final public function getIterator(): Iterator
     {
-        $data = [];
-        foreach (DocumentIndex::forBson($this)->fields as $field) {
-            $data[$field->key] = $field->getValue();
-        }
+        $index = DocumentIndex::forBson($this);
 
-        return Iterator::createFromDecodedData($this, $data);
+        return Iterator::createFromDecodedData(
+            $this,
+            $index->fields,
+        );
     }
 
     // ------------------------------------------------------------------
