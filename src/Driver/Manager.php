@@ -157,6 +157,7 @@ final class Manager
         }
 
         $this->topologyManager->stop();
+        $this->executor->close();
     }
 
     public function addSubscriber(Subscriber $subscriber): void

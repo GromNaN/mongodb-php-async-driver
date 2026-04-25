@@ -112,6 +112,19 @@ final class OperationExecutor
         }
     }
 
+    /**
+     * Close all connection pools. Called from Manager::__destruct() to ensure
+     * immediate socket cleanup regardless of GC timing.
+     */
+    public function close(): void
+    {
+        foreach ($this->pools as $pool) {
+            $pool->close();
+        }
+
+        $this->pools = [];
+    }
+
     public function addSubscriber(Subscriber $subscriber): void
     {
         $this->subscribers[spl_object_id($subscriber)] = $subscriber;
