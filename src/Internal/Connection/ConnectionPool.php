@@ -294,12 +294,12 @@ final class ConnectionPool
                     $conn->connect($this->options);
 
                     if (! $deferred->isComplete()) {
-                        $this->inUse++;
+                        // Do NOT increment inUse here; acquire() does it after await().
                         $deferred->complete($conn);
                     } else {
-                        // Waiter timed out while we were connecting; recycle the connection.
-                        $this->inUse++;
-                        $this->release($conn);
+                        // Waiter was served by another path while we were connecting.
+                        // Close the superfluous connection to avoid file-descriptor leaks.
+                        $conn->close();
                     }
                 } catch (Throwable $e) {
                     if (! $deferred->isComplete()) {
