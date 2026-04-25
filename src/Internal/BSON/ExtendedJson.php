@@ -616,7 +616,7 @@ final class ExtendedJson
         if ($v instanceof UTCDateTime) {
             $ms = $v->getMilliseconds();
             if ($ms instanceof Int64) {
-                $ms = (int) (string) $ms;
+                $ms = (int) $ms->integer;
             }
 
             // Relaxed: ISO-8601 only for non-negative ms within year [0, 9999]
@@ -664,7 +664,7 @@ final class ExtendedJson
 
         if ($v instanceof Int64) {
             // Relaxed: always emit Int64 as a native JSON integer
-            return (int) (string) $v;
+            return (int) $v->integer;
         }
 
         if ($v instanceof Decimal128) {
