@@ -123,7 +123,7 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
 
         $intPart   = $m[4];
         $fracPart  = $m[5] ?? '';
-        $parsedExp = (int) $m[6];
+        $parsedExp = (int) ($m[6] ?? 0);
 
         // Reject strings with no digits at all (e.g. bare "+" or ".")
         if ($intPart === '' && $fracPart === '') {
