@@ -9,7 +9,6 @@ use MongoDB\Driver\ReadPreference;
 use function array_any;
 use function array_filter;
 use function array_intersect_assoc;
-use function array_values;
 
 /**
  * Stateless server-selection logic (SDAM spec §Server Selection).
@@ -33,7 +32,7 @@ final class ServerSelector
      *
      * @param array<string, InternalServerDescription> $servers
      *
-     * @return list<InternalServerDescription>
+     * @return InternalServerDescription[]
      */
     public static function select(
         array $servers,
@@ -121,21 +120,21 @@ final class ServerSelector
      *
      * @param array<string, InternalServerDescription> $servers
      *
-     * @return list<InternalServerDescription>
+     * @return InternalServerDescription[]
      */
     private static function filterAvailable(array $servers): array
     {
-        return array_values(array_filter($servers, static fn (InternalServerDescription $sd) => $sd->isAvailable()));
+        return array_filter($servers, static fn (InternalServerDescription $sd) => $sd->isAvailable());
     }
 
     /**
      * @param array<string, InternalServerDescription> $servers
      *
-     * @return list<InternalServerDescription>
+     * @return InternalServerDescription[]
      */
     private static function filterByType(array $servers, string $type): array
     {
-        return array_values(array_filter($servers, static fn (InternalServerDescription $sd) => $sd->type === $type));
+        return array_filter($servers, static fn (InternalServerDescription $sd) => $sd->type === $type);
     }
 
     /**
@@ -144,7 +143,7 @@ final class ServerSelector
      * @param array<string, InternalServerDescription> $servers
      * @param array<array<string, string>>             $tagSets
      *
-     * @return list<InternalServerDescription>
+     * @return InternalServerDescription[]
      */
     private static function selectSecondaries(array $servers, array $tagSets, int $localThresholdMs): array
     {
@@ -161,10 +160,10 @@ final class ServerSelector
      * A server matches if it satisfies *at least one* tag set (a tag set is
      * satisfied when the server has *all* tags in that set).
      *
-     * @param list<InternalServerDescription> $servers
-     * @param array<array<string, string>>    $tagSets
+     * @param InternalServerDescription>   $server[]
+     * @param array<array<string, string>> $tagSets
      *
-     * @return list<InternalServerDescription>
+     * @return InternalServerDescription[]
      */
     private static function filterByTagSets(array $servers, array $tagSets): array
     {
@@ -172,13 +171,13 @@ final class ServerSelector
             return $servers;
         }
 
-        return array_values(array_filter(
+        return array_filter(
             $servers,
             static fn (InternalServerDescription $sd) => array_any(
                 $tagSets,
                 static fn (array $tagSet) => array_intersect_assoc($tagSet, $sd->tags) === $tagSet,
             ),
-        ));
+        );
     }
 
     /**
@@ -187,9 +186,9 @@ final class ServerSelector
      *
      * Servers with no RTT measurement are excluded.
      *
-     * @param list<InternalServerDescription> $servers
+     * @param InternalServerDescription> $server[]
      *
-     * @return list<InternalServerDescription>
+     * @return InternalServerDescription[]
      */
     private static function filterByLatency(array $servers, int $localThresholdMs): array
     {

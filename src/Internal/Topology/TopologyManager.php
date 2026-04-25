@@ -25,6 +25,7 @@ use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
 use MongoDB\Internal\Uri\UriOptions;
 
 use function array_filter;
+use function array_first;
 use function array_keys;
 use function array_map;
 use function array_rand;
@@ -419,16 +420,12 @@ final class TopologyManager
      * For all other modes (where multiple servers may qualify), return a random
      * one to distribute load.
      *
-     * @param list<InternalServerDescription> $candidates
+     * @param InternalServerDescription[] $candidates
      */
     private function pickServer(array $candidates, ReadPreference $rp): InternalServerDescription
     {
-        if (count($candidates) === 1) {
-            return $candidates[0];
-        }
-
-        if ($rp->getModeString() === ReadPreference::PRIMARY) {
-            return $candidates[0];
+        if (count($candidates) === 1 || $rp->getModeString() === ReadPreference::PRIMARY) {
+            return array_first($candidates);
         }
 
         // Random selection among eligible secondaries / nearest servers.

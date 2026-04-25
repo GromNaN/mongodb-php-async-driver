@@ -10,6 +10,7 @@ use MongoDB\Internal\Topology\ServerSelector;
 use MongoDB\Internal\Topology\TopologyType;
 use PHPUnit\Framework\TestCase;
 
+use function array_first;
 use function array_keys;
 use function array_map;
 
@@ -57,7 +58,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::Single, new ReadPreference(ReadPreference::PRIMARY));
 
         $this->assertCount(1, $result);
-        $this->assertSame('a', $result[0]->host);
+        $this->assertSame('a', array_first($result)->host);
     }
 
     public function testSingleTopologyExcludesUnknownServer(): void
@@ -86,7 +87,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::LoadBalanced, $rp);
 
         $this->assertCount(1, $result);
-        $this->assertSame('g', $result[0]->host);
+        $this->assertSame('g', array_first($result)->host);
     }
 
     // -------------------------------------------------------------------------
@@ -129,7 +130,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::Sharded, new ReadPreference(ReadPreference::PRIMARY));
 
         $this->assertCount(1, $result);
-        $this->assertSame('g', $result[0]->host);
+        $this->assertSame('g', array_first($result)->host);
     }
 
     public function testShardedTopologyReturnsMongosOnly(): void
@@ -142,7 +143,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::Sharded, new ReadPreference(ReadPreference::PRIMARY));
 
         $this->assertCount(1, $result);
-        $this->assertSame('a', $result[0]->host);
+        $this->assertSame('a', array_first($result)->host);
     }
 
     // -------------------------------------------------------------------------
@@ -159,7 +160,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::ReplicaSetWithPrimary, new ReadPreference(ReadPreference::PRIMARY));
 
         $this->assertCount(1, $result);
-        $this->assertSame('primary', $result[0]->host);
+        $this->assertSame('primary', array_first($result)->host);
     }
 
     public function testPrimaryModeReturnsEmptyWhenNoPrimary(): void
@@ -188,7 +189,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::ReplicaSetWithPrimary, new ReadPreference(ReadPreference::PRIMARY_PREFERRED));
 
         $this->assertCount(1, $result);
-        $this->assertSame('primary', $result[0]->host);
+        $this->assertSame('primary', array_first($result)->host);
     }
 
     public function testPrimaryPreferredFallsBackToSecondaries(): void
@@ -219,7 +220,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::ReplicaSetWithPrimary, new ReadPreference(ReadPreference::SECONDARY));
 
         $this->assertCount(1, $result);
-        $this->assertSame('s1', $result[0]->host);
+        $this->assertSame('s1', array_first($result)->host);
     }
 
     // -------------------------------------------------------------------------
@@ -235,7 +236,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::ReplicaSetWithPrimary, new ReadPreference(ReadPreference::SECONDARY_PREFERRED));
 
         $this->assertCount(1, $result);
-        $this->assertSame('primary', $result[0]->host);
+        $this->assertSame('primary', array_first($result)->host);
     }
 
     // -------------------------------------------------------------------------
@@ -316,7 +317,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::ReplicaSetWithPrimary, new ReadPreference(ReadPreference::SECONDARY));
 
         $this->assertCount(1, $result);
-        $this->assertSame('measured', $result[0]->host);
+        $this->assertSame('measured', array_first($result)->host);
     }
 
     // -------------------------------------------------------------------------
@@ -350,7 +351,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::ReplicaSetWithPrimary, $rp);
 
         $this->assertCount(1, $result);
-        $this->assertSame('s1', $result[0]->host);
+        $this->assertSame('s1', array_first($result)->host);
     }
 
     public function testTagSetFilteringWithMultipleSets(): void
@@ -386,7 +387,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::ReplicaSetWithPrimary, $rp);
 
         $this->assertCount(1, $result);
-        $this->assertSame('s1', $result[0]->host);
+        $this->assertSame('s1', array_first($result)->host);
     }
 
     // -------------------------------------------------------------------------
@@ -417,7 +418,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::Single, $rp);
 
         $this->assertCount(1, $result);
-        $this->assertSame('a', $result[0]->host);
+        $this->assertSame('a', array_first($result)->host);
     }
 
     public function testPrimaryPreferredWithNonMatchingTagsFallsBackToPrimary(): void
@@ -434,7 +435,7 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::ReplicaSetWithPrimary, $rp);
 
         $this->assertCount(1, $result);
-        $this->assertSame('a', $result[0]->host);
+        $this->assertSame('a', array_first($result)->host);
     }
 
     public function testSecondaryPreferredWithNonMatchingTagsFallsBackToPrimary(): void
@@ -450,6 +451,6 @@ class ServerSelectorTest extends TestCase
         $result = ServerSelector::select($servers, TopologyType::ReplicaSetWithPrimary, $rp);
 
         $this->assertCount(1, $result);
-        $this->assertSame('a', $result[0]->host);
+        $this->assertSame('a', array_first($result)->host);
     }
 }
