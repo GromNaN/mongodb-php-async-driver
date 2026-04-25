@@ -19,7 +19,6 @@ use MongoDB\Internal\BSON\Index\DocumentIndex;
 use OutOfBoundsException;
 use Stringable;
 
-use function array_keys;
 use function base64_decode;
 use function base64_encode;
 use function get_debug_type;

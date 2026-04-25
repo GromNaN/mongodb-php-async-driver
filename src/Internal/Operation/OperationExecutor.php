@@ -54,6 +54,7 @@ use RuntimeException;
 use stdClass;
 use Throwable;
 
+use function array_is_list;
 use function array_map;
 use function array_values;
 use function assert;
@@ -724,11 +725,11 @@ final class OperationExecutor
                 $remappedOps[] = $remapped;
             }
 
-            // Command body (kind 0): no ops field; ops go in kind-1 doc sequence.
-            // Include ops in the command for APM events (CommandStartedEvent.getCommand()).
+            // Command body (kind 0): ops are NOT included here; they are sent as a kind-1
+            // document sequence so the kind-0 body stays well below maxBsonObjectSize.
+            // The APM event reconstructs ops from the doc sequence via normalizeDocSeqForApm().
             $command = [
                 'bulkWrite'  => 1,
-                'ops'        => $remappedOps,
                 'nsInfo'     => $batchNsInfo,
                 'ordered'    => $ordered,
                 'errorsOnly' => ! $verboseResults,
@@ -925,17 +926,17 @@ final class OperationExecutor
             unset($bodyForEncoding[$seq['id']]);
         }
 
-        // Build APM command doc from the (small) body only, avoiding BSON-encoding of large
-        // doc-sequence fields (e.g. ops containing 16 MB documents) which would cause OOM.
-        // Re-add doc-sequence fields as PHP arrays; CommandStartedEvent consumers receive them
-        // as plain arrays which is equivalent to the decoded BSON representation.
+        // Build APM command doc from the (small) body only.
+        // Re-add doc-sequence fields item-by-item using normalizeDocSeqForApm() instead of the
+        // PackedArray::fromPHP()->toPHP() round-trip, which builds the entire BSON blob in one
+        // allocation before decoding it and causes OOM for large batches (e.g. 100 000 ops).
         $commandDoc = Document::fromPHP($bodyForEncoding)->toPHP(['root' => 'object', 'document' => 'object']);
         assert($commandDoc instanceof stdClass);
         foreach ($docSequences as $seq) {
-            $items = $prepared[$seq['id']] ?? [];
-            // Decode each item as an object (matching ext-mongodb APM behaviour).
-            $commandDoc->{$seq['id']} = PackedArray::fromPHP($items)
-                ->toPHP(['root' => 'array', 'document' => 'object']);
+            // Fall back to the doc sequence's own docs when the field is absent from the
+            // prepared command (e.g. bulkWrite ops are no longer stored in the command body).
+            $items = $prepared[$seq['id']] ?? $seq['docs'];
+            $commandDoc->{$seq['id']} = self::normalizeDocSeqForApm($items);
         }
 
         // Sensitive commands must have their command body replaced with {} in APM events.
@@ -1425,6 +1426,49 @@ final class OperationExecutor
             tags:              $sd->tags,
             executor:          $this,
         );
+    }
+
+    /**
+     * Normalise doc-sequence items for APM without a full BSON round-trip.
+     *
+     * The PackedArray::fromPHP()->toPHP() pattern allocates the entire BSON blob
+     * for all items at once, which causes OOM for large batches (100 000+ ops).
+     * This method processes each item individually: Document/PackedArray values are
+     * decoded via their own toPHP(), PHP arrays with string keys become stdClass,
+     * and everything else is returned as-is.  The result matches what the round-trip
+     * produces but uses only the memory needed for one decoded item at a time.
+     *
+     * @param list<mixed> $items
+     *
+     * @return list<mixed>
+     */
+    private static function normalizeDocSeqForApm(array $items): array
+    {
+        $normalize = static function (mixed $value) use (&$normalize): mixed {
+            if ($value instanceof Document) {
+                $arr = $value->toPHP(['root' => 'array', 'document' => 'array']);
+
+                return (object) array_map($normalize, $arr);
+            }
+
+            if ($value instanceof PackedArray) {
+                return array_map(
+                    $normalize,
+                    $value->toPHP(['root' => 'array', 'document' => 'array']),
+                );
+            }
+
+            if (is_array($value)) {
+                $normalized = array_map($normalize, $value);
+
+                // BSON documents (string-keyed PHP arrays) become stdClass; BSON arrays stay as arrays.
+                return array_is_list($value) ? $normalized : (object) $normalized;
+            }
+
+            return $value;
+        };
+
+        return array_map($normalize, $items);
     }
 
     /**
