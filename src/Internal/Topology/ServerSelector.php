@@ -50,16 +50,12 @@ final class ServerSelector
 
         if ($topologyType === TopologyType::Single) {
             // Single topology: return the sole available server regardless of RP.
-            $available = self::filterAvailable($servers);
-
-            return array_values($available);
+            return self::filterAvailable($servers);
         }
 
         if ($topologyType === TopologyType::LoadBalanced) {
             // Load-balanced topology: always exactly one load-balancer entry.
-            $available = self::filterAvailable($servers);
-
-            return array_values($available);
+            return self::filterAvailable($servers);
         }
 
         if ($topologyType === TopologyType::Sharded) {
@@ -78,12 +74,12 @@ final class ServerSelector
 
         switch ($mode) {
             case ReadPreference::PRIMARY:
-                return array_values(self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY));
+                return self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY);
 
             case ReadPreference::PRIMARY_PREFERRED:
                 $primaries = self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY);
                 if ($primaries !== []) {
-                    return array_values($primaries);
+                    return $primaries;
                 }
 
                 // Fall back to secondaries.
@@ -99,7 +95,7 @@ final class ServerSelector
                 }
 
                 // Fall back to primary (ignoring tag sets for the primary fallback).
-                return array_values(self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY));
+                return self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY);
 
             case ReadPreference::NEAREST:
                 // All available servers (any type), filtered by tags then latency.
@@ -123,21 +119,21 @@ final class ServerSelector
      *
      * @param array<string, InternalServerDescription> $servers
      *
-     * @return array<string, InternalServerDescription>
+     * @return list<InternalServerDescription>
      */
     private static function filterAvailable(array $servers): array
     {
-        return array_filter($servers, static fn (InternalServerDescription $sd) => $sd->isAvailable());
+        return array_values(array_filter($servers, static fn (InternalServerDescription $sd) => $sd->isAvailable()));
     }
 
     /**
      * @param array<string, InternalServerDescription> $servers
      *
-     * @return array<string, InternalServerDescription>
+     * @return list<InternalServerDescription>
      */
     private static function filterByType(array $servers, string $type): array
     {
-        return array_filter($servers, static fn (InternalServerDescription $sd) => $sd->type === $type);
+        return array_values(array_filter($servers, static fn (InternalServerDescription $sd) => $sd->type === $type));
     }
 
     /**
@@ -163,10 +159,10 @@ final class ServerSelector
      * A server matches if it satisfies *at least one* tag set (a tag set is
      * satisfied when the server has *all* tags in that set).
      *
-     * @param array<string, InternalServerDescription> $servers
-     * @param array<array<string, string>>             $tagSets
+     * @param list<InternalServerDescription> $servers
+     * @param array<array<string, string>>    $tagSets
      *
-     * @return array<string, InternalServerDescription>
+     * @return list<InternalServerDescription>
      */
     private static function filterByTagSets(array $servers, array $tagSets): array
     {
@@ -174,7 +170,7 @@ final class ServerSelector
             return $servers;
         }
 
-        return array_filter(
+        return array_values(array_filter(
             $servers,
             static function (InternalServerDescription $sd) use ($tagSets): bool {
                 foreach ($tagSets as $tagSet) {
@@ -185,7 +181,7 @@ final class ServerSelector
 
                 return false;
             },
-        );
+        ));
     }
 
     /**
@@ -210,7 +206,7 @@ final class ServerSelector
      *
      * Servers with no RTT measurement are excluded.
      *
-     * @param array<string, InternalServerDescription> $servers
+     * @param list<InternalServerDescription> $servers
      *
      * @return list<InternalServerDescription>
      */
@@ -231,7 +227,7 @@ final class ServerSelector
         }
 
         if ($minRtt === null) {
-            return array_values($servers); // No RTT data: cannot filter, return all candidates.
+            return $servers; // No RTT data: cannot filter, return all candidates.
         }
 
         $threshold = $minRtt + $localThresholdMs;
