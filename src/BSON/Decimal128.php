@@ -8,12 +8,13 @@ use JsonSerializable;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use Stringable;
 
+use function ctype_digit;
 use function is_string;
-use function ltrim;
 use function preg_match;
 use function rtrim;
 use function sprintf;
 use function strlen;
+use function strspn;
 
 final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, Stringable
 {
@@ -84,16 +85,25 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
 
     private static function normalizeAndValidate(string $value): string
     {
-        // Single regex validates the entire input and captures components for further checks.
-        //   Group 1 (sign):  optional leading sign
-        //   Group 2 (inf):   infinity keyword (case-insensitive)
-        //   Group 3 (nan):   NaN keyword (case-insensitive)
-        //   Group 4 (int):   integer digits of mantissa (may be empty when leading dot is used)
-        //   Group 5 (frac):  fractional digits after the decimal point (absent when no dot)
-        //   Group 6 (exp):   signed exponent digits after E (absent when no exponent)
+        // Fast path: plain unsigned integer ≤ 34 digits — no regex needed.
+        // sigDigits ≤ strlen ≤ 34, stored exponent = 0 ∈ [-6176, 6111].
+        if (strlen($value) <= 34 && ctype_digit($value)) {
+            return $value;
+        }
+
+        // Single regex handles sign, inf, nan, and numeric forms.
         if (
             ! preg_match(
-                '/^(?P<sign>[+-]?)(?:(?P<inf>inf(?:inity)?)|(?P<nan>nan)|(?P<int>\d*)(?:\.(?P<frac>\d*))?(?:[eE](?P<exp>[+-]?\d+))?)$/i',
+                '/^
+                    ([+-]?)                 # [1] optional leading sign
+                    (?:
+                        (inf(?:inity)?)     # [2] infinity keyword (case-insensitive)
+                      | (nan)               # [3] NaN keyword (case-insensitive)
+                      | (\d*)               # [4] integer digits of mantissa (may be empty with leading dot)
+                        (?:\.(\d*))?        # [5] fractional digits after the decimal point
+                        (?:[eE]([+-]?\d+))? # [6] signed exponent digits after E
+                    )
+                $/ix',
                 $value,
                 $m,
             )
@@ -103,53 +113,69 @@ final class Decimal128 implements Decimal128Interface, JsonSerializable, Type, S
             );
         }
 
-        if (isset($m['inf']) && $m['inf'] !== '') {
-            return $m['sign'] === '-' ? '-Infinity' : 'Infinity';
+        if ($m[2] !== '') {
+            return $m[1] === '-' ? '-Infinity' : 'Infinity';
         }
 
-        if (isset($m['nan']) && $m['nan'] !== '') {
+        if ($m[3] !== '') {
             return 'NaN';
         }
 
-        $intPart   = $m['int'];
-        $fracPart  = $m['frac'] ?? '';
-        $parsedExp = isset($m['exp']) && $m['exp'] !== '' ? (int) $m['exp'] : 0;
+        $intPart   = $m[4];
+        $fracPart  = $m[5] ?? '';
+        $parsedExp = (int) $m[6];
 
-        // Reject strings that are neither inf/nan nor have any digits (e.g. bare "+" or ".")
+        // Reject strings with no digits at all (e.g. bare "+" or ".")
         if ($intPart === '' && $fracPart === '') {
             throw new InvalidArgumentException(
                 sprintf('Error parsing Decimal128 string: %s', $value),
             );
         }
 
-        // Validate significant digits and exponent range for Decimal128 (34 digits, exp -6176..6111)
-        $decimalPlaces = strlen($fracPart);
-        $coeffDigits   = ltrim($intPart . $fracPart, '0') ?: '0';
+        // Validate coefficient size and exponent range for Decimal128 (34 digits, exp -6176..6111).
+        $intLen  = strlen($intPart);
+        $fracLen = strlen($fracPart);
 
-        if ($coeffDigits !== '0') {
-            $trimmedCoeff  = rtrim($coeffDigits, '0');
-            $trailingZeros = strlen($coeffDigits) - strlen($trimmedCoeff);
-            $sigDigits     = strlen($trimmedCoeff);
-            $coeffLen      = strlen($coeffDigits);
+        // Leading zeros of the coefficient (intPart . fracPart) without string concatenation.
+        $leadZeros = strspn($intPart, '0');
+        if ($leadZeros === $intLen) {
+            $leadZeros += strspn($fracPart, '0');
+        }
 
-            // Too many significant digits to fit in a 34-digit coefficient
+        $coeffLen = $intLen + $fracLen - $leadZeros;
+
+        if ($coeffLen > 0) {
+            // Trailing zeros: count from end of fracPart, then intPart if all of fracPart is zeros.
+            if ($fracLen > 0) {
+                $rtrimFracLen  = strlen(rtrim($fracPart, '0'));
+                $trailingZeros = $fracLen - $rtrimFracLen;
+                if ($rtrimFracLen === 0) {
+                    $trailingZeros += $intLen - strlen(rtrim($intPart, '0'));
+                }
+            } else {
+                $trailingZeros = $intLen - strlen(rtrim($intPart, '0'));
+            }
+
+            $sigDigits = $coeffLen - $trailingZeros;
+
+            // Too many significant digits to fit in a 34-digit coefficient.
             if ($sigDigits > 34) {
                 throw new InvalidArgumentException(
                     sprintf('Error parsing Decimal128 string: %s', $value),
                 );
             }
 
-            // Overflow: even filling the coefficient to 34 digits the stored exponent exceeds 6111.
-            // E_min_achievable = parsedExp - decimalPlaces + coeffLen - 34
-            if ($parsedExp - $decimalPlaces + $coeffLen - 34 > 6111) {
+            // Overflow: even filling the coefficient to 34 digits, the stored exponent exceeds 6111.
+            // E_min_achievable = parsedExp - fracLen + coeffLen - 34
+            if ($parsedExp - $fracLen + $coeffLen - 34 > 6111) {
                 throw new InvalidArgumentException(
                     sprintf('Error parsing Decimal128 string: %s', $value),
                 );
             }
 
-            // Underflow: even removing all trailing zeros the stored exponent is below -6176.
-            // E_max_achievable = parsedExp - decimalPlaces + trailingZeros
-            if ($parsedExp - $decimalPlaces + $trailingZeros < -6176) {
+            // Underflow: even removing all trailing zeros, the stored exponent is below -6176.
+            // E_max_achievable = parsedExp - fracLen + trailingZeros
+            if ($parsedExp - $fracLen + $trailingZeros < -6176) {
                 throw new InvalidArgumentException(
                     sprintf('Error parsing Decimal128 string: %s', $value),
                 );
