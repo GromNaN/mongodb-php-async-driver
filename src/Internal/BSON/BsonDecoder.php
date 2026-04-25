@@ -41,6 +41,7 @@ use function gmp_strval;
 use function mb_check_encoding;
 use function ord;
 use function sprintf;
+use function str_contains;
 use function str_repeat;
 use function strlen;
 use function strpos;
@@ -493,7 +494,13 @@ final class BsonDecoder
         $byte = ord($bson[$offset]);
         $offset++;
 
-        return $byte !== 0x00;
+        if ($byte !== 0x00 && $byte !== 0x01) {
+            throw new RuntimeException(
+                sprintf('Invalid BSON boolean value 0x%02X at offset %d', $byte, $offset - 1),
+            );
+        }
+
+        return $byte === 0x01;
     }
 
     private static function readUTCDateTime(string $bson, int &$offset): UTCDateTime
@@ -514,7 +521,14 @@ final class BsonDecoder
     private static function readDbPointer(string $bson, int &$offset): DBPointer
     {
         $ref = self::readString($bson, $offset);
-        $oid = bin2hex(substr($bson, $offset, 12));
+
+        if ($offset + 12 > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes for DBPointer OID at offset %d (need 12, have %d)', $offset, strlen($bson) - $offset),
+            );
+        }
+
+        $oid     = bin2hex(substr($bson, $offset, 12));
         $offset += 12;
 
         return DBPointer::create($ref, $oid);
@@ -531,6 +545,12 @@ final class BsonDecoder
     {
         $code = self::readString($bson, $offset);
 
+        if (str_contains($code, "\x00")) {
+            throw new RuntimeException(
+                sprintf('JavaScript code string at offset %d contains embedded null bytes', $offset),
+            );
+        }
+
         return new Javascript($code);
     }
 
@@ -542,10 +562,32 @@ final class BsonDecoder
         bool $noDocumentPersistable = false,
         bool $preserveInt64 = false,
     ): Javascript {
-        $totalLen = self::readInt32Unsigned($bson, $offset);
+        $startOffset = $offset;
+        $totalLen    = self::readInt32Unsigned($bson, $offset);
+
+        // Minimum: 4 (self) + 4 (code string len) + 1 (empty code null) + 5 (empty scope) = 14
+        if ($totalLen < 14) {
+            throw new RuntimeException(
+                sprintf('Invalid CodeWithScope length %d at offset %d', $totalLen, $startOffset),
+            );
+        }
+
+        $endOffset = $startOffset + $totalLen;
+
+        if ($endOffset > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('CodeWithScope length %d at offset %d exceeds input length %d', $totalLen, $startOffset, strlen($bson)),
+            );
+        }
 
         $code  = self::readString($bson, $offset);
         $scope = self::decodeDocument($bson, $offset, $typeMap, 'document', false, false, $noRootPersistable, $noDocumentPersistable, '', $preserveInt64);
+
+        if ($offset !== $endOffset) {
+            throw new RuntimeException(
+                sprintf('CodeWithScope at offset %d has incorrect length (expected to end at %d, ended at %d)', $startOffset, $endOffset, $offset),
+            );
+        }
 
         return new Javascript($code, $scope);
     }
@@ -556,7 +598,24 @@ final class BsonDecoder
      */
     private static function readJavascriptWithScopeAsBson(string $bson, int &$offset): Javascript
     {
-        self::readInt32Unsigned($bson, $offset); // consume outer length int32
+        $startOffset = $offset;
+        $totalLen    = self::readInt32Unsigned($bson, $offset);
+
+        // Minimum: 4 (self) + 4 (code string len) + 1 (empty code null) + 5 (empty scope) = 14
+        if ($totalLen < 14) {
+            throw new RuntimeException(
+                sprintf('Invalid CodeWithScope length %d at offset %d', $totalLen, $startOffset),
+            );
+        }
+
+        $endOffset = $startOffset + $totalLen;
+
+        if ($endOffset > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('CodeWithScope length %d at offset %d exceeds input length %d', $totalLen, $startOffset, strlen($bson)),
+            );
+        }
+
         $code = self::readString($bson, $offset);
 
         if ($offset + 4 > strlen($bson)) {
@@ -573,7 +632,14 @@ final class BsonDecoder
             );
         }
 
-        $scope = Document::fromBSON(substr($bson, $offset, $scopeLen));
+        $scope   = Document::fromBSON(substr($bson, $offset, $scopeLen));
+        $offset += $scopeLen;
+
+        if ($offset !== $endOffset) {
+            throw new RuntimeException(
+                sprintf('CodeWithScope at offset %d has incorrect length (expected to end at %d, ended at %d)', $startOffset, $endOffset, $offset),
+            );
+        }
 
         return new Javascript($code, $scope);
     }

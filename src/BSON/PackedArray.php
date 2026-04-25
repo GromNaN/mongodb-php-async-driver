@@ -16,9 +16,11 @@ use MongoDB\Internal\BSON\BsonEncoder;
 use MongoDB\Internal\BSON\ExtendedJson;
 use MongoDB\Internal\BSON\Index\PackedArrayIndex;
 use OutOfBoundsException;
+use stdClass;
 use Stringable;
 
 use function array_is_list;
+use function array_values;
 use function base64_decode;
 use function base64_encode;
 use function get_debug_type;
@@ -84,6 +86,18 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
             );
         }
 
+        // Non-empty JSON objects are accepted when their keys are sequential integers 0, 1, 2, ...
+        // An empty JSON object {} is rejected (indistinguishable from a document, not an array).
+        if ($phpValue instanceof stdClass) {
+            $phpValue = (array) $phpValue;
+
+            if ($phpValue === []) {
+                throw new DriverUnexpectedValueException(
+                    'Received invalid JSON array: expected key 0, but found ""',
+                );
+            }
+        }
+
         if (! is_array($phpValue)) {
             throw new DriverUnexpectedValueException(
                 'Received invalid JSON array: expected key 0, but found ""',
@@ -102,8 +116,10 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
             $expected++;
         }
 
-        $decoded = ExtendedJson::fromValue(ExtendedJson::normalizeJson($phpValue));
-        $bson    = BsonEncoder::encodeList(is_array($decoded) ? $decoded : (array) $decoded);
+        // Re-index to a list for BsonEncoder
+        $phpValue = array_values($phpValue);
+        $decoded  = ExtendedJson::fromValue(ExtendedJson::normalizeJson($phpValue));
+        $bson     = BsonEncoder::encodeList(is_array($decoded) ? $decoded : (array) $decoded);
 
         return new static($bson);
     }
