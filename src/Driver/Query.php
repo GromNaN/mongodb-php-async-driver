@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace MongoDB\Driver;
 
 use MongoDB\BSON\Document as BsonDocument;
-use MongoDB\BSON\PackedArray;
 use MongoDB\BSON\Serializable as BsonSerializable;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Exception\UnexpectedValueException;
@@ -14,7 +13,6 @@ use function array_is_list;
 use function array_key_exists;
 use function array_map;
 use function assert;
-use function get_debug_type;
 use function is_array;
 use function is_object;
 use function is_string;
@@ -26,9 +24,8 @@ final class Query
 
     public function __construct(private array|object $filter, ?array $queryOptions = null)
     {
-        // Validate filter for PackedArray and empty keys
-        if ($filter instanceof PackedArray) {
-            throw new UnexpectedValueException('MongoDB\BSON\PackedArray cannot be serialized as a root document');
+        if (! is_document($filter)) {
+            throw UnexpectedValueException::documentRequiredAsRoot();
         }
 
         $this->validateEmptyKeys($filter, 'filter');
@@ -39,9 +36,7 @@ final class Query
         if (array_key_exists('readConcern', $options)) {
             $val = $options['readConcern'];
             if (! ($val instanceof ReadConcern)) {
-                throw new InvalidArgumentException(
-                    'Expected "readConcern" option to be ' . ReadConcern::class . ', ' . get_debug_type($val) . ' given',
-                );
+                throw InvalidArgumentException::invalidOptionType('readConcern', $val, ReadConcern::class);
             }
         }
 
@@ -49,13 +44,11 @@ final class Query
         if (array_key_exists('hint', $options)) {
             $val = $options['hint'];
             if (! is_string($val) && ! is_array($val) && ! is_object($val)) {
-                throw new InvalidArgumentException(
-                    'Expected "hint" option to be string, array, or object, ' . get_debug_type($val) . ' given',
-                );
+                throw InvalidArgumentException::expectedHintOption('hint', $val);
             }
 
-            if ($val instanceof PackedArray) {
-                throw new UnexpectedValueException('MongoDB\BSON\PackedArray cannot be serialized as a root document');
+            if (! is_document($val)) {
+                throw UnexpectedValueException::documentRequiredAsRoot();
             }
 
             if (is_array($val) || is_object($val)) {
@@ -72,14 +65,12 @@ final class Query
 
             $val = $options[$key];
 
-            if ($val instanceof PackedArray) {
-                throw new UnexpectedValueException('MongoDB\BSON\PackedArray cannot be serialized as a root document');
+            if (! is_array($val) && ! is_object($val)) {
+                throw InvalidArgumentException::expectedDocumentOption($key, $val);
             }
 
-            if (! is_array($val) && ! is_object($val)) {
-                throw new InvalidArgumentException(
-                    'Expected "' . $key . '" option to be array or object, ' . get_debug_type($val) . ' given',
-                );
+            if (! is_document($val)) {
+                throw UnexpectedValueException::documentRequiredAsRoot();
             }
 
             $this->validateEmptyKeys($val, $key);

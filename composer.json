@@ -21,6 +21,7 @@
     "autoload": {
         "files": [
             "src/BSON/functions.php",
+            "src/Driver/functions.php",
             "src/Driver/Monitoring/functions.php"
         ],
         "psr-4": {
