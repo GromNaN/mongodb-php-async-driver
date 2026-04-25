@@ -28,6 +28,7 @@ use ReflectionException;
 use RuntimeException;
 use stdClass;
 
+use function array_filter;
 use function array_key_exists;
 use function array_merge;
 use function bin2hex;
@@ -86,18 +87,10 @@ final class BsonDecoder
         bool $ignoreRootKeys = false,
         bool $preserveInt64 = false,
     ): array|object {
-        foreach ($typeMap as $k => $v) {
-            if ($v !== null) {
-                continue;
-            }
-
-            unset($typeMap[$k]);
-        }
-
         $noRootPersistable     = array_key_exists('root', $typeMap) && $typeMap['root'] === 'object';
         $noDocumentPersistable = array_key_exists('document', $typeMap) && $typeMap['document'] === 'object';
 
-        $typeMap = array_merge(self::DEFAULT_TYPE_MAP, $typeMap);
+        $typeMap = array_merge(self::DEFAULT_TYPE_MAP, array_filter($typeMap, static fn ($v) => $v !== null));
 
         $offset = 0;
 

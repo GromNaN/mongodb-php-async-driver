@@ -227,10 +227,7 @@ final class ExtendedJson
 
         // --- $regularExpression ---
         if (array_key_exists('$regularExpression', $value)) {
-            $r = $value['$regularExpression'];
-            if ($r instanceof stdClass) {
-                $r = (array) $r;
-            }
+            $r = self::toArray($value['$regularExpression']);
 
             if (
                 count($value) !== 1
@@ -252,10 +249,7 @@ final class ExtendedJson
 
         // --- $timestamp ---
         if (array_key_exists('$timestamp', $value)) {
-            $t = $value['$timestamp'];
-            if ($t instanceof stdClass) {
-                $t = (array) $t;
-            }
+            $t = self::toArray($value['$timestamp']);
 
             if (
                 count($value) !== 1
@@ -366,10 +360,7 @@ final class ExtendedJson
 
         // --- $dbPointer ---
         if (array_key_exists('$dbPointer', $value)) {
-            $dbp = $value['$dbPointer'];
-            if ($dbp instanceof stdClass) {
-                $dbp = (array) $dbp;
-            }
+            $dbp = self::toArray($value['$dbPointer']);
 
             if (
                 count($value) !== 1
@@ -381,10 +372,7 @@ final class ExtendedJson
             }
 
             $ref   = $dbp['$ref'] ?? '';
-            $dbpId = $dbp['$id'] ?? null;
-            if ($dbpId instanceof stdClass) {
-                $dbpId = (array) $dbpId;
-            }
+            $dbpId = self::toArray($dbp['$id'] ?? []);
 
             $oid = is_array($dbpId) ? ($dbpId['$oid'] ?? '') : '';
 
@@ -421,6 +409,15 @@ final class ExtendedJson
     // -------------------------------------------------------------------------
     // Canonical helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Cast $v to array: stdClass objects are cast with (array), arrays are returned as-is.
+     * Used to normalize JSON-decoded objects/arrays before accessing their keys.
+     */
+    private static function toArray(mixed $v): mixed
+    {
+        return $v instanceof stdClass ? (array) $v : $v;
+    }
 
     /**
      * Recursively convert $v into a structure that, when passed through
