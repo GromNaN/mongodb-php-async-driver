@@ -1111,11 +1111,12 @@ final class OperationExecutor
         // Commands that return a cursor sub-document (find, aggregate, …).
         $rawCursor = $body['cursor'] ?? null;
         if ($rawCursor !== null && (is_array($rawCursor) || is_object($rawCursor))) {
-            $cursorDoc  = (array) $rawCursor;
-            $cursorIdRaw = $cursorDoc['id'] ?? 0;
+            $cursorIdRaw = is_array($rawCursor) ? ($rawCursor['id'] ?? 0) : ($rawCursor->id ?? 0);
             $cursorId   = $cursorIdRaw instanceof Int64 ? (int) (string) $cursorIdRaw : (int) $cursorIdRaw;
-            $ns         = (string) ($cursorDoc['ns'] ?? $db);
-            $firstBatch = (array) ($cursorDoc['firstBatch'] ?? []);
+            $nsRaw      = is_array($rawCursor) ? ($rawCursor['ns'] ?? null) : ($rawCursor->ns ?? null);
+            $ns         = (string) ($nsRaw ?? $db);
+            $batchRaw   = is_array($rawCursor) ? ($rawCursor['firstBatch'] ?? []) : ($rawCursor->firstBatch ?? []);
+            $firstBatch = (array) $batchRaw;
 
             $getMoreFn = function (int $cursorId, string $ns) use ($pool, $db, $maxAwaitTimeMS, $batchSize, $comment, $server, $session): array {
                 $getMoreCmd = [
