@@ -116,7 +116,7 @@ final class ReadPreference implements Serializable
             );
 
             if ($hedgeVal instanceof PackedArray) {
-                throw new UnexpectedValueException('MongoDB\BSON\PackedArray cannot be serialized as a root document');
+                throw UnexpectedValueException::documentRequiredAsRoot();
             }
 
             if (! is_array($hedgeVal) && ! is_object($hedgeVal)) {
@@ -343,7 +343,7 @@ final class ReadPreference implements Serializable
             );
 
             if ($hedgeVal instanceof PackedArray) {
-                throw new UnexpectedValueException('MongoDB\BSON\PackedArray cannot be serialized as a root document');
+                throw UnexpectedValueException::documentRequiredAsRoot();
             }
 
             if ($mode === self::PRIMARY) {

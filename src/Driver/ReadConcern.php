@@ -70,7 +70,7 @@ final class ReadConcern implements Serializable
         }
 
         if (! is_string($data['level'])) {
-            throw new InvalidArgumentException('MongoDB\Driver\ReadConcern initialization requires "level" string field');
+            throw InvalidArgumentException::initializationRequiresStringField('MongoDB\\Driver\\ReadConcern', 'level');
         }
 
         $this->level = $data['level'];
@@ -80,7 +80,7 @@ final class ReadConcern implements Serializable
     {
         if (isset($properties['level'])) {
             if (! is_string($properties['level'])) {
-                throw new InvalidArgumentException('MongoDB\Driver\ReadConcern initialization requires "level" string field');
+                throw InvalidArgumentException::initializationRequiresStringField('MongoDB\\Driver\\ReadConcern', 'level');
             }
 
             return new static($properties['level']);

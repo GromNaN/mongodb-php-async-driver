@@ -20,7 +20,6 @@ use function array_map;
 use function array_merge;
 use function bin2hex;
 use function count;
-use function get_debug_type;
 use function get_object_vars;
 use function is_array;
 use function is_object;
@@ -50,15 +49,11 @@ final class BulkWrite implements Countable
         if (array_key_exists('let', $options)) {
             $let = $options['let'];
             if (! is_array($let) && ! is_object($let)) {
-                throw new InvalidArgumentException(
-                    'Expected "let" option to be array or object, ' . get_debug_type($let) . ' given',
-                );
+                throw InvalidArgumentException::expectedDocumentOption('let', $let);
             }
 
-            if ($let instanceof PackedArray) {
-                throw new UnexpectedValueException(
-                    'MongoDB\BSON\PackedArray cannot be serialized as a root document',
-                );
+            if (! is_document($let)) {
+                throw UnexpectedValueException::documentRequiredAsRoot();
             }
         }
 
@@ -83,10 +78,8 @@ final class BulkWrite implements Countable
 
     public function insert(array|object $document): mixed
     {
-        if ($document instanceof PackedArray) {
-            throw new UnexpectedValueException(
-                'MongoDB\BSON\PackedArray cannot be serialized as a root document',
-            );
+        if (! is_document($document)) {
+            throw UnexpectedValueException::documentRequiredAsRoot();
         }
 
         $docArr = self::toValidationArray($document);
@@ -104,10 +97,8 @@ final class BulkWrite implements Countable
 
     public function update(array|object $filter, array|object $newObj, ?array $updateOptions = null): void
     {
-        if ($filter instanceof PackedArray) {
-            throw new UnexpectedValueException(
-                'MongoDB\BSON\PackedArray cannot be serialized as a root document',
-            );
+        if (! is_document($filter)) {
+            throw UnexpectedValueException::documentRequiredAsRoot();
         }
 
         $options = $updateOptions ?? [];
@@ -190,10 +181,8 @@ final class BulkWrite implements Countable
 
     public function delete(array|object $filter, ?array $deleteOptions = null): void
     {
-        if ($filter instanceof PackedArray) {
-            throw new UnexpectedValueException(
-                'MongoDB\BSON\PackedArray cannot be serialized as a root document',
-            );
+        if (! is_document($filter)) {
+            throw UnexpectedValueException::documentRequiredAsRoot();
         }
 
         $options = $deleteOptions ?? [];
@@ -384,15 +373,11 @@ final class BulkWrite implements Countable
     private static function validateCollationOption(mixed $value): void
     {
         if (! is_array($value) && ! is_object($value)) {
-            throw new InvalidArgumentException(
-                'Expected "collation" option to be array or object, ' . get_debug_type($value) . ' given',
-            );
+            throw InvalidArgumentException::expectedDocumentOption('collation', $value);
         }
 
-        if ($value instanceof PackedArray) {
-            throw new UnexpectedValueException(
-                'MongoDB\BSON\PackedArray cannot be serialized as a root document',
-            );
+        if (! is_document($value)) {
+            throw UnexpectedValueException::documentRequiredAsRoot();
         }
 
         $arr = is_array($value) ? $value : (array) $value;
@@ -403,24 +388,18 @@ final class BulkWrite implements Countable
     private static function validateHintOption(mixed $value): void
     {
         if (! is_string($value) && ! is_array($value) && ! is_object($value)) {
-            throw new InvalidArgumentException(
-                'Expected "hint" option to be string, array, or object, ' . get_debug_type($value) . ' given',
-            );
+            throw InvalidArgumentException::expectedHintOption('hint', $value);
         }
 
-        if ($value instanceof PackedArray) {
-            throw new UnexpectedValueException(
-                'MongoDB\BSON\PackedArray cannot be serialized as a root document',
-            );
+        if (! is_string($value) && ! is_document($value)) {
+            throw UnexpectedValueException::documentRequiredAsRoot();
         }
     }
 
     private static function validateArrayFiltersOption(mixed $value): void
     {
         if (! is_array($value) && ! is_object($value)) {
-            throw new InvalidArgumentException(
-                'Expected "arrayFilters" option to be array or object, ' . get_debug_type($value) . ' given',
-            );
+            throw InvalidArgumentException::expectedDocumentOption('arrayFilters', $value);
         }
 
         // PackedArray is a valid BSON array — allow it

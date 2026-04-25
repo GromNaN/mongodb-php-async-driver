@@ -12,6 +12,7 @@ use function ctype_digit;
 use function is_bool;
 use function is_int;
 use function is_string;
+use function sprintf;
 use function str_starts_with;
 use function substr;
 
@@ -168,9 +169,7 @@ final class WriteConcern implements Serializable
         // Validate w
         if ($w !== null) {
             if (! is_int($w) && ! is_string($w)) {
-                throw new InvalidArgumentException(
-                    'MongoDB\Driver\WriteConcern initialization requires "w" field to be integer or string',
-                );
+                throw InvalidArgumentException::initializationRequiresFieldType('MongoDB\\Driver\\WriteConcern', 'w', 'integer or string');
             }
 
             if (is_int($w) && $w < -3) {
@@ -187,7 +186,7 @@ final class WriteConcern implements Serializable
                 $positive = str_starts_with($wtimeout, '-') ? substr($wtimeout, 1) : $wtimeout;
                 if (! ctype_digit($positive) || $positive === '') {
                     throw new InvalidArgumentException(
-                        'Error parsing "' . $wtimeout . '" as 64-bit value for MongoDB\Driver\WriteConcern initialization',
+                        sprintf('Error parsing "%s" as 64-bit value for MongoDB\\Driver\\WriteConcern initialization', $wtimeout),
                     );
                 }
 
@@ -199,9 +198,7 @@ final class WriteConcern implements Serializable
                 }
                 // Keep as string to preserve 64-bit value in serialization
             } elseif (! is_int($wtimeout)) {
-                throw new InvalidArgumentException(
-                    'MongoDB\Driver\WriteConcern initialization requires "wtimeout" field to be integer or string',
-                );
+                throw InvalidArgumentException::initializationRequiresFieldType('MongoDB\\Driver\\WriteConcern', 'wtimeout', 'integer or string');
             }
 
             if ($wtimeout < 0) {
@@ -213,9 +210,7 @@ final class WriteConcern implements Serializable
 
         // Validate journal
         if ($journal !== null && ! is_bool($journal)) {
-            throw new InvalidArgumentException(
-                'MongoDB\Driver\WriteConcern initialization requires "j" field to be boolean',
-            );
+            throw InvalidArgumentException::initializationRequiresFieldType('MongoDB\\Driver\\WriteConcern', 'j', 'boolean');
         }
 
         // Map w=-3 to 'majority', w=-2 to null (isDefault)

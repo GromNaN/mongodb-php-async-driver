@@ -64,9 +64,7 @@ final class Manager
 
         // Validate serverApi driver option
         if (isset($driverOptions['serverApi']) && ! ($driverOptions['serverApi'] instanceof ServerApi)) {
-            throw new InvalidArgumentException(
-                'Expected "serverApi" driver option to be ' . ServerApi::class . ', ' . get_debug_type($driverOptions['serverApi']) . ' given',
-            );
+            throw InvalidArgumentException::invalidDriverOptionType('serverApi', $driverOptions['serverApi'], ServerApi::class);
         }
 
         // Validate driver driverOption: name, version, platform must be strings
@@ -74,7 +72,7 @@ final class Manager
             foreach (['name', 'version', 'platform'] as $field) {
                 if (isset($driverOptions['driver'][$field]) && ! is_string($driverOptions['driver'][$field])) {
                     throw new InvalidArgumentException(
-                        'Expected "' . $field . '" in "driver" driver option to be string, ' . get_debug_type($driverOptions['driver'][$field]) . ' given',
+                        sprintf('Expected "%s" in "driver" driver option to be string, %s given', $field, get_debug_type($driverOptions['driver'][$field])),
                     );
                 }
             }
@@ -89,7 +87,7 @@ final class Manager
             if ($normalizedKey === 'safe') {
                 if (! is_bool($value)) {
                     throw new InvalidArgumentException(
-                        'Expected boolean for "safe" URI option, ' . get_debug_type($value) . ' given',
+                        sprintf('Expected boolean for "safe" URI option, %s given', get_debug_type($value)),
                     );
                 }
 
@@ -519,7 +517,7 @@ final class Manager
 
         if ($maxStaleness !== null && ! is_int($maxStaleness)) {
             throw new InvalidArgumentException(
-                'Expected integer for "maxStalenessSeconds" URI option, ' . get_debug_type($maxStaleness) . ' given',
+                sprintf('Expected integer for "maxStalenessSeconds" URI option, %s given', get_debug_type($maxStaleness)),
             );
         }
 
@@ -558,7 +556,7 @@ final class Manager
             $typeName = is_int($level) ? '32-bit integer' : get_debug_type($level);
 
             throw new InvalidArgumentException(
-                'Expected string for "readConcernLevel" URI option, ' . $typeName . ' given',
+                sprintf('Expected string for "readConcernLevel" URI option, %s given', $typeName),
             );
         }
 
@@ -580,9 +578,7 @@ final class Manager
             return new ReadPreference($rp);
         }
 
-        throw new InvalidArgumentException(
-            'Expected "readPreference" option to be ' . ReadPreference::class . ', ' . get_debug_type($rp) . ' given',
-        );
+        throw InvalidArgumentException::invalidOptionType('readPreference', $rp, ReadPreference::class);
     }
 
     private function extractWriteConcern(?array $options): ?WriteConcern
@@ -596,9 +592,7 @@ final class Manager
             return $wc;
         }
 
-        throw new InvalidArgumentException(
-            'Expected "writeConcern" option to be ' . WriteConcern::class . ', ' . get_debug_type($wc) . ' given',
-        );
+        throw InvalidArgumentException::invalidOptionType('writeConcern', $wc, WriteConcern::class);
     }
 
     private function extractReadConcern(?array $options): ?ReadConcern
@@ -612,9 +606,7 @@ final class Manager
             return $rc;
         }
 
-        throw new InvalidArgumentException(
-            'Expected "readConcern" option to be ' . ReadConcern::class . ', ' . get_debug_type($rc) . ' given',
-        );
+        throw InvalidArgumentException::invalidOptionType('readConcern', $rc, ReadConcern::class);
     }
 
     private function extractSession(?array $options): ?Session
@@ -628,9 +620,7 @@ final class Manager
             return $session;
         }
 
-        throw new InvalidArgumentException(
-            'Expected "session" option to be ' . Session::class . ', ' . get_debug_type($session) . ' given',
-        );
+        throw InvalidArgumentException::invalidOptionType('session', $session, Session::class);
     }
 
     /**
