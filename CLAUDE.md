@@ -75,6 +75,7 @@ These failures are expected and should not block commits:
 - **Exception messages always use `sprintf()`** — never string concatenation (`.`) or double-quoted interpolation. Static messages with no dynamic parts may be plain string literals.
 - **Use `hrtime(true)` for durations** — monotonic nanosecond integer. `microtime(true)` only for absolute wall-clock timestamps.
 - **No manual `use` statements** — write FQCNs in code, phpcbf adds imports automatically.
+- **`$str .=` in loops is NOT O(n²) in PHP** — since PHP 5.6+ the engine extends single-reference strings in-place with exponential buffer growth (amortized O(n)). Replacing `$str .= $part` with `$parts[] = $part; implode('', $parts)` adds array-allocation overhead and is equal or slightly slower. Do not suggest this refactor as a performance improvement.
 
 ## Commit discipline
 

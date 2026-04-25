@@ -358,7 +358,7 @@ final class BsonEncoder
         if ($value instanceof Timestamp) {
             return [
                 BsonType::Timestamp,
-                pack('V', $value->getIncrement()) . pack('V', $value->getTimestamp()),
+                pack('VV', $value->getIncrement(), $value->getTimestamp()),
             ];
         }
 
