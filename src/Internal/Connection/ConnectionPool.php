@@ -165,6 +165,22 @@ final class ConnectionPool
     }
 
     /**
+     * Close all idle connections when the pool is garbage-collected.
+     *
+     * This prevents file-descriptor leaks when a Manager (and its pool) goes
+     * out of scope without an explicit close() call — the common case in
+     * per-test Manager instances.
+     */
+    public function __destruct()
+    {
+        while (! $this->idle->isEmpty()) {
+            $conn = $this->idle->dequeue();
+            assert($conn instanceof Connection);
+            $conn->close();
+        }
+    }
+
+    /**
      * Permanently close the pool: close all idle connections and reject every
      * pending waiter with a ConnectionException.
      */
