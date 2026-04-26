@@ -89,6 +89,7 @@ final class Cursor implements CursorInterface
         ?Closure $getMoreFn = null,
         string $database = '',
         ?Command $command = null,
+        ?Query $query = null,
     ): self {
         $instance = new self();
         $instance->items = $items;
@@ -100,6 +101,7 @@ final class Cursor implements CursorInterface
         $instance->exhausted = ($instance->cursorId === 0);
         $instance->debugDatabase = $database;
         $instance->debugCommand = $command;
+        $instance->debugQuery = $query;
 
         return $instance;
     }

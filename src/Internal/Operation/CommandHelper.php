@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Operation;
 
-use InvalidArgumentException;
 use MongoDB\BSON\Document;
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\ReadConcern;
 use MongoDB\Driver\ReadPreference;
 use MongoDB\Driver\ServerApi;
@@ -213,7 +213,7 @@ final class CommandHelper
         }
 
         if ($command === []) {
-            throw new InvalidArgumentException('Command document must not be empty');
+            throw new InvalidArgumentException('Empty command document');
         }
 
         return (string) array_key_first($command);

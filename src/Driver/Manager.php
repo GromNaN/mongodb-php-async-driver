@@ -560,10 +560,6 @@ final class Manager
             return $rp;
         }
 
-        if (is_string($rp)) {
-            return new ReadPreference($rp);
-        }
-
         throw InvalidArgumentException::invalidOptionType('readPreference', $rp, ReadPreference::class);
     }
 

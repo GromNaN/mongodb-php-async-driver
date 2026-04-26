@@ -222,7 +222,7 @@ final class OperationExecutor
 
         $maxAwaitTimeMS = isset($opts['maxAwaitTimeMS']) ? (int) $opts['maxAwaitTimeMS'] : 0;
 
-        return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer);
+        return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer, $query);
     }
 
     /**
@@ -1025,6 +1025,7 @@ final class OperationExecutor
         ?Command $debugCommand = null,
         ?Session $session = null,
         ?Server $callingServer = null,
+        ?Query $debugQuery = null,
     ): CursorInterface {
         $body = $this->doSendCommand($pool, $db, $cmdName, $prepared, $server);
 
@@ -1038,7 +1039,7 @@ final class OperationExecutor
             : (int) ((is_array($cursorOpt) ? ($cursorOpt['batchSize'] ?? 0) : 0));
         $comment = $prepared['comment'] ?? null;
 
-        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand, $session, $batchSize, $comment, $callingServer);
+        return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand, $session, $batchSize, $comment, $callingServer, $debugQuery);
     }
 
     /**
@@ -1089,6 +1090,7 @@ final class OperationExecutor
         int $batchSize = 0,
         mixed $comment = null,
         ?Server $callingServer = null,
+        ?Query $debugQuery = null,
     ): CursorInterface {
         $publicServer = $callingServer ?? $this->buildPublicServer($server);
 
@@ -1139,6 +1141,7 @@ final class OperationExecutor
                 getMoreFn:  $getMoreFn,
                 database:   $db,
                 command:    $debugCommand,
+                query:      $debugQuery,
             );
         }
 
