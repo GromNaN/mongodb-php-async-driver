@@ -469,7 +469,7 @@ final class BulkWrite implements Countable
             return $update;
         }
 
-        if (is_array($update) && array_is_list($update)) {
+        if (is_array($update) && array_is_list($update) && count($update) > 0) {
             return PackedArray::fromBSON(BsonEncoder::encodeList($update));
         }
 

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Operation;
 
-use Exception;
 use MongoDB\BSON\Document;
 use MongoDB\BSON\Int64;
 use MongoDB\BSON\PackedArray;
@@ -24,11 +23,6 @@ use MongoDB\Driver\Exception\ExecutionTimeoutException;
 use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
 use MongoDB\Driver\Exception\ServerException;
-use MongoDB\Driver\Monitoring\CommandFailedEvent;
-use MongoDB\Driver\Monitoring\CommandStartedEvent;
-use MongoDB\Driver\Monitoring\CommandSubscriber;
-use MongoDB\Driver\Monitoring\CommandSucceededEvent;
-use MongoDB\Driver\Monitoring\Subscriber;
 use MongoDB\Driver\Query;
 use MongoDB\Driver\ReadConcern;
 use MongoDB\Driver\ReadPreference;
@@ -42,7 +36,7 @@ use MongoDB\Driver\WriteError;
 use MongoDB\Driver\WriteResult;
 use MongoDB\Internal\Connection\ConnectionPool;
 use MongoDB\Internal\Connection\SyncRunner;
-use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
+use MongoDB\Internal\Monitoring\Dispatcher;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
 use MongoDB\Internal\Protocol\RequestIdGenerator;
@@ -50,11 +44,9 @@ use MongoDB\Internal\Session\SessionPool;
 use MongoDB\Internal\Topology\InternalServerDescription;
 use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\UriOptions;
-use RuntimeException;
 use stdClass;
 use Throwable;
 
-use function array_is_list;
 use function array_map;
 use function array_values;
 use function assert;
@@ -67,11 +59,9 @@ use function is_array;
 use function is_object;
 use function is_string;
 use function iterator_to_array;
-use function spl_object_id;
 use function sprintf;
 use function strlen;
 use function strpos;
-use function strtolower;
 use function substr;
 
 /**
@@ -92,25 +82,19 @@ final class OperationExecutor
     /** @var array<string, ConnectionPool> Keyed by "host:port". */
     private array $pools = [];
 
-    /** @var array<int, Subscriber> Keyed by spl_object_id(). */
-    private array $subscribers = [];
-
     /**
-     * @param TopologyManager  $topology    Live topology manager.
-     * @param UriOptions       $options     Parsed URI options.
-     * @param SessionPool      $sessionPool Session pool for implicit sessions.
-     * @param list<Subscriber> $subscribers Monitoring subscribers.
+     * @param TopologyManager $topology    Live topology manager.
+     * @param UriOptions      $options     Parsed URI options.
+     * @param SessionPool     $sessionPool Session pool for implicit sessions.
+     * @param Dispatcher      $dispatcher  Shared subscriber registry (owned by Manager).
      */
     public function __construct(
         private TopologyManager $topology,
         private UriOptions $options,
         private SessionPool $sessionPool,
-        array $subscribers = [],
+        private Dispatcher $dispatcher,
         private ?ServerApi $serverApi = null,
     ) {
-        foreach ($subscribers as $subscriber) {
-            $this->subscribers[spl_object_id($subscriber)] = $subscriber;
-        }
     }
 
     /**
@@ -124,16 +108,6 @@ final class OperationExecutor
         }
 
         $this->pools = [];
-    }
-
-    public function addSubscriber(Subscriber $subscriber): void
-    {
-        $this->subscribers[spl_object_id($subscriber)] = $subscriber;
-    }
-
-    public function removeSubscriber(Subscriber $subscriber): void
-    {
-        unset($this->subscribers[spl_object_id($subscriber)]);
     }
 
     // -------------------------------------------------------------------------
@@ -936,12 +910,10 @@ final class OperationExecutor
             // Fall back to the doc sequence's own docs when the field is absent from the
             // prepared command (e.g. bulkWrite ops are no longer stored in the command body).
             $items = $prepared[$seq['id']] ?? $seq['docs'];
-            $commandDoc->{$seq['id']} = self::normalizeDocSeqForApm($items);
+            $commandDoc->{$seq['id']} = Dispatcher::normalizeDocSeqForApm($items);
         }
 
-        // Sensitive commands must have their command body replaced with {} in APM events.
-        $isSensitive = self::isSensitiveCommand($cmdName, $commandDoc);
-        $this->fireCommandStarted($cmdName, $isSensitive ? new stdClass() : $commandDoc, $db, $requestId, $server->host, $server->port, $serverConnId, $operationId ?: $requestId);
+        $this->dispatcher->dispatchCommandStarted($cmdName, $commandDoc, $db, $requestId, $server->host, $server->port, $serverConnId, $operationId ?: $requestId);
 
         try {
             [$bytes] = OpMsgEncoder::encodeWithRequestId($bodyForEncoding, $docSequences);
@@ -964,7 +936,7 @@ final class OperationExecutor
 
                 // Per PHPC-1990: CommandFailedEvent stores a ServerException (not CommandException).
                 $eventErr = new ServerException($errmsg, $code, (object) $body);
-                $this->fireCommandFailed($cmdName, $eventErr, $db, $requestId, $durationUs, $server->host, $server->port, $isSensitive ? new stdClass() : (object) $body, $serverConnId);
+                $this->dispatcher->dispatchCommandFailed($cmdName, $eventErr, $db, $requestId, $durationUs, $server->host, $server->port, (object) $body, $serverConnId);
 
                 $pool->release($conn);
 
@@ -982,19 +954,16 @@ final class OperationExecutor
                 $wceMsg  = (string) ($wceArr['errmsg'] ?? 'Write Concern error');
                 $wceCode = (int) ($wceArr['code'] ?? 0);
                 $eventErr = new ServerException($wceMsg, $wceCode, (object) $body);
-                $this->fireCommandFailed($cmdName, $eventErr, $db, $requestId, $durationUs, $server->host, $server->port, $isSensitive ? new stdClass() : (object) $body, $serverConnId, $operationId ?: $requestId);
+                $this->dispatcher->dispatchCommandFailed($cmdName, $eventErr, $db, $requestId, $durationUs, $server->host, $server->port, (object) $body, $serverConnId, $operationId ?: $requestId);
                 $pool->release($conn);
 
                 throw new CommandException(sprintf('Write Concern error: %s', $wceMsg), $wceCode, (object) $body);
             }
 
             // Unacknowledged writes must report {ok: 1} in APM (no result fields).
-            $apmReply = $isSensitive || $isUnacknowledged ? new stdClass() : (object) $body;
-            if (! $isSensitive && $isUnacknowledged) {
-                $apmReply->ok = 1;
-            }
+            $apmReply = $isUnacknowledged ? (object) ['ok' => 1] : (object) $body;
 
-            $this->fireCommandSucceeded($cmdName, $apmReply, $db, $requestId, $durationUs, $server->host, $server->port, $serverConnId, $operationId ?: $requestId);
+            $this->dispatcher->dispatchCommandSucceeded($cmdName, $apmReply, $db, $requestId, $durationUs, $server->host, $server->port, $serverConnId, $operationId ?: $requestId);
 
             $pool->release($conn);
 
@@ -1008,7 +977,7 @@ final class OperationExecutor
                 $e->getCode(),
                 $e,
             );
-            $this->fireCommandFailed($cmdName, $wrapped, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
+            $this->dispatcher->dispatchCommandFailed($cmdName, $wrapped, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
             $pool->release($conn);
 
             throw $wrapped;
@@ -1019,13 +988,13 @@ final class OperationExecutor
                 $e->getCode(),
                 $e,
             );
-            $this->fireCommandFailed($cmdName, $wrapped, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
+            $this->dispatcher->dispatchCommandFailed($cmdName, $wrapped, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
             $pool->release($conn);
 
             throw $wrapped;
         } catch (Throwable $e) {
             $durationUs = intdiv(hrtime(true) - $startNs, 1_000);
-            $this->fireCommandFailed($cmdName, $e, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
+            $this->dispatcher->dispatchCommandFailed($cmdName, $e, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
 
             $pool->release($conn);
 
@@ -1198,142 +1167,6 @@ final class OperationExecutor
     }
 
     // -------------------------------------------------------------------------
-    // Private — monitoring helpers
-    // -------------------------------------------------------------------------
-
-    private function fireCommandStarted(
-        string $cmdName,
-        object $cmd,
-        string $db,
-        int $requestId,
-        string $host = '',
-        int $port = 27017,
-        ?int $serverConnectionId = null,
-        int $operationId = 0,
-    ): void {
-        $event = null;
-        GlobalSubscriberRegistry::dispatch(
-            $this->subscribers,
-            CommandSubscriber::class,
-            static function (CommandSubscriber $subscriber) use (
-                &$event,
-                $cmdName,
-                $cmd,
-                $db,
-                $requestId,
-                $operationId,
-                $host,
-                $port,
-                $serverConnectionId,
-            ): void {
-                $subscriber->commandStarted(
-                    $event ??= CommandStartedEvent::create(
-                        commandName:        $cmdName,
-                        command:            $cmd,
-                        databaseName:       $db,
-                        requestId:          $requestId,
-                        operationId:        $operationId ?: $requestId,
-                        host:               $host,
-                        port:               $port,
-                        serverConnectionId: $serverConnectionId,
-                    ),
-                );
-            },
-        );
-    }
-
-    private function fireCommandSucceeded(
-        string $cmdName,
-        object $reply,
-        string $db,
-        int $requestId,
-        int $durationMicros,
-        string $host = '',
-        int $port = 27017,
-        ?int $serverConnectionId = null,
-        int $operationId = 0,
-    ): void {
-        $event = null;
-        GlobalSubscriberRegistry::dispatch(
-            $this->subscribers,
-            CommandSubscriber::class,
-            static function (CommandSubscriber $subscriber) use (
-                &$event,
-                $cmdName,
-                $reply,
-                $db,
-                $requestId,
-                $operationId,
-                $durationMicros,
-                $host,
-                $port,
-                $serverConnectionId,
-            ): void {
-                $subscriber->commandSucceeded(
-                    $event ??= CommandSucceededEvent::create(
-                        commandName:        $cmdName,
-                        reply:              $reply,
-                        databaseName:       $db,
-                        requestId:          $requestId,
-                        operationId:        $operationId ?: $requestId,
-                        durationMicros:     $durationMicros,
-                        host:               $host,
-                        port:               $port,
-                        serverConnectionId: $serverConnectionId,
-                    ),
-                );
-            },
-        );
-    }
-
-    private function fireCommandFailed(
-        string $cmdName,
-        Throwable $exception,
-        string $db,
-        int $requestId,
-        int $durationMicros,
-        string $host = '',
-        int $port = 27017,
-        ?object $reply = null,
-        ?int $serverConnectionId = null,
-        int $operationId = 0,
-    ): void {
-        $event     = null;
-        GlobalSubscriberRegistry::dispatch(
-            $this->subscribers,
-            CommandSubscriber::class,
-            static function (CommandSubscriber $subscriber) use (
-                &$event,
-                $cmdName,
-                $db,
-                $exception,
-                $requestId,
-                $operationId,
-                $durationMicros,
-                $host,
-                $port,
-                $serverConnectionId,
-                $reply,
-            ): void {
-                $subscriber->commandFailed(
-                    $event ??= CommandFailedEvent::create(
-                        commandName:        $cmdName,
-                        databaseName:       $db,
-                        error:              $exception instanceof Exception ? $exception : new RuntimeException($exception->getMessage(), $exception->getCode(), $exception),
-                        requestId:          $requestId,
-                        operationId:        $operationId ?: $requestId,
-                        durationMicros:     $durationMicros,
-                        host:               $host,
-                        port:               $port,
-                        serverConnectionId: $serverConnectionId,
-                        reply:              $reply,
-                    ),
-                );
-            },
-        );
-    }
-
-    // -------------------------------------------------------------------------
     // Private — misc helpers
     // -------------------------------------------------------------------------
 
@@ -1429,49 +1262,6 @@ final class OperationExecutor
     }
 
     /**
-     * Normalise doc-sequence items for APM without a full BSON round-trip.
-     *
-     * The PackedArray::fromPHP()->toPHP() pattern allocates the entire BSON blob
-     * for all items at once, which causes OOM for large batches (100 000+ ops).
-     * This method processes each item individually: Document/PackedArray values are
-     * decoded via their own toPHP(), PHP arrays with string keys become stdClass,
-     * and everything else is returned as-is.  The result matches what the round-trip
-     * produces but uses only the memory needed for one decoded item at a time.
-     *
-     * @param list<mixed> $items
-     *
-     * @return list<mixed>
-     */
-    private static function normalizeDocSeqForApm(array $items): array
-    {
-        $normalize = static function (mixed $value) use (&$normalize): mixed {
-            if ($value instanceof Document) {
-                $arr = $value->toPHP(['root' => 'array', 'document' => 'array']);
-
-                return (object) array_map($normalize, $arr);
-            }
-
-            if ($value instanceof PackedArray) {
-                return array_map(
-                    $normalize,
-                    $value->toPHP(['root' => 'array', 'document' => 'array']),
-                );
-            }
-
-            if (is_array($value)) {
-                $normalized = array_map($normalize, $value);
-
-                // BSON documents (string-keyed PHP arrays) become stdClass; BSON arrays stay as arrays.
-                return array_is_list($value) ? $normalized : (object) $normalized;
-            }
-
-            return $value;
-        };
-
-        return array_map($normalize, $items);
-    }
-
-    /**
      * Estimate the BSON-encoded size of a document without allocating the BSON bytes.
      *
      * This is used to detect oversized documents before attempting to encode them,
@@ -1500,36 +1290,5 @@ final class OperationExecutor
         }
 
         return $size;
-    }
-
-    /**
-     * Return true when this command must have its body and reply redacted in APM events.
-     *
-     * Per the Command Monitoring specification, the following commands are sensitive:
-     * authenticate, saslStart, saslContinue, getnonce, createUser, updateUser,
-     * copydbgetnonce, copydbsaslstart, copydb, and hello / isMaster when they contain
-     * speculativeAuthenticate.
-     */
-    private static function isSensitiveCommand(string $cmdName, object $cmd): bool
-    {
-        return match (strtolower($cmdName)) {
-            // Inconditional sensitive commands (body and reply always redacted)
-            'authenticate',
-            'saslstart',
-            'saslcontinue',
-            'getnonce',
-            'createuser',
-            'updateuser',
-            'copydbgetnonce',
-            'copydbsaslstart',
-            'copydb' => true,
-
-            // hello (and legacy hello variants) are sensitive only when speculativeAuthenticate is present
-            'hello',
-            'ismaster',
-            'isMaster' => isset($cmd->speculativeAuthenticate),
-
-            default => false,
-        };
     }
 }

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace MongoDB\Tests\Driver\Monitoring;
 
 use MongoDB\Driver\Monitoring\Subscriber;
-use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
+use MongoDB\Internal\Monitoring\Dispatcher;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
 
@@ -19,7 +19,7 @@ class SubscriberFunctionsTest extends TestCase
 
     protected function setUp(): void
     {
-        new ReflectionProperty(GlobalSubscriberRegistry::class, 'subscribers')->setValue(null, []);
+        new ReflectionProperty(Dispatcher::class, 'globalSubscribers')->setValue(null, []);
 
         $this->subscriberA = $this->createStub(Subscriber::class);
         $this->subscriberB = $this->createStub(Subscriber::class);
@@ -90,7 +90,7 @@ class SubscriberFunctionsTest extends TestCase
     private function collectDispatched(): array
     {
         $collected = [];
-        GlobalSubscriberRegistry::dispatch([], Subscriber::class, static function (Subscriber $s) use (&$collected): void {
+        Dispatcher::dispatch([], Subscriber::class, static function (Subscriber $s) use (&$collected): void {
             $collected[] = $s;
         });
 

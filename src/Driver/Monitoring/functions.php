@@ -11,7 +11,7 @@ declare(strict_types=1);
 namespace MongoDB\Driver\Monitoring;
 
 use MongoDB\Driver\Exception\InvalidArgumentException;
-use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
+use MongoDB\Internal\Monitoring\Dispatcher;
 
 use function function_exists;
 use function sprintf;
@@ -21,12 +21,12 @@ use function strstr;
 if (! function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
     function addSubscriber(Subscriber $subscriber): void
     {
-        GlobalSubscriberRegistry::add($subscriber);
+        Dispatcher::addGlobalSubscriber($subscriber);
     }
 
     function removeSubscriber(Subscriber $subscriber): void
     {
-        GlobalSubscriberRegistry::remove($subscriber);
+        Dispatcher::removeGlobalSubscriber($subscriber);
     }
 
     function mongoc_log(int $level, string $domain, string $message): void
@@ -49,7 +49,7 @@ if (! function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
             );
         }
 
-        GlobalSubscriberRegistry::dispatch(
+        Dispatcher::dispatch(
             [],
             LogSubscriber::class,
             static fn (LogSubscriber $subscriber) => $subscriber->log($level, $domain, $message),

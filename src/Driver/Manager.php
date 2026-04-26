@@ -8,8 +8,8 @@ use InvalidArgumentException as PhpInvalidArgumentException;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Monitoring\LogSubscriber;
 use MongoDB\Driver\Monitoring\Subscriber;
-use MongoDB\Internal\Connection\ConnectionPool;
 use MongoDB\Internal\Connection\SyncRunner;
+use MongoDB\Internal\Monitoring\Dispatcher;
 use MongoDB\Internal\Operation\OperationExecutor;
 use MongoDB\Internal\Session\SessionPool;
 use MongoDB\Internal\Topology\TopologyManager;
@@ -18,11 +18,8 @@ use MongoDB\Internal\Uri\UriOptions;
 
 use function array_key_exists;
 use function array_merge;
-use function array_search;
-use function array_values;
 use function count;
 use function get_debug_type;
-use function in_array;
 use function is_bool;
 use function is_int;
 use function is_string;
@@ -42,10 +39,7 @@ final class Manager
     private ReadPreference $readPreference;
     private WriteConcern $writeConcern;
     private ReadConcern $readConcern;
-    /** @var list<ConnectionPool> keyed by "host:port" */
-    private array $pools = [];
-    /** @var list<Subscriber> */
-    private array $subscribers = [];
+    private Dispatcher $dispatcher;
     private SessionPool $sessionPool;
 
     public function __construct(
@@ -117,10 +111,14 @@ final class Manager
         $this->writeConcern   = $this->buildWriteConcern($mergedOptions);
         $this->readConcern    = $this->buildReadConcern($mergedOptions);
 
+        // Single subscriber registry shared by topology and executor.
+        $this->dispatcher = new Dispatcher();
+
         // Initialize topology manager
         $this->topologyManager = new TopologyManager(
             $this->connectionString->getHosts(),
             $this->uriOptions,
+            $this->dispatcher,
         );
 
         $this->sessionPool = new SessionPool();
@@ -130,7 +128,7 @@ final class Manager
             $this->topologyManager,
             $this->uriOptions,
             $this->sessionPool,
-            $this->subscribers,
+            $this->dispatcher,
             $driverOptions['serverApi'] ?? null,
         );
 
@@ -166,26 +164,12 @@ final class Manager
             throw new InvalidArgumentException('LogSubscriber instances cannot be registered with a Manager');
         }
 
-        if (in_array($subscriber, $this->subscribers, true)) {
-            return;
-        }
-
-        $this->subscribers[] = $subscriber;
-        $this->executor->addSubscriber($subscriber);
-        $this->topologyManager->addSubscriber($subscriber);
+        $this->dispatcher->addSubscriber($subscriber);
     }
 
     public function removeSubscriber(Subscriber $subscriber): void
     {
-        $key = array_search($subscriber, $this->subscribers, true);
-        if ($key === false) {
-            return;
-        }
-
-        unset($this->subscribers[$key]);
-        $this->subscribers = array_values($this->subscribers);
-        $this->executor->removeSubscriber($subscriber);
-        $this->topologyManager->removeSubscriber($subscriber);
+        $this->dispatcher->removeSubscriber($subscriber);
     }
 
     public function executeBulkWrite(

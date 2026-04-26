@@ -8,15 +8,16 @@ use MongoDB\Driver\Monitoring\CommandSubscriber;
 use MongoDB\Driver\Monitoring\LogSubscriber;
 use MongoDB\Driver\Monitoring\SDAMSubscriber;
 use MongoDB\Driver\Monitoring\Subscriber;
-use MongoDB\Internal\Monitoring\GlobalSubscriberRegistry;
+use MongoDB\Internal\Monitoring\Dispatcher;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
 use RuntimeException;
+use stdClass;
 
 use function MongoDB\Driver\Monitoring\addSubscriber;
 
 /**
- * Unit tests for GlobalSubscriberRegistry::dispatch().
+ * Unit tests for Dispatcher::dispatch().
  *
  * Covers:
  * - class filter: only subscribers matching $subscriberClass are called
@@ -24,11 +25,11 @@ use function MongoDB\Driver\Monitoring\addSubscriber;
  * - exceptions thrown by subscribers are swallowed
  * - all three subscriber interfaces: CommandSubscriber, SDAMSubscriber, LogSubscriber
  */
-class GlobalSubscriberRegistryDispatchTest extends TestCase
+class DispatcherTest extends TestCase
 {
     protected function setUp(): void
     {
-        new ReflectionProperty(GlobalSubscriberRegistry::class, 'subscribers')->setValue(null, []);
+        new ReflectionProperty(Dispatcher::class, 'globalSubscribers')->setValue(null, []);
     }
 
     // -------------------------------------------------------------------------
@@ -44,7 +45,7 @@ class GlobalSubscriberRegistryDispatchTest extends TestCase
         addSubscriber($sdamSubscriber);
 
         $called = [];
-        GlobalSubscriberRegistry::dispatch([], CommandSubscriber::class, static function (object $s) use (&$called): void {
+        Dispatcher::dispatch([], CommandSubscriber::class, static function (object $s) use (&$called): void {
             $called[] = $s;
         });
 
@@ -64,7 +65,7 @@ class GlobalSubscriberRegistryDispatchTest extends TestCase
         addSubscriber($global);
 
         $called = [];
-        GlobalSubscriberRegistry::dispatch([$manager], Subscriber::class, static function (object $s) use (&$called): void {
+        Dispatcher::dispatch([$manager], Subscriber::class, static function (object $s) use (&$called): void {
             $called[] = $s;
         });
 
@@ -80,7 +81,7 @@ class GlobalSubscriberRegistryDispatchTest extends TestCase
         addSubscriber($global);
 
         $order = [];
-        GlobalSubscriberRegistry::dispatch([$manager], Subscriber::class, static function (object $s) use (&$order, $manager, $global): void {
+        Dispatcher::dispatch([$manager], Subscriber::class, static function (object $s) use (&$order, $manager, $global): void {
             if ($s === $manager) {
                 $order[] = 'manager';
             } elseif ($s === $global) {
@@ -104,7 +105,7 @@ class GlobalSubscriberRegistryDispatchTest extends TestCase
         addSubscriber($ok);
 
         $called = [];
-        GlobalSubscriberRegistry::dispatch([], Subscriber::class, static function (object $s) use (&$called, $throwing): void {
+        Dispatcher::dispatch([], Subscriber::class, static function (object $s) use (&$called, $throwing): void {
             if ($s === $throwing) {
                 throw new RuntimeException('subscriber error');
             }
@@ -126,7 +127,7 @@ class GlobalSubscriberRegistryDispatchTest extends TestCase
         addSubscriber($subscriber);
 
         $received = null;
-        GlobalSubscriberRegistry::dispatch([], CommandSubscriber::class, static function (object $s) use (&$received): void {
+        Dispatcher::dispatch([], CommandSubscriber::class, static function (object $s) use (&$received): void {
             $received = $s;
         });
 
@@ -143,7 +144,7 @@ class GlobalSubscriberRegistryDispatchTest extends TestCase
         addSubscriber($subscriber);
 
         $received = null;
-        GlobalSubscriberRegistry::dispatch([], SDAMSubscriber::class, static function (object $s) use (&$received): void {
+        Dispatcher::dispatch([], SDAMSubscriber::class, static function (object $s) use (&$received): void {
             $received = $s;
         });
 
@@ -156,7 +157,7 @@ class GlobalSubscriberRegistryDispatchTest extends TestCase
         addSubscriber($commandSubscriber);
 
         $called = false;
-        GlobalSubscriberRegistry::dispatch([], SDAMSubscriber::class, static function (object $s) use (&$called): void {
+        Dispatcher::dispatch([], SDAMSubscriber::class, static function (object $s) use (&$called): void {
             $called = true;
         });
 
@@ -173,7 +174,7 @@ class GlobalSubscriberRegistryDispatchTest extends TestCase
         addSubscriber($subscriber);
 
         $received = null;
-        GlobalSubscriberRegistry::dispatch([], LogSubscriber::class, static function (object $s) use (&$received): void {
+        Dispatcher::dispatch([], LogSubscriber::class, static function (object $s) use (&$received): void {
             $received = $s;
         });
 
@@ -186,7 +187,7 @@ class GlobalSubscriberRegistryDispatchTest extends TestCase
         addSubscriber($commandSubscriber);
 
         $called = false;
-        GlobalSubscriberRegistry::dispatch([], LogSubscriber::class, static function (object $s) use (&$called): void {
+        Dispatcher::dispatch([], LogSubscriber::class, static function (object $s) use (&$called): void {
             $called = true;
         });
 
@@ -200,10 +201,52 @@ class GlobalSubscriberRegistryDispatchTest extends TestCase
     public function testDispatchWithNoSubscribersIsNoop(): void
     {
         $called = false;
-        GlobalSubscriberRegistry::dispatch([], Subscriber::class, static function (object $s) use (&$called): void {
+        Dispatcher::dispatch([], Subscriber::class, static function (object $s) use (&$called): void {
             $called = true;
         });
 
         $this->assertFalse($called);
+    }
+
+    // -------------------------------------------------------------------------
+    // Event lazy instantiation — $event passed by reference
+    // -------------------------------------------------------------------------
+
+    public function testDispatchCreatesEventOnlyOnce(): void
+    {
+        $sub1 = $this->createMock(Subscriber::class);
+        $sub2 = $this->createMock(Subscriber::class);
+
+        addSubscriber($sub1);
+        addSubscriber($sub2);
+
+        $createdCount = 0;
+        Dispatcher::dispatch([], Subscriber::class, static function (object $s, ?object &$event) use (&$createdCount): void {
+            if ($event !== null) {
+                return;
+            }
+
+            $createdCount++;
+            $event = new stdClass();
+        });
+
+        $this->assertSame(1, $createdCount);
+    }
+
+    public function testDispatchSharesEventInstanceAcrossManagerAndGlobalSubscribers(): void
+    {
+        $global  = $this->createMock(Subscriber::class);
+        $manager = $this->createMock(Subscriber::class);
+
+        addSubscriber($global);
+
+        $received = [];
+        Dispatcher::dispatch([$manager], Subscriber::class, static function (object $s, ?object &$event) use (&$received): void {
+            $event ??= new stdClass();
+            $received[] = $event;
+        });
+
+        $this->assertCount(2, $received);
+        $this->assertSame($received[0], $received[1], 'The same event instance must be shared across all subscribers');
     }
 }
