@@ -7,11 +7,11 @@ use function sprintf;
 
 final class WriteResult
 {
-    private int $insertedCount;
-    private int $matchedCount;
-    private int $modifiedCount;
-    private int $deletedCount;
-    private int $upsertedCount;
+    private ?int $insertedCount;
+    private ?int $matchedCount;
+    private ?int $modifiedCount;
+    private ?int $deletedCount;
+    private ?int $upsertedCount;
     private array $upsertedIds;
     private Server $server;
     private ?WriteConcernError $writeConcernError;
@@ -36,11 +36,11 @@ final class WriteResult
      * Used by \MongoDB\Internal\WriteResult\WriteResultFactory
      */
     public static function createFromInternal(
-        int $insertedCount,
-        int $matchedCount,
-        int $modifiedCount,
-        int $deletedCount,
-        int $upsertedCount,
+        ?int $insertedCount,
+        ?int $matchedCount,
+        ?int $modifiedCount,
+        ?int $deletedCount,
+        ?int $upsertedCount,
         array $upsertedIds,
         Server $server,
         ?WriteConcernError $writeConcernError,

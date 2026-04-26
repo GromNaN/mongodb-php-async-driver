@@ -233,6 +233,7 @@ final class OperationExecutor
         BulkWrite $bulk,
         ?WriteConcern $writeConcern = null,
         ?Session $session = null,
+        bool $writeConcernExplicit = false,
     ): WriteResult {
         $this->ensureStarted();
 
@@ -266,6 +267,11 @@ final class OperationExecutor
         $errorReplies   = [];
         $wcError        = null;
         $acknowledged   = $writeConcern === null || $writeConcern->getW() !== 0;
+        // When no explicit WriteConcern was provided, libmongoc sets NULL on the
+        // bulk operation, and mongoc_write_concern_is_acknowledged(NULL) returns
+        // true — so counts are included in the reply as int(0) even for w=0 URIs.
+        // Only when an explicit WriteConcern(0) is set are counts omitted (NULL).
+        $countsAvailable = ! $writeConcernExplicit || $acknowledged;
 
         // Build consecutive batches of same-type operations to minimise round-trips
         // while preserving original operation order (required for ordered bulk writes).
@@ -528,11 +534,11 @@ final class OperationExecutor
         $publicServer = $this->buildPublicServer($server);
 
         $writeResult = WriteResult::createFromInternal(
-            insertedCount:   $totalInserted,
-            matchedCount:    $totalMatched,
-            modifiedCount:   $totalModified,
-            deletedCount:    $totalDeleted,
-            upsertedCount:   $totalUpserted,
+            insertedCount:   $countsAvailable ? $totalInserted : null,
+            matchedCount:    $countsAvailable ? $totalMatched : null,
+            modifiedCount:   $countsAvailable ? $totalModified : null,
+            deletedCount:    $countsAvailable ? $totalDeleted : null,
+            upsertedCount:   $countsAvailable ? $totalUpserted : null,
             upsertedIds:     $upsertedIds,
             server:          $publicServer,
             writeConcernError: $wcError,

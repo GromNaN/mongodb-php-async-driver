@@ -177,10 +177,11 @@ final class Manager
         BulkWrite $bulk,
         array|null $options = null,
     ): WriteResult {
-        $writeConcern = $this->extractWriteConcern($options) ?? $this->writeConcern;
+        $explicitWriteConcern = $this->extractWriteConcern($options);
+        $writeConcern = $explicitWriteConcern ?? $this->writeConcern;
         $session = $this->extractSession($options);
 
-        return SyncRunner::run(fn () => $this->executor->executeBulkWrite($namespace, $bulk, $writeConcern, $session));
+        return SyncRunner::run(fn () => $this->executor->executeBulkWrite($namespace, $bulk, $writeConcern, $session, $explicitWriteConcern !== null));
     }
 
     public function executeBulkWriteCommand(
