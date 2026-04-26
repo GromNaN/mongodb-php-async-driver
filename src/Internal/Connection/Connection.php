@@ -215,7 +215,7 @@ final class Connection
             while (strlen($buffer) < 4) {
                 $chunk = $this->socket->read(limit: self::INITIAL_READ_SIZE, cancellation: $cancellation);
                 if ($chunk === null) {
-                    throw new ConnectionException('Connection closed while reading message length');
+                    throw new ConnectionTimeoutException('Failed to read 4 bytes: socket error or timeout');
                 }
 
                 $buffer .= $chunk;

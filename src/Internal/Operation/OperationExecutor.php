@@ -20,8 +20,8 @@ use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Driver\Exception\ConnectionException;
 use MongoDB\Driver\Exception\ConnectionTimeoutException;
 use MongoDB\Driver\Exception\ExecutionTimeoutException;
-use MongoDB\Driver\Exception\InvalidArgumentException as DriverInvalidArgumentException;
-use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
+use MongoDB\Driver\Exception\InvalidArgumentException;
+use MongoDB\Driver\Exception\RuntimeException;
 use MongoDB\Driver\Exception\ServerException;
 use MongoDB\Driver\Query;
 use MongoDB\Driver\ReadConcern;
@@ -54,6 +54,7 @@ use function count;
 use function explode;
 use function get_object_vars;
 use function hrtime;
+use function implode;
 use function intdiv;
 use function is_array;
 use function is_object;
@@ -238,11 +239,11 @@ final class OperationExecutor
         $this->ensureStarted();
 
         if ($bulk->count() === 0) {
-            throw new DriverInvalidArgumentException('Cannot do an empty bulk write');
+            throw new InvalidArgumentException('Cannot do an empty bulk write');
         }
 
         if ($bulk->isExecuted()) {
-            throw new DriverInvalidArgumentException(
+            throw new InvalidArgumentException(
                 'BulkWrite objects may only be executed once and this instance has already been executed',
             );
         }
@@ -266,6 +267,8 @@ final class OperationExecutor
         $writeErrors    = [];
         $errorReplies   = [];
         $wcError        = null;
+        // Exception that interrupted an ordered bulk write mid-stream.
+        $batchException   = null;
         $acknowledged   = $writeConcern === null || $writeConcern->getW() !== 0;
         // When no explicit WriteConcern was provided, libmongoc sets NULL on the
         // bulk operation, and mongoc_write_concern_is_acknowledged(NULL) returns
@@ -356,7 +359,8 @@ final class OperationExecutor
                     }
                 } catch (Throwable $e) {
                     if ($ordered) {
-                        throw $e;
+                        $batchException = $e;
+                        break;
                     }
                 }
             } elseif ($batchType === 'update') {
@@ -453,7 +457,8 @@ final class OperationExecutor
                     }
                 } catch (Throwable $e) {
                     if ($ordered) {
-                        throw $e;
+                        $batchException = $e;
+                        break;
                     }
                 }
             } elseif ($batchType === 'delete') {
@@ -521,7 +526,8 @@ final class OperationExecutor
                     }
                 } catch (Throwable $e) {
                     if ($ordered) {
-                        throw $e;
+                        $batchException = $e;
+                        break;
                     }
                 }
             }
@@ -548,6 +554,15 @@ final class OperationExecutor
             errorReplies:    $errorReplies,
         );
 
+        if ($batchException !== null) {
+            throw new BulkWriteException(
+                message:     sprintf('Bulk write failed due to previous %s: %s', $batchException::class, $batchException->getMessage()),
+                code:        0,
+                writeResult: $writeResult,
+                previous:    $batchException,
+            );
+        }
+
         if ($errorReplies !== []) {
             $reply   = (array) $errorReplies[0];
             $replyObj = is_object($errorReplies[0]) ? $errorReplies[0] : (object) $reply;
@@ -563,8 +578,18 @@ final class OperationExecutor
         if ($writeErrors !== []) {
             $firstError = $writeErrors[0];
 
+            if (count($writeErrors) === 1) {
+                $message = $firstError->getMessage();
+            } else {
+                $quoted = array_map(
+                    static fn (WriteError $e) => sprintf('"%s"', $e->getMessage()),
+                    $writeErrors,
+                );
+                $message = sprintf('Multiple write errors: %s', implode(', ', $quoted));
+            }
+
             throw new BulkWriteException(
-                message:        $firstError->getMessage(),
+                message:        $message,
                 code:           $firstError->getCode(),
                 writeResult:    $writeResult,
             );
@@ -589,11 +614,11 @@ final class OperationExecutor
         $this->ensureStarted();
 
         if ($bulk->count() === 0) {
-            throw new DriverRuntimeException('BulkWriteCommand cannot be empty');
+            throw new RuntimeException('BulkWriteCommand cannot be empty');
         }
 
         if ($session !== null && $writeConcern !== null && $writeConcern->getW() === 0) {
-            throw new DriverInvalidArgumentException(
+            throw new InvalidArgumentException(
                 'Cannot combine "session" option with an unacknowledged write concern',
             );
         }
@@ -617,14 +642,14 @@ final class OperationExecutor
         // Check individual document/namespace sizes BEFORE batching to avoid OOM.
         foreach ($allNsInfo as $nsEntry) {
             if (strlen((string) ($nsEntry['ns'] ?? '')) >= $maxMessageSizeBytes) {
-                throw new DriverInvalidArgumentException('unable to send document: namespace is too large');
+                throw new InvalidArgumentException('unable to send document: namespace is too large');
             }
         }
 
         foreach ($allOps as $op) {
             $docToCheck = $op['document'] ?? null;
             if ($docToCheck !== null && self::estimateBsonSize($docToCheck) >= $maxMessageSizeBytes) {
-                throw new DriverInvalidArgumentException('unable to send document: document is too large');
+                throw new InvalidArgumentException('unable to send document: document is too large');
             }
         }
 
@@ -1223,7 +1248,7 @@ final class OperationExecutor
     {
         $pos = strpos($namespace, '.');
         if ($pos === false) {
-            throw new DriverInvalidArgumentException(sprintf('Invalid namespace provided: %s', $namespace));
+            throw new InvalidArgumentException(sprintf('Invalid namespace provided: %s', $namespace));
         }
 
         return [substr($namespace, 0, $pos), substr($namespace, $pos + 1)];
