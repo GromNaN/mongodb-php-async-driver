@@ -7,8 +7,13 @@ namespace MongoDB\Internal\Topology;
 use MongoDB\Driver\ReadPreference;
 
 use function array_any;
+use function array_diff_key;
 use function array_filter;
+use function array_flip;
 use function array_intersect_assoc;
+use function array_rand;
+use function array_values;
+use function count;
 
 /**
  * Stateless server-selection logic (SDAM spec §Server Selection).
@@ -28,9 +33,11 @@ final class ServerSelector
      *  - availability filter (type != Unknown)
      *  - mode-specific type filter
      *  - tag-set matching
+     *  - deprioritized server exclusion (when non-deprioritized candidates exist)
      *  - latency window filter (localThresholdMs)
      *
      * @param array<string, InternalServerDescription> $servers
+     * @param string[]                                 $deprioritizedServers Addresses ("host:port") to deprioritize.
      *
      * @return InternalServerDescription[]
      */
@@ -39,76 +46,112 @@ final class ServerSelector
         TopologyType $topologyType,
         ReadPreference $readPreference,
         int $localThresholdMs = 15,
+        array $deprioritizedServers = [],
+        string $operation = 'read',
     ): array {
-        // ----------------------------------------------------------------
-        // Special topology handling
-        // ----------------------------------------------------------------
+        $suitable = self::selectSuitable($servers, $topologyType, $readPreference, $deprioritizedServers, $operation);
 
-        if ($topologyType === TopologyType::Unknown) {
-            // Unknown topology: discovery not yet complete — no server is suitable.
-            return [];
+        // For Single and LoadBalanced, no latency filtering is applied.
+        if (
+            $topologyType === TopologyType::Single
+            || $topologyType === TopologyType::LoadBalanced
+            || $topologyType === TopologyType::Unknown
+        ) {
+            return $suitable;
         }
 
-        if ($topologyType === TopologyType::Single) {
-            // Single topology: return the sole available server regardless of RP.
-            return self::filterAvailable($servers);
+        return self::filterByLatency($suitable, $localThresholdMs);
+    }
+
+    /**
+     * Return the set of suitable servers before latency-window filtering.
+     *
+     * This is the "suitable_servers" stage from the SDAM spec: mode + tag-set
+     * filtering is applied, and deprioritized servers are excluded when
+     * non-deprioritized candidates are available.
+     *
+     * @param array<string, InternalServerDescription> $servers
+     * @param string[]                                 $deprioritizedServers Addresses ("host:port") to deprioritize.
+     *
+     * @return InternalServerDescription[]
+     */
+    public static function selectSuitable(
+        array $servers,
+        TopologyType $topologyType,
+        ReadPreference $readPreference,
+        array $deprioritizedServers = [],
+        string $operation = 'read',
+    ): array {
+        // For write operations on replica-set topologies, the spec requires that
+        // drivers always target the primary regardless of the read preference.
+        if (
+            $operation === 'write'
+            && ($topologyType === TopologyType::ReplicaSetWithPrimary
+                || $topologyType === TopologyType::ReplicaSetNoPrimary)
+        ) {
+            $readPreference = new ReadPreference(ReadPreference::PRIMARY);
         }
 
-        if ($topologyType === TopologyType::LoadBalanced) {
-            // Load-balanced topology: always exactly one load-balancer entry.
-            return self::filterAvailable($servers);
+        if ($deprioritizedServers !== []) {
+            // Try selection with deprioritized servers removed.
+            $deprioritizedIndex = array_flip($deprioritizedServers);
+            $filteredServers    = array_diff_key($servers, $deprioritizedIndex);
+            $candidates         = self::applySuitableFilter($filteredServers, $topologyType, $readPreference);
+            if ($candidates !== []) {
+                return $candidates;
+            }
+
+            // All candidates were deprioritized — fall back to full server list.
         }
 
-        if ($topologyType === TopologyType::Sharded) {
-            // Sharded: mongos servers within the latency window.
-            $mongos = self::filterByType($servers, InternalServerDescription::TYPE_MONGOS);
+        return self::applySuitableFilter($servers, $topologyType, $readPreference);
+    }
 
-            return self::filterByLatency($mongos, $localThresholdMs);
+    /**
+     * Choose a single server from the latency-window candidates using the
+     * operationCount-based two-random-picks algorithm (multi-threaded spec §6).
+     *
+     * Algorithm:
+     *  1. If there is only one candidate, return it.
+     *  2. Pick two candidates at random (without replacement).
+     *  3. Return the one with the lower operationCount; break ties randomly.
+     *
+     * @param InternalServerDescription[] $candidates      Servers in the latency window.
+     * @param array<string, int>          $operationCounts Map of "host:port" → outstanding op count.
+     *
+     * @return InternalServerDescription|null Null only when $candidates is empty.
+     */
+    public static function selectInWindow(array $candidates, array $operationCounts = []): ?InternalServerDescription
+    {
+        $candidates = array_values($candidates);
+        $count      = count($candidates);
+
+        if ($count === 0) {
+            return null;
         }
 
-        // ----------------------------------------------------------------
-        // Replica-set / unknown topology — honour the read preference.
-        // ----------------------------------------------------------------
-
-        $mode    = $readPreference->getModeString();
-        $tagSets = $readPreference->getTagSets();
-
-        switch ($mode) {
-            case ReadPreference::PRIMARY:
-                return self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY);
-
-            case ReadPreference::PRIMARY_PREFERRED:
-                $primaries = self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY);
-                if ($primaries !== []) {
-                    return $primaries;
-                }
-
-                // Fall back to secondaries.
-                return self::selectSecondaries($servers, $tagSets, $localThresholdMs);
-
-            case ReadPreference::SECONDARY:
-                return self::selectSecondaries($servers, $tagSets, $localThresholdMs);
-
-            case ReadPreference::SECONDARY_PREFERRED:
-                $secondaries = self::selectSecondaries($servers, $tagSets, $localThresholdMs);
-                if ($secondaries !== []) {
-                    return $secondaries;
-                }
-
-                // Fall back to primary (ignoring tag sets for the primary fallback).
-                return self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY);
-
-            case ReadPreference::NEAREST:
-                // All available servers (any type), filtered by tags then latency.
-                $available = self::filterAvailable($servers);
-                $tagged    = self::filterByTagSets($available, $tagSets);
-
-                return self::filterByLatency($tagged, $localThresholdMs);
-
-            default:
-                // Should never happen with a well-constructed ReadPreference.
-                return [];
+        if ($count === 1) {
+            return $candidates[0];
         }
+
+        // Pick two distinct indexes at random.
+        $keys = (array) array_rand($candidates, 2);
+        $a    = $candidates[$keys[0]];
+        $b    = $candidates[$keys[1]];
+
+        $opCountA = $operationCounts[$a->getAddress()] ?? 0;
+        $opCountB = $operationCounts[$b->getAddress()] ?? 0;
+
+        if ($opCountA < $opCountB) {
+            return $a;
+        }
+
+        if ($opCountB < $opCountA) {
+            return $b;
+        }
+
+        // Tie: pick randomly between the two.
+        return $candidates[$keys[array_rand($keys)]];
     }
 
     // =========================================================================
@@ -116,7 +159,70 @@ final class ServerSelector
     // =========================================================================
 
     /**
-     * Return servers whose type is not Unknown (i.e., they responded to hello).
+     * Apply mode and tag-set filtering without latency window.
+     *
+     * @param array<string, InternalServerDescription> $servers
+     *
+     * @return InternalServerDescription[]
+     */
+    private static function applySuitableFilter(
+        array $servers,
+        TopologyType $topologyType,
+        ReadPreference $readPreference,
+    ): array {
+        if ($topologyType === TopologyType::Unknown) {
+            return [];
+        }
+
+        if ($topologyType === TopologyType::Single || $topologyType === TopologyType::LoadBalanced) {
+            return self::filterAvailable($servers);
+        }
+
+        if ($topologyType === TopologyType::Sharded) {
+            return array_values(self::filterByType($servers, InternalServerDescription::TYPE_MONGOS));
+        }
+
+        $mode    = $readPreference->getModeString();
+        $tagSets = $readPreference->getTagSets();
+
+        switch ($mode) {
+            case ReadPreference::PRIMARY:
+                return array_values(self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY));
+
+            case ReadPreference::PRIMARY_PREFERRED:
+                $primaries = self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY);
+                if ($primaries !== []) {
+                    return array_values($primaries);
+                }
+
+                return self::suitableSecondaries($servers, $tagSets);
+
+            case ReadPreference::SECONDARY:
+                return self::suitableSecondaries($servers, $tagSets);
+
+            case ReadPreference::SECONDARY_PREFERRED:
+                $secondaries = self::suitableSecondaries($servers, $tagSets);
+                if ($secondaries !== []) {
+                    return $secondaries;
+                }
+
+                return array_values(self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY));
+
+            case ReadPreference::NEAREST:
+                $available = self::filterAvailable($servers);
+
+                return array_values(self::filterByTagSets($available, $tagSets));
+
+            default:
+                return [];
+        }
+    }
+
+    /**
+     * Return servers that are eligible for selection (known, readable types).
+     *
+     * Excluded: Unknown, RSGhost (cannot participate in reads/writes), and
+     * PossiblePrimary (placeholder — not yet confirmed to be primary).
      *
      * @param array<string, InternalServerDescription> $servers
      *
@@ -124,7 +230,12 @@ final class ServerSelector
      */
     private static function filterAvailable(array $servers): array
     {
-        return array_filter($servers, static fn (InternalServerDescription $sd) => $sd->isAvailable());
+        return array_values(array_filter(
+            $servers,
+            static fn (InternalServerDescription $sd) => $sd->isAvailable()
+                && $sd->type !== InternalServerDescription::TYPE_RS_GHOST
+                && $sd->type !== InternalServerDescription::TYPE_POSSIBLE_PRIMARY,
+        ));
     }
 
     /**
@@ -138,19 +249,18 @@ final class ServerSelector
     }
 
     /**
-     * Select secondaries, apply tag-set filtering, then apply the latency window.
+     * Select secondaries matching tag sets (no latency filtering).
      *
      * @param array<string, InternalServerDescription> $servers
      * @param array<array<string, string>>             $tagSets
      *
      * @return InternalServerDescription[]
      */
-    private static function selectSecondaries(array $servers, array $tagSets, int $localThresholdMs): array
+    private static function suitableSecondaries(array $servers, array $tagSets): array
     {
         $secondaries = self::filterByType($servers, InternalServerDescription::TYPE_RS_SECONDARY);
-        $tagged      = self::filterByTagSets($secondaries, $tagSets);
 
-        return self::filterByLatency($tagged, $localThresholdMs);
+        return array_values(self::filterByTagSets($secondaries, $tagSets));
     }
 
     /**

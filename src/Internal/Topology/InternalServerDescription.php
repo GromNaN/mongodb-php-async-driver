@@ -40,7 +40,7 @@ final class InternalServerDescription
         public readonly int $port,
         public readonly string $type = self::TYPE_UNKNOWN,
         public readonly array $helloResponse = [],
-        public readonly ?int $roundTripTimeMs = null,
+        public readonly ?float $roundTripTimeMs = null,
         public readonly ?string $setName = null,
         public readonly array $tags = [],
         public readonly bool $primary = false,
@@ -78,13 +78,28 @@ final class InternalServerDescription
             port:            $this->port,
             type:            $this->type,
             helloResponse:   $response,
-            roundTripTimeMs: $rttMs,
+            roundTripTimeMs: self::calculateEwmaRtt($this->roundTripTimeMs, (float) $rttMs),
             setName:         $this->setName,
             tags:            $this->tags,
             primary:         $this->primary,
             lastUpdateTime:  $now,
             error:           null,
         );
+    }
+
+    /**
+     * Compute the EWMA-averaged round-trip time.
+     *
+     * Formula: new_avg = 0.2 * new_rtt + 0.8 * prev_avg
+     * When there is no previous measurement, the new RTT is returned as-is.
+     */
+    public static function calculateEwmaRtt(?float $prevAvg, float $newRtt): float
+    {
+        if ($prevAvg === null) {
+            return $newRtt;
+        }
+
+        return 0.2 * $newRtt + 0.8 * $prevAvg;
     }
 
     public function withError(Throwable $error, ?int $now = null): self
@@ -197,7 +212,7 @@ final class InternalServerDescription
             port:            $port,
             type:            $type,
             helloResponse:   $response,
-            roundTripTimeMs: $rttMs,
+            roundTripTimeMs: (float) $rttMs,
             setName:         $setName,
             tags:            $tags,
             primary:         $primary,

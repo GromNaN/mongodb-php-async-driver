@@ -244,6 +244,25 @@ final class TopologyManager
         );
         $previousType = $this->topologyType;
 
+        // Apply EWMA smoothing to the RTT before storing in the topology.
+        if ($sd->roundTripTimeMs !== null) {
+            $sd = new InternalServerDescription(
+                host:            $sd->host,
+                port:            $sd->port,
+                type:            $sd->type,
+                helloResponse:   $sd->helloResponse,
+                roundTripTimeMs: InternalServerDescription::calculateEwmaRtt(
+                    $previousSd->roundTripTimeMs,
+                    $sd->roundTripTimeMs,
+                ),
+                setName:         $sd->setName,
+                tags:            $sd->tags,
+                primary:         $sd->primary,
+                lastUpdateTime:  $sd->lastUpdateTime,
+                error:           $sd->error,
+            );
+        }
+
         // Apply SDAM transition.
         $result = SdamStateMachine::applyServerDescription(
             topologyType:   $this->topologyType,

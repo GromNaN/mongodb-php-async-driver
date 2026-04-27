@@ -21,7 +21,7 @@ final class ServerDescription
     private string $type;
     private array $hello_response;
     private int $last_update_time;
-    private ?int $round_trip_time;
+    private ?float $round_trip_time;
 
     /**
      * Private constructor. Use the internal factory to create instances.
@@ -35,7 +35,7 @@ final class ServerDescription
         string $host,
         int $port,
         string $type,
-        ?int $roundTripTime,
+        ?float $roundTripTime,
         array $helloResponse,
         int $lastUpdateTime,
     ): static {
@@ -67,7 +67,7 @@ final class ServerDescription
 
     public function getRoundTripTime(): ?int
     {
-        return $this->round_trip_time;
+        return $this->round_trip_time !== null ? (int) $this->round_trip_time : null;
     }
 
     public function getHelloResponse(): array
