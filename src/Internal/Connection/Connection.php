@@ -167,7 +167,7 @@ final class Connection
         $mechsKey   = $username !== null ? ($authSource . '.' . $username) : null;
 
         // Run server handshake (hello / isMaster), optionally requesting saslSupportedMechs.
-        $helloBody = $this->runHello($mechsKey);
+        $helloBody = $this->runHello($mechsKey, $options?->clientMetadata);
 
         // Authenticate if credentials were supplied (and auth was not skipped).
         if ($username !== null) {
@@ -370,10 +370,11 @@ final class Connection
      *
      * @param string|null $saslSupportedMechs "authSource.username" key to request
      *                                        mechanism negotiation from the server.
+     * @param array|null  $clientMetadata     Pre-built `client` document to send in the handshake.
      *
      * @return array|object Decoded hello response body.
      */
-    private function runHello(?string $saslSupportedMechs = null): array|object
+    private function runHello(?string $saslSupportedMechs = null, ?array $clientMetadata = null): array|object
     {
         $helloCmd = [
             'hello' => 1,
@@ -382,6 +383,10 @@ final class Connection
 
         if ($saslSupportedMechs !== null) {
             $helloCmd['saslSupportedMechs'] = $saslSupportedMechs;
+        }
+
+        if ($clientMetadata !== null) {
+            $helloCmd['client'] = $clientMetadata;
         }
 
         [$bytes] = OpMsgEncoder::encodeWithRequestId($helloCmd);

@@ -8,6 +8,7 @@ use InvalidArgumentException as PhpInvalidArgumentException;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Monitoring\LogSubscriber;
 use MongoDB\Driver\Monitoring\Subscriber;
+use MongoDB\Internal\Connection\ClientMetadata;
 use MongoDB\Internal\Connection\SyncRunner;
 use MongoDB\Internal\Monitoring\Dispatcher;
 use MongoDB\Internal\Operation\OperationExecutor;
@@ -211,6 +212,11 @@ final class Manager
 
         // Validate constraints that depend on both URI structure and merged options
         $this->validateMergedOptions($mergedOptions);
+
+        $mergedOptions['clientMetadata'] = ClientMetadata::build(
+            $mergedOptions['appname'] ?? null,
+            $driverOptions['driver'] ?? [],
+        );
 
         $this->uriOptions = UriOptions::fromArray($mergedOptions);
 

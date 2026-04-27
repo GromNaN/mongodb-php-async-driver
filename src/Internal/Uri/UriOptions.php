@@ -142,6 +142,19 @@ final class UriOptions
     /** @var array<string, string> */
     public readonly array $authMechanismProperties;
 
+    /**
+     * Pre-built `client` metadata document for the hello handshake.
+     * Not a URI option — injected by Manager after construction.
+     *
+     * @var array{
+     *     application?: array{name: string},
+     *     driver: array{name: string, version: string},
+     *     os: array{type: string},
+     *     platform: string,
+     * }|null
+     */
+    public readonly ?array $clientMetadata;
+
     // -------------------------------------------------------------------------
     // Factory
     // -------------------------------------------------------------------------
@@ -384,6 +397,9 @@ final class UriOptions
         } else {
             self::assignReadonly($self, 'authMechanismProperties', []);
         }
+
+        // ----- clientMetadata (injected by Manager, not a URI option) ---------
+        self::assignReadonly($self, 'clientMetadata', $options['clientMetadata'] ?? null);
 
         return $self;
     }
