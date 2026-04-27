@@ -96,42 +96,63 @@ final class Connection
             isset($options->tlsCertificateKeyFile)
         );
 
-        if ($tlsEnabled) {
-            // Build TLS context from URI options.
-            $tlsContext = new ClientTlsContext($this->host);
+        // Build a cancellation token for the TCP (+ TLS) connect phase.
+        // connectTimeoutMS defaults to 10 000 ms per the MongoDB URI spec.
+        $connectTimeoutMs  = isset($options->connectTimeoutMS) && $options->connectTimeoutMS > 0
+            ? $options->connectTimeoutMS
+            : 10_000;
+        $connectCancellation = new TimeoutCancellation($connectTimeoutMs / 1000.0);
 
-            if (isset($options->tlsCAFile)) {
-                $tlsContext = $tlsContext->withCaFile($options->tlsCAFile);
+        try {
+            if ($tlsEnabled) {
+                // Build TLS context from URI options.
+                $tlsContext = new ClientTlsContext($this->host);
+
+                if (isset($options->tlsCAFile)) {
+                    $tlsContext = $tlsContext->withCaFile($options->tlsCAFile);
+                }
+
+                if (isset($options->tlsCertificateKeyFile)) {
+                    $tlsContext = $tlsContext->withCertificate(new Certificate($options->tlsCertificateKeyFile));
+                }
+
+                // Both tlsAllowInvalidCertificates and tlsAllowInvalidHostnames disable
+                // peer verification. amphp/socket ties verify_peer and verify_peer_name
+                // together so we cannot disable hostname checks independently.
+                if (
+                    ($options->tlsAllowInvalidCertificates ?? false) ||
+                    ($options->tlsAllowInvalidHostnames ?? false)
+                ) {
+                    $tlsContext = $tlsContext->withoutPeerVerification();
+                }
+
+                // connectTls() establishes the TCP connection and performs the TLS
+                // handshake, suspending the fiber until both complete.
+                $this->socket = connectTls(
+                    $this->host . ':' . $this->port,
+                    (new ConnectContext())->withTlsContext($tlsContext),
+                    $connectCancellation,
+                );
+            } else {
+                // amphp/socket connect() suspends the fiber internally.
+                $this->socket = connect(
+                    'tcp://' . $this->host . ':' . $this->port,
+                    null,
+                    $connectCancellation,
+                );
             }
-
-            if (isset($options->tlsCertificateKeyFile)) {
-                $tlsContext = $tlsContext->withCertificate(new Certificate($options->tlsCertificateKeyFile));
-            }
-
-            // Both tlsAllowInvalidCertificates and tlsAllowInvalidHostnames disable
-            // peer verification. amphp/socket ties verify_peer and verify_peer_name
-            // together so we cannot disable hostname checks independently.
-            if (
-                ($options->tlsAllowInvalidCertificates ?? false) ||
-                ($options->tlsAllowInvalidHostnames ?? false)
-            ) {
-                $tlsContext = $tlsContext->withoutPeerVerification();
-            }
-
-            // connectTls() establishes the TCP connection and performs the TLS
-            // handshake, suspending the fiber until both complete.
-            $this->socket = connectTls(
-                $this->host . ':' . $this->port,
-                (new ConnectContext())->withTlsContext($tlsContext),
+        } catch (CancelledException $e) {
+            throw new ConnectionTimeoutException(
+                sprintf('Connection to %s:%d timed out after %d ms', $this->host, $this->port, $connectTimeoutMs),
+                0,
+                $e,
             );
-        } else {
-            // amphp/socket connect() suspends the fiber internally.
-            $this->socket = connect('tcp://' . $this->host . ':' . $this->port);
         }
 
-        if (isset($options->socketTimeoutMS) && $options->socketTimeoutMS > 0) {
-            $this->socketTimeoutSecs = $options->socketTimeoutMS / 1000.0;
-        }
+        // During the hello + auth phases, apply connectTimeoutMS as the I/O timeout.
+        // This covers the full connection setup (TCP + hello + auth) as mandated by
+        // the spec.  After setup is complete, socketTimeoutMS takes over.
+        $this->socketTimeoutSecs = $connectTimeoutMs / 1000.0;
 
         $this->state = self::STATE_CONNECTED;
 
@@ -163,6 +184,11 @@ final class Connection
 
             $mechanism->authenticate($this, $username, $password, $authSource);
         }
+
+        // Connection setup complete — switch to the per-operation socket timeout.
+        $this->socketTimeoutSecs = isset($options->socketTimeoutMS) && $options->socketTimeoutMS > 0
+            ? $options->socketTimeoutMS / 1000.0
+            : 0.0;
 
         $this->state = self::STATE_READY;
         $this->markUsed();
