@@ -188,16 +188,14 @@ The following features from `ext-mongodb` are **not yet implemented**:
 
 | Feature | Notes |
 |---|---|
-| **TLS / SSL** | Plain TCP only; `tls=true` URI option is ignored |
 | **Multi-document transactions** | `Session::startTransaction()` / `commitTransaction()` / `abortTransaction()` are stubs |
 | **Client-side field level encryption (CSFLE)** | `ClientEncryption` class exists but encryption is not wired up |
 | **Queryable Encryption (QE)** | Not implemented |
 | **Wire compression** | `zlib`, `snappy`, and `zstd` compressors are not supported |
-| **SRV connection strings** | `mongodb+srv://` URIs are not supported |
 | **Persistent clients** | Each `Manager` instance creates independent connections; there is no cross-request connection persistence like in the C extension |
-| **GSSAPI / Kerberos authentication** | Only SCRAM-SHA-256 and SCRAM-SHA-1 are implemented |
+| **GSSAPI / Kerberos authentication** | SCRAM-SHA-256 and SCRAM-SHA-1 are implemented; GSSAPI is not |
 | **LDAP (PLAIN) authentication** | Not implemented |
-| **X.509 authentication** | Not implemented (requires TLS) |
+| **X.509 authentication** | Not implemented |
 | **AWS authentication** | Not implemented |
 | **Stable API versioning** | `serverApi` URI / constructor option is parsed but not sent in commands |
 | **Snapshot sessions** | `Session` objects do not support snapshot read concern |

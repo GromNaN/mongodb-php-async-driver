@@ -9,6 +9,19 @@ All commits carry an `Assisted-by: Claude Code/claude-sonnet-4-6` trailer.
 
 A pure userland PHP 8.4+ MongoDB driver that replicates the `MongoDB\Driver\*` and `MongoDB\BSON\*` namespaces normally provided by `ext-mongodb`. Async I/O is handled by RevoltPHP (`revolt/event-loop`) and `amphp/socket`.
 
+**Implemented features:**
+- Full BSON encoding/decoding (`MongoDB\BSON\*`)
+- OP_MSG wire protocol
+- Connection pooling with idle-connection cleanup
+- TLS/SSL connections (`tls`, `tlsCAFile`, `tlsCertificateKeyFile`, `tlsAllowInvalidCertificates`, `tlsAllowInvalidHostnames`)
+- `mongodb+srv://` Initial DNS Seedlist Discovery (SRV + TXT records, implicit TLS, `srvServiceName`, `srvMaxHosts`)
+- Password authentication: SCRAM-SHA-256 and SCRAM-SHA-1 with `saslSupportedMechs` negotiation
+- SDAM topology monitoring (Standalone, ReplicaSet, Sharded, LoadBalanced)
+- Server selection with latency window, tag sets, deprioritized servers, and operationCount-based in-window selection (RTT EWMA)
+- APM monitoring events (command, SDAM, heartbeat)
+- Sessions and transactions
+- GridFS, Change Streams, bulk write
+
 ## Coding standards
 
 The coding style is enforced by PHP_CodeSniffer with the PSR-12 standard.
@@ -97,7 +110,7 @@ src/Internal/Operation/      OperationExecutor, CommandHelper
 src/Internal/Protocol/       OP_MSG MessageHeader, OpMsgEncoder, OpMsgDecoder
 src/Internal/Session/        SessionPool
 src/Internal/Topology/       TopologyManager, ServerMonitor, SdamStateMachine, ServerSelector
-src/Internal/Uri/            ConnectionString, UriOptions
+src/Internal/Uri/            ConnectionString, UriOptions, SrvResolver
 src/functions.php            Global Monitoring functions (not autoloadable)
 ```
 
@@ -110,6 +123,8 @@ src/functions.php            Global Monitoring functions (not autoloadable)
 - **`SyncRunner::run()`**: wraps async operations so they block when called from non-fiber context (plain PHP scripts) and suspend-only when called from inside a Revolt fiber.
 - **No class_exists guards**: classes are plain PSR-4 files. The Composer autoloader won't load a file for an already-defined class, so no guards are needed.
 - **Use `hrtime(true)` for durations, `microtime(true)` for wall-clock timestamps**: `hrtime` is monotonic (no clock skew) and returns nanoseconds as an integer — convert with `intdiv($ns, 1_000)` for µs or `intdiv($ns, 1_000_000)` for ms. Keep `microtime` only for absolute timestamps (e.g. `lastUpdateTime`, `UTCDateTime` constructor).
+- **RTT is a smoothed float**: `InternalServerDescription::roundTripTimeMs` is `?float` (EWMA with α=0.2). Raw heartbeat RTT is fed into `TopologyManager::onServerUpdate()` which applies `calculateEwmaRtt()` before storing. `ServerDescription::getRoundTripTime()` returns `?int` for ext-mongodb API compatibility.
+- **`mongodb+srv://` resolution**: `SrvResolver::resolve()` performs DNS SRV + TXT lookups synchronously (PHP `dns_get_record()`). TXT options (`authSource`, `replicaSet`, `loadBalanced`) are merged at lowest priority — URI query params always win. Implicit TLS is applied unless `tls`/`ssl` is explicitly set in the URI.
 
 ## References
 
