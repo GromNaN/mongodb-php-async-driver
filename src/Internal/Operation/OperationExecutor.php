@@ -50,6 +50,7 @@ use Throwable;
 use function array_map;
 use function array_values;
 use function assert;
+use function bin2hex;
 use function count;
 use function explode;
 use function get_object_vars;
@@ -82,6 +83,9 @@ final class OperationExecutor
 {
     /** @var array<string, ConnectionPool> Keyed by "host:port". */
     private array $pools = [];
+
+    /** @var array<string, int> txnNumber counter per lsid id (hex), for retryable writes. */
+    private array $txnNumbers = [];
 
     /**
      * @param TopologyManager $topology    Live topology manager.
@@ -140,6 +144,7 @@ final class OperationExecutor
         ?ReadConcern $readConcern = null,
         ?WriteConcern $writeConcern = null,
         ?Server $callingServer = null,
+        bool $retryRead = false,
     ): CursorInterface {
         $this->ensureStarted();
 
@@ -167,6 +172,27 @@ final class OperationExecutor
         );
 
         $maxAwaitTimeMS = (int) ($command->getOptions()['maxAwaitTimeMS'] ?? 0);
+
+        $canRetry = $retryRead
+            && $this->options->retryReads
+            && ($session === null || ! $session->isInTransaction())
+            && $this->serverSupportsRetry($server);
+
+        if (! $canRetry) {
+            return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer);
+        }
+
+        try {
+            return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer);
+        } catch (Throwable $e) {
+            if (! RetryableError::isRetryable($e)) {
+                throw $e;
+            }
+        }
+
+        // One retry with a freshly selected server.
+        $server = $this->topology->selectServer($readPreference);
+        $pool   = $this->getOrCreatePool($server->host, $server->port);
 
         return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer);
     }
@@ -223,6 +249,26 @@ final class OperationExecutor
 
         $maxAwaitTimeMS = isset($opts['maxAwaitTimeMS']) ? (int) $opts['maxAwaitTimeMS'] : 0;
 
+        $canRetry = $this->options->retryReads
+            && ($session === null || ! $session->isInTransaction())
+            && $this->serverSupportsRetry($server);
+
+        if (! $canRetry) {
+            return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer, $query);
+        }
+
+        try {
+            return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer, $query);
+        } catch (Throwable $e) {
+            if (! RetryableError::isRetryable($e)) {
+                throw $e;
+            }
+        }
+
+        // One retry with a freshly selected server.
+        $server = $this->topology->selectServer($readPreference);
+        $pool   = $this->getOrCreatePool($server->host, $server->port);
+
         return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer, $query);
     }
 
@@ -252,6 +298,11 @@ final class OperationExecutor
 
         $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
         $pool   = $this->getOrCreatePool($server->host, $server->port);
+
+        $canRetryWrites = $this->options->retryWrites
+            && $session === null
+            && ($writeConcern === null || $writeConcern->getW() !== 0)
+            && $this->serverSupportsRetryableWrites($server);
 
         $ordered     = (bool) ($bulk->getOptions()['ordered'] ?? true);
         $bulkOptions = $bulk->getOptions();
@@ -327,9 +378,18 @@ final class OperationExecutor
                     serverApi:    $this->serverApi,
                 );
 
+                $batchIsRetryable = $canRetryWrites && $this->isBatchRetryableForWrite($batch);
+                $retryLsid        = null;
+
+                if ($batchIsRetryable) {
+                    $retryLsid                = $this->sessionPool->acquire();
+                    $txnNum                   = $this->nextTxnNumber($retryLsid);
+                    $insertCmd['lsid']        = $retryLsid;
+                    $insertCmd['txnNumber']   = new Int64($txnNum);
+                }
+
                 try {
-                    $cursor = $this->sendCommand($pool, $db, 'insert', $insertCmd, $server, 0, null, $session);
-                    $result = (array) (iterator_to_array($cursor)[0] ?? []);
+                    $result = $this->executeBatchWithRetry($pool, $server, $db, 'insert', $insertCmd, $session, $batchIsRetryable);
 
                     $totalInserted += (int) ($result['n'] ?? count($docs));
                     $acknowledged   = ! ($result['acknowledged'] ?? true) ? false : $acknowledged;
@@ -361,6 +421,11 @@ final class OperationExecutor
                     if ($ordered) {
                         $batchException = $e;
                         break;
+                    }
+                } finally {
+                    if ($retryLsid !== null) {
+                        $this->sessionPool->release($retryLsid);
+                        $retryLsid = null;
                     }
                 }
             } elseif ($batchType === 'update') {
@@ -416,9 +481,18 @@ final class OperationExecutor
                     serverApi:    $this->serverApi,
                 );
 
+                $batchIsRetryable = $canRetryWrites && $this->isBatchRetryableForWrite($batch);
+                $retryLsid        = null;
+
+                if ($batchIsRetryable) {
+                    $retryLsid                = $this->sessionPool->acquire();
+                    $txnNum                   = $this->nextTxnNumber($retryLsid);
+                    $updateCmd['lsid']        = $retryLsid;
+                    $updateCmd['txnNumber']   = new Int64($txnNum);
+                }
+
                 try {
-                    $cursor = $this->sendCommand($pool, $db, 'update', $updateCmd, $server, 0, null, $session);
-                    $result = (array) (iterator_to_array($cursor)[0] ?? []);
+                    $result = $this->executeBatchWithRetry($pool, $server, $db, 'update', $updateCmd, $session, $batchIsRetryable);
 
                     $upsertedInBatch = (array) ($result['upserted'] ?? []);
                     $totalMatched  += (int) ($result['n'] ?? 0) - count($upsertedInBatch);
@@ -460,6 +534,11 @@ final class OperationExecutor
                         $batchException = $e;
                         break;
                     }
+                } finally {
+                    if ($retryLsid !== null) {
+                        $this->sessionPool->release($retryLsid);
+                        $retryLsid = null;
+                    }
                 }
             } elseif ($batchType === 'delete') {
                 $deleteSpecs = array_map(static function ($op): array {
@@ -495,9 +574,18 @@ final class OperationExecutor
                     serverApi:    $this->serverApi,
                 );
 
+                $batchIsRetryable = $canRetryWrites && $this->isBatchRetryableForWrite($batch);
+                $retryLsid        = null;
+
+                if ($batchIsRetryable) {
+                    $retryLsid                = $this->sessionPool->acquire();
+                    $txnNum                   = $this->nextTxnNumber($retryLsid);
+                    $deleteCmd['lsid']        = $retryLsid;
+                    $deleteCmd['txnNumber']   = new Int64($txnNum);
+                }
+
                 try {
-                    $cursor = $this->sendCommand($pool, $db, 'delete', $deleteCmd, $server, 0, null, $session);
-                    $result = (array) (iterator_to_array($cursor)[0] ?? []);
+                    $result = $this->executeBatchWithRetry($pool, $server, $db, 'delete', $deleteCmd, $session, $batchIsRetryable);
 
                     $totalDeleted += (int) ($result['n'] ?? 0);
 
@@ -528,6 +616,11 @@ final class OperationExecutor
                     if ($ordered) {
                         $batchException = $e;
                         break;
+                    }
+                } finally {
+                    if ($retryLsid !== null) {
+                        $this->sessionPool->release($retryLsid);
+                        $retryLsid = null;
                     }
                 }
             }
@@ -1198,6 +1291,115 @@ final class OperationExecutor
         }
 
         return $this->pools[$address];
+    }
+
+    // -------------------------------------------------------------------------
+    // Private — retry helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * True when the server supports retryable reads/writes (wire version >= 6).
+     */
+    private function serverSupportsRetry(InternalServerDescription $server): bool
+    {
+        return ($server->helloResponse['maxWireVersion'] ?? 0) >= 6;
+    }
+
+    /**
+     * True when the server supports retryable writes:
+     * wire version >= 6, logicalSessionTimeoutMinutes present, not standalone.
+     */
+    private function serverSupportsRetryableWrites(InternalServerDescription $server): bool
+    {
+        return ($server->helloResponse['maxWireVersion'] ?? 0) >= 6
+            && isset($server->helloResponse['logicalSessionTimeoutMinutes'])
+            && $server->type !== InternalServerDescription::TYPE_STANDALONE;
+    }
+
+    /**
+     * Increment and return the txnNumber for the given server session lsid.
+     * The lsid's id is a BSON Binary; its raw bytes are used as a pool key.
+     */
+    private function nextTxnNumber(object $lsid): int
+    {
+        $key = bin2hex($lsid->id->getData());
+
+        return $this->txnNumbers[$key] = ($this->txnNumbers[$key] ?? 0) + 1;
+    }
+
+    /**
+     * True when a bulk-write batch is eligible for retryable writes.
+     * Batches with multi-document update (multi:true) or multi-document delete
+     * (limit:0) are not retryable per the spec.
+     */
+    private function isBatchRetryableForWrite(array $batch): bool
+    {
+        $type = $batch['type'];
+
+        if ($type === 'insert') {
+            return true;
+        }
+
+        if ($type === 'update') {
+            foreach ($batch['ops'] as $op) {
+                [, , , $opts] = $op;
+                if ($opts['multi'] ?? false) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        if ($type === 'delete') {
+            foreach ($batch['ops'] as $op) {
+                [, , $opts] = $op;
+                if (($opts['limit'] ?? 1) === 0) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Execute a bulk-write batch command, retrying once on a retryable error when
+     * $retryable is true.  The caller must have already injected lsid / txnNumber
+     * into $prepared if retryable writes are active.
+     *
+     * Returns the decoded first response document as an array.
+     *
+     * @throws CommandException|ConnectionException on non-retryable or second-attempt failure.
+     */
+    private function executeBatchWithRetry(
+        ConnectionPool $pool,
+        InternalServerDescription $server,
+        string $db,
+        string $cmdName,
+        array $prepared,
+        ?Session $session,
+        bool $retryable,
+    ): array {
+        try {
+            $cursor = $this->sendCommand($pool, $db, $cmdName, $prepared, $server, 0, null, $session);
+
+            return (array) (iterator_to_array($cursor)[0] ?? []);
+        } catch (Throwable $e) {
+            if (! $retryable || ! RetryableError::isRetryable($e)) {
+                throw $e;
+            }
+        }
+
+        // One retry: select a fresh server and pool.
+        $retryServer = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
+        $retryPool   = $this->getOrCreatePool($retryServer->host, $retryServer->port);
+
+        $cursor = $this->sendCommand($retryPool, $db, $cmdName, $prepared, $retryServer, 0, null, $session);
+
+        return (array) (iterator_to_array($cursor)[0] ?? []);
     }
 
     // -------------------------------------------------------------------------

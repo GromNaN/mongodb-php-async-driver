@@ -240,7 +240,7 @@ final class Manager
         $readConcern    = $this->extractReadConcern($options);
         $session        = $this->extractSession($options);
 
-        return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern));
+        return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, retryRead: true));
     }
 
     public function executeWriteCommand(

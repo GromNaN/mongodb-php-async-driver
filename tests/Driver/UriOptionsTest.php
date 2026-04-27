@@ -4,6 +4,14 @@ declare(strict_types=1);
 
 namespace MongoDB\Tests\Driver;
 
+use MongoDB\BSON\Binary;
+use MongoDB\BSON\Document;
+use MongoDB\BSON\Int64;
+use MongoDB\BSON\MaxKey;
+use MongoDB\BSON\MinKey;
+use MongoDB\BSON\ObjectId;
+use MongoDB\BSON\Regex;
+use MongoDB\BSON\UTCDateTime;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Exception\UnexpectedValueException;
 use MongoDB\Internal\Uri\UriOptions;
