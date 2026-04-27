@@ -626,11 +626,11 @@ final class Manager
 
     private function extractReadPreference(?array $options): ?ReadPreference
     {
-        if ($options === null || ! isset($options['readPreference'])) {
+        $rp = $options['readPreference'] ?? null;
+        if ($rp === null) {
             return null;
         }
 
-        $rp = $options['readPreference'];
         if ($rp instanceof ReadPreference) {
             return $rp;
         }
@@ -640,11 +640,11 @@ final class Manager
 
     private function extractWriteConcern(?array $options): ?WriteConcern
     {
-        if ($options === null || ! isset($options['writeConcern'])) {
+        $wc = $options['writeConcern'] ?? null;
+        if ($wc === null) {
             return null;
         }
 
-        $wc = $options['writeConcern'];
         if ($wc instanceof WriteConcern) {
             return $wc;
         }
@@ -654,11 +654,11 @@ final class Manager
 
     private function extractReadConcern(?array $options): ?ReadConcern
     {
-        if ($options === null || ! isset($options['readConcern'])) {
+        $rc = $options['readConcern'] ?? null;
+        if ($rc === null) {
             return null;
         }
 
-        $rc = $options['readConcern'];
         if ($rc instanceof ReadConcern) {
             return $rc;
         }
@@ -668,11 +668,11 @@ final class Manager
 
     private function extractSession(?array $options): ?Session
     {
-        if ($options === null || ! isset($options['session'])) {
+        $session = $options['session'] ?? null;
+        if ($session === null) {
             return null;
         }
 
-        $session = $options['session'];
         if ($session instanceof Session) {
             return $session;
         }
