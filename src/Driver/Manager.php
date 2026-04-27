@@ -206,8 +206,8 @@ final class Manager
 
         // Default authSource to the URI path database, then to 'admin'.
         // Only applied when credentials are present and authSource was not explicitly set.
-        if (isset($mergedOptions['username']) && ! isset($mergedOptions['authSource'])) {
-            $mergedOptions['authSource'] = $this->connectionString->getDatabase() ?? 'admin';
+        if (isset($mergedOptions['username'])) {
+            $mergedOptions['authSource'] ??= $this->connectionString->getDatabase() ?? 'admin';
         }
 
         // Validate constraints that depend on both URI structure and merged options
