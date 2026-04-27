@@ -7,7 +7,6 @@ namespace MongoDB\Internal\Uri;
 use Closure;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueException;
-use MongoDB\Internal\BSON\BsonType;
 
 use function array_filter;
 use function array_is_list;
@@ -83,6 +82,7 @@ final class UriOptions
     public readonly int $connectTimeoutMS;
     public readonly int $socketTimeoutMS;
     public readonly int $maxIdleTimeMS;
+    public readonly int $srvMaxHosts;
     public readonly int $wTimeoutMS;
     public readonly int $zlibCompressionLevel;
 
@@ -192,6 +192,7 @@ final class UriOptions
         }
 
         // ----- Optional integer options (only set when present) ---------------
+        // socketCheckIntervalMS is validated but not stored (no declared property).
         foreach (
             [
                 'connectTimeoutMS',
@@ -207,6 +208,11 @@ final class UriOptions
             }
 
             self::assertNonNegativeInt($key, $options[$key]);
+
+            if ($key === 'socketCheckIntervalMS') {
+                continue;
+            }
+
             self::assignReadonly($self, $key, (int) $options[$key]);
         }
 
@@ -215,7 +221,7 @@ final class UriOptions
             $wTimeout = $options['wTimeoutMS'];
             if (! is_int($wTimeout)) {
                 throw new InvalidArgumentException(
-                    sprintf('Expected integer for "wTimeoutMS" URI option, %s given', get_debug_type($wTimeout)),
+                    sprintf('Expected integer for "wTimeoutMS" URI option, %s given', self::phpTypeName($wTimeout)),
                 );
             }
 
@@ -276,7 +282,7 @@ final class UriOptions
             $w = $options['w'];
             if (! is_string($w) && ! is_int($w)) {
                 throw new InvalidArgumentException(
-                    sprintf('Expected 32-bit integer or string for "w" URI option, %s given', BsonType::phpTypeName($w)),
+                    sprintf('Expected 32-bit integer or string for "w" URI option, %s given', self::phpTypeName($w)),
                 );
             }
 
@@ -300,7 +306,7 @@ final class UriOptions
             $tags = $options['readPreferenceTags'];
             if (! is_array($tags)) {
                 throw new InvalidArgumentException(
-                    sprintf('Expected array for "readPreferenceTags" URI option, %s given', get_debug_type($tags)),
+                    sprintf('Expected array for "readPreferenceTags" URI option, %s given', self::phpTypeName($tags)),
                 );
             }
 
