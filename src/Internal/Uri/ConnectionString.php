@@ -14,10 +14,12 @@ use function array_search;
 use function array_values;
 use function count;
 use function ctype_digit;
+use function ctype_xdigit;
 use function explode;
 use function filter_var;
 use function implode;
 use function in_array;
+use function rawurldecode;
 use function sprintf;
 use function str_starts_with;
 use function strlen;
@@ -253,24 +255,74 @@ final class ConnectionString
         $this->username = null;
         $this->password = null;
 
-        // Find the '@' that separates credentials from hosts.
-        // The host portion may not contain '@', so we look for the last '@'
-        // before the first '/' (path separator).
+        // Find the boundary between host list and path/query-string.
+        // The slash separating hosts from database is optional when there is no
+        // database but query options are present: e.g. mongodb://host?tls=true.
         $slashPos = strpos($rest, '/');
-        $hostPart = $slashPos !== false ? substr($rest, 0, $slashPos) : $rest;
-        $afterHost = $slashPos !== false ? substr($rest, $slashPos + 1) : '';
+        $qMarkPos = strpos($rest, '?');
+
+        if ($slashPos !== false && ($qMarkPos === false || $slashPos < $qMarkPos)) {
+            // Normal case: '/' appears before '?' (or no '?').
+            $hostPart  = substr($rest, 0, $slashPos);
+            $afterHost = substr($rest, $slashPos + 1);
+        } elseif ($qMarkPos !== false) {
+            // No '/' before '?': treat '?' as the start of afterHost with no db.
+            $hostPart  = substr($rest, 0, $qMarkPos);
+            $afterHost = '?' . substr($rest, $qMarkPos + 1);
+        } else {
+            $hostPart  = $rest;
+            $afterHost = '';
+        }
 
         $atPos = strrpos($hostPart, '@');
+
+        // If no '@' was found before the first '/' but one appears in afterHost,
+        // the userinfo contains an unescaped '/' which is disallowed.
+        if ($atPos === false && strpos($afterHost, '@') !== false) {
+            throw new InvalidArgumentException(
+                sprintf(
+                    "Failed to parse MongoDB URI: '%s'. Userinfo contains unescaped '/' character.",
+                    $uri,
+                ),
+            );
+        }
+
         if ($atPos !== false) {
             $userinfo = substr($hostPart, 0, $atPos);
             $hostPart = substr($hostPart, $atPos + 1);
 
+            // Unescaped '@' characters in userinfo are disallowed — they must be percent-encoded.
+            if (strpos($userinfo, '@') !== false) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. Userinfo contains unescaped '@' character.",
+                        $uri,
+                    ),
+                );
+            }
+
             $colonPos = strpos($userinfo, ':');
             if ($colonPos !== false) {
-                $this->username = urldecode(substr($userinfo, 0, $colonPos));
-                $this->password = urldecode(substr($userinfo, $colonPos + 1));
+                $rawUser     = substr($userinfo, 0, $colonPos);
+                $rawPassword = substr($userinfo, $colonPos + 1);
+
+                // MongoDB requires colons in passwords to be percent-encoded.
+                if (strpos($rawPassword, ':') !== false) {
+                    throw new InvalidArgumentException(
+                        sprintf(
+                            "Failed to parse MongoDB URI: '%s'. Password contains unescaped colon.",
+                            $uri,
+                        ),
+                    );
+                }
+
+                $this->validatePercentEncoding($rawUser, 'username', $uri);
+                $this->validatePercentEncoding($rawPassword, 'password', $uri);
+                $this->username = rawurldecode($rawUser);
+                $this->password = rawurldecode($rawPassword);
             } else {
-                $this->username = urldecode($userinfo);
+                $this->validatePercentEncoding($userinfo, 'username', $uri);
+                $this->username = rawurldecode($userinfo);
             }
         }
 
@@ -303,7 +355,7 @@ final class ConnectionString
         }
 
         if ($dbPart !== '') {
-            $this->database = urldecode($dbPart);
+            $this->database = rawurldecode($dbPart);
         }
 
         // --- 6. Parse and normalize options ---
@@ -507,10 +559,36 @@ final class ConnectionString
                 );
             }
 
+            // Decode percent-encoded characters (e.g. %2F in Unix socket paths).
+            $host = rawurldecode($host);
+
             $hosts[] = ['host' => $host, 'port' => $port];
         }
 
         return $hosts;
+    }
+
+    /**
+     * Validate that a string contains only well-formed percent-encoded sequences.
+     * Every '%' must be followed by exactly two hexadecimal digits.
+     */
+    private function validatePercentEncoding(string $value, string $context, string $uri): void
+    {
+        $offset = 0;
+        while (($pos = strpos($value, '%', $offset)) !== false) {
+            $hex = substr($value, $pos + 1, 2);
+            if (strlen($hex) < 2 || ! ctype_xdigit($hex)) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        "Failed to parse MongoDB URI: '%s'. Invalid percent-encoding in %s.",
+                        $uri,
+                        $context,
+                    ),
+                );
+            }
+
+            $offset = $pos + 3;
+        }
     }
 
     /**
@@ -571,6 +649,11 @@ final class ConnectionString
                 throw new InvalidArgumentException(
                     sprintf("Failed to parse MongoDB URI: '%s'. %s", $this->uri, $e->getMessage()),
                 );
+            }
+
+            // null means the option was silently dropped (e.g., empty integer value).
+            if ($coercedValue === null) {
+                continue;
             }
 
             // readPreferenceTags may appear multiple times; accumulate into an array of tag sets
@@ -651,6 +734,11 @@ final class ConnectionString
     private function coerceOptionValue(string $key, string $rawKey, string $value): mixed
     {
         if (in_array($key, self::INT_OPTIONS, true)) {
+            if ($value === '') {
+                // Silently ignore empty-value integer options (spec: emit warning, not error).
+                return null;
+            }
+
             if (! ctype_digit($value) && ! (str_starts_with($value, '-') && ctype_digit(substr($value, 1)))) {
                 throw new InvalidArgumentException(
                     sprintf('Unsupported value for "%s": "%s".', strtolower($rawKey), $value),

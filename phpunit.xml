@@ -13,6 +13,7 @@
             <directory>tests/Protocol</directory>
             <directory>tests/Auth</directory>
             <directory>tests/Topology</directory>
+            <directory>tests/Uri</directory>
             <file>tests/StubCompatibilityTest.php</file>
         </testsuite>
         <testsuite name="integration">

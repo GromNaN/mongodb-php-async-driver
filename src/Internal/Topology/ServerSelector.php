@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Topology;
 
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\ReadPreference;
 
 use function array_any;
@@ -14,6 +15,8 @@ use function array_intersect_assoc;
 use function array_rand;
 use function array_values;
 use function count;
+use function max;
+use function sprintf;
 
 /**
  * Stateless server-selection logic (SDAM spec §Server Selection).
@@ -48,8 +51,9 @@ final class ServerSelector
         int $localThresholdMs = 15,
         array $deprioritizedServers = [],
         string $operation = 'read',
+        int $heartbeatFrequencyMs = 10000,
     ): array {
-        $suitable = self::selectSuitable($servers, $topologyType, $readPreference, $deprioritizedServers, $operation);
+        $suitable = self::selectSuitable($servers, $topologyType, $readPreference, $deprioritizedServers, $operation, $heartbeatFrequencyMs);
 
         // For Single and LoadBalanced, no latency filtering is applied.
         if (
@@ -81,6 +85,7 @@ final class ServerSelector
         ReadPreference $readPreference,
         array $deprioritizedServers = [],
         string $operation = 'read',
+        int $heartbeatFrequencyMs = 10000,
     ): array {
         // For write operations on replica-set topologies, the spec requires that
         // drivers always target the primary regardless of the read preference.
@@ -96,7 +101,7 @@ final class ServerSelector
             // Try selection with deprioritized servers removed.
             $deprioritizedIndex = array_flip($deprioritizedServers);
             $filteredServers    = array_diff_key($servers, $deprioritizedIndex);
-            $candidates         = self::applySuitableFilter($filteredServers, $topologyType, $readPreference);
+            $candidates         = self::applySuitableFilter($filteredServers, $topologyType, $readPreference, $servers, $heartbeatFrequencyMs);
             if ($candidates !== []) {
                 return $candidates;
             }
@@ -104,7 +109,7 @@ final class ServerSelector
             // All candidates were deprioritized — fall back to full server list.
         }
 
-        return self::applySuitableFilter($servers, $topologyType, $readPreference);
+        return self::applySuitableFilter($servers, $topologyType, $readPreference, $servers, $heartbeatFrequencyMs);
     }
 
     /**
@@ -159,9 +164,10 @@ final class ServerSelector
     // =========================================================================
 
     /**
-     * Apply mode and tag-set filtering without latency window.
+     * Apply mode, tag-set, and maxStaleness filtering without latency window.
      *
-     * @param array<string, InternalServerDescription> $servers
+     * @param array<string, InternalServerDescription> $servers    The candidate servers (may be a subset when deprioritized servers were excluded)
+     * @param array<string, InternalServerDescription> $allServers The full topology server map (needed for maxStaleness calculation)
      *
      * @return InternalServerDescription[]
      */
@@ -169,6 +175,8 @@ final class ServerSelector
         array $servers,
         TopologyType $topologyType,
         ReadPreference $readPreference,
+        array $allServers,
+        int $heartbeatFrequencyMs = 10000,
     ): array {
         if ($topologyType === TopologyType::Unknown) {
             return [];
@@ -185,6 +193,24 @@ final class ServerSelector
         $mode    = $readPreference->getModeString();
         $tagSets = $readPreference->getTagSets();
 
+        $maxStalenessSeconds = $readPreference->getMaxStalenessSeconds();
+        $isReplicaSet        = $topologyType === TopologyType::ReplicaSetWithPrimary
+            || $topologyType === TopologyType::ReplicaSetNoPrimary;
+
+        // Validate maxStalenessSeconds heartbeat constraint (replica sets only).
+        if ($maxStalenessSeconds > 0 && $isReplicaSet) {
+            $minMs = $heartbeatFrequencyMs + 10_000; // idleWritePeriodMS = 10 000 ms
+            if ($maxStalenessSeconds * 1000 < $minMs) {
+                throw new InvalidArgumentException(sprintf(
+                    'maxStalenessSeconds must be at least heartbeatFrequencyMS + idleWritePeriodMS = %dms, '
+                    . 'but maxStalenessSeconds is %ds (%dms)',
+                    $minMs,
+                    $maxStalenessSeconds,
+                    $maxStalenessSeconds * 1000,
+                ));
+            }
+        }
+
         switch ($mode) {
             case ReadPreference::PRIMARY:
                 return array_values(self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY));
@@ -195,27 +221,135 @@ final class ServerSelector
                     return array_values($primaries);
                 }
 
-                return self::suitableSecondaries($servers, $tagSets);
+                $candidates = self::suitableSecondaries($servers, $tagSets);
+                break;
 
             case ReadPreference::SECONDARY:
-                return self::suitableSecondaries($servers, $tagSets);
+                $candidates = self::suitableSecondaries($servers, $tagSets);
+                break;
 
             case ReadPreference::SECONDARY_PREFERRED:
                 $secondaries = self::suitableSecondaries($servers, $tagSets);
                 if ($secondaries !== []) {
-                    return $secondaries;
+                    $candidates = $secondaries;
+                    break;
                 }
 
                 return array_values(self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY));
 
             case ReadPreference::NEAREST:
-                $available = self::filterAvailable($servers);
-
-                return array_values(self::filterByTagSets($available, $tagSets));
+                $available  = self::filterAvailable($servers);
+                $candidates = array_values(self::filterByTagSets($available, $tagSets));
+                break;
 
             default:
                 return [];
         }
+
+        if ($maxStalenessSeconds > 0 && $isReplicaSet) {
+            $candidates = self::filterByMaxStaleness(
+                $candidates,
+                $topologyType,
+                $allServers,
+                $maxStalenessSeconds,
+                $heartbeatFrequencyMs,
+            );
+        }
+
+        // SecondaryPreferred: if all secondaries were filtered out (e.g. by maxStaleness),
+        // fall back to the primary.
+        if ($mode === ReadPreference::SECONDARY_PREFERRED && $candidates === []) {
+            return array_values(self::filterByType($servers, InternalServerDescription::TYPE_RS_PRIMARY));
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * Filter secondary candidates by estimated staleness.
+     *
+     * Implements the maxStalenessSeconds algorithm from the SDAM / Server Selection spec:
+     *   - ReplicaSetWithPrimary: staleness = (S.lastUpdateTime - S.lastWriteDate)
+     *                                       - (P.lastUpdateTime - P.lastWriteDate)
+     *                                       + heartbeatFrequencyMs
+     *   - ReplicaSetNoPrimary:   staleness = SMax.lastWriteDate - S.lastWriteDate
+     *                                       + heartbeatFrequencyMs
+     *
+     * Primary candidates are always kept (they are never considered stale).
+     * Candidates without lastWriteDate data are excluded.
+     *
+     * @param InternalServerDescription[]              $candidates
+     * @param array<string, InternalServerDescription> $allServers
+     *
+     * @return InternalServerDescription[]
+     */
+    private static function filterByMaxStaleness(
+        array $candidates,
+        TopologyType $topologyType,
+        array $allServers,
+        int $maxStalenessSeconds,
+        int $heartbeatFrequencyMs,
+    ): array {
+        $maxStalenessMs = $maxStalenessSeconds * 1000;
+
+        if ($topologyType === TopologyType::ReplicaSetWithPrimary) {
+            $primary = null;
+            foreach ($allServers as $sd) {
+                if ($sd->type === InternalServerDescription::TYPE_RS_PRIMARY) {
+                    $primary = $sd;
+                    break;
+                }
+            }
+
+            if ($primary?->lastWriteDate === null) {
+                return $candidates;
+            }
+
+            $pLastUpdateTime  = $primary->lastUpdateTime;
+            $pLastWriteDate   = $primary->lastWriteDate;
+
+            return array_values(array_filter(
+                $candidates,
+                static function (InternalServerDescription $sd) use ($pLastUpdateTime, $pLastWriteDate, $maxStalenessMs, $heartbeatFrequencyMs): bool {
+                    if ($sd->type === InternalServerDescription::TYPE_RS_PRIMARY) {
+                        return true; // Primary is never stale
+                    }
+
+                    if ($sd->lastWriteDate === null) {
+                        return false;
+                    }
+
+                    $staleness = $sd->lastUpdateTime - $sd->lastWriteDate
+                        - ($pLastUpdateTime - $pLastWriteDate)
+                        + $heartbeatFrequencyMs;
+
+                    return $staleness <= $maxStalenessMs;
+                },
+            ));
+        }
+
+        // ReplicaSetNoPrimary: use the secondary with the greatest lastWriteDate as reference.
+        $sMaxWriteDate = 0;
+        foreach ($allServers as $sd) {
+            if ($sd->type !== InternalServerDescription::TYPE_RS_SECONDARY || $sd->lastWriteDate === null) {
+                continue;
+            }
+
+            $sMaxWriteDate = max($sMaxWriteDate, $sd->lastWriteDate);
+        }
+
+        return array_values(array_filter(
+            $candidates,
+            static function (InternalServerDescription $sd) use ($sMaxWriteDate, $maxStalenessMs, $heartbeatFrequencyMs): bool {
+                if ($sd->lastWriteDate === null) {
+                    return false;
+                }
+
+                $staleness = $sMaxWriteDate - $sd->lastWriteDate + $heartbeatFrequencyMs;
+
+                return $staleness <= $maxStalenessMs;
+            },
+        ));
     }
 
     /**

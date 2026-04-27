@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Topology;
 
+use MongoDB\BSON\UTCDateTime;
 use Throwable;
 
 use function is_array;
+use function is_int;
 use function microtime;
 
 /**
@@ -46,6 +48,7 @@ final class InternalServerDescription
         public readonly bool $primary = false,
         public readonly int $lastUpdateTime = 0,
         public readonly ?Throwable $error = null,
+        public readonly ?int $lastWriteDate = null,
     ) {
     }
 
@@ -66,6 +69,7 @@ final class InternalServerDescription
             primary:         $this->primary,
             lastUpdateTime:  $this->lastUpdateTime,
             error:           $this->error,
+            lastWriteDate:   $this->lastWriteDate,
         );
     }
 
@@ -84,6 +88,7 @@ final class InternalServerDescription
             primary:         $this->primary,
             lastUpdateTime:  $now,
             error:           null,
+            lastWriteDate:   self::extractLastWriteDate($response),
         );
     }
 
@@ -117,6 +122,7 @@ final class InternalServerDescription
             primary:         false,
             lastUpdateTime:  $now,
             error:           $error,
+            lastWriteDate:   null,
         );
     }
 
@@ -218,6 +224,32 @@ final class InternalServerDescription
             primary:         $primary,
             lastUpdateTime:  $now,
             error:           null,
+            lastWriteDate:   self::extractLastWriteDate($response),
         );
+    }
+
+    /**
+     * Extract lastWriteDate in milliseconds from a hello response.
+     *
+     * Handles both UTCDateTime objects (real BSON responses) and plain integers
+     * (test fixtures using pre-parsed values).
+     */
+    private static function extractLastWriteDate(array $response): ?int
+    {
+        $lwd = $response['lastWrite']['lastWriteDate'] ?? null;
+
+        if ($lwd === null) {
+            return null;
+        }
+
+        if ($lwd instanceof UTCDateTime) {
+            return (int) ((string) $lwd);
+        }
+
+        if (is_int($lwd)) {
+            return $lwd;
+        }
+
+        return null;
     }
 }
