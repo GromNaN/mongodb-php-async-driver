@@ -44,8 +44,20 @@ final class UriOptions
     // String options
     // -------------------------------------------------------------------------
 
+    /** MongoDB username */
+    public readonly string $username;
+
+    /** MongoDB password (sensitive — not logged) */
+    public readonly string $password;
+
+    /** Application name sent in the client metadata handshake */
+    public readonly string $appname;
+
     /** Replica-set name */
     public readonly string $replicaSet;
+
+    /** SRV service name (default "mongodb") */
+    public readonly string $srvServiceName;
 
     /** Auth mechanism name (e.g. SCRAM-SHA-256) */
     public readonly string $authMechanism;
@@ -61,6 +73,9 @@ final class UriOptions
 
     /** TLS certificate/key file path */
     public readonly string $tlsCertificateKeyFile;
+
+    /** TLS certificate/key file password */
+    public readonly string $tlsCertificateKeyFilePassword;
 
     // -------------------------------------------------------------------------
     // Integer options — with defaults

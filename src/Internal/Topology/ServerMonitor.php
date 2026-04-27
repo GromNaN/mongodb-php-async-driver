@@ -236,7 +236,8 @@ final class ServerMonitor
         }
 
         $conn = new Connection($this->host, $this->port);
-        $conn->connect($this->options);
+        // Monitoring connections must not authenticate per the SDAM spec.
+        $conn->connect($this->options, skipAuth: true);
 
         $this->connection = $conn;
 

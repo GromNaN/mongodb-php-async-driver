@@ -13,7 +13,7 @@ use Amp\TimeoutCancellation;
 use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Driver\Exception\ConnectionException;
 use MongoDB\Driver\Exception\ConnectionTimeoutException;
-use MongoDB\Driver\Exception\LogicException;
+use MongoDB\Internal\Auth\AuthMechanismFactory;
 use MongoDB\Internal\Protocol\MessageHeader;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
@@ -79,9 +79,13 @@ final class Connection
      * Establish the TCP connection, run the hello handshake, and optionally
      * authenticate. Suspends the current fiber until complete.
      *
+     * @param bool $skipAuth When true, skip authentication even if credentials are
+     *                       present in $options. Used for dedicated monitoring connections
+     *                       per the SDAM spec (monitoring connections must not authenticate).
+     *
      * @throws ConnectionException on I/O errors.
      */
-    public function connect(?UriOptions $options = null): void
+    public function connect(?UriOptions $options = null, bool $skipAuth = false): void
     {
         $this->state = self::STATE_CONNECTING;
 
@@ -129,16 +133,35 @@ final class Connection
             $this->socketTimeoutSecs = $options->socketTimeoutMS / 1000.0;
         }
 
-        $this->state  = self::STATE_CONNECTED;
+        $this->state = self::STATE_CONNECTED;
 
-        // Run server handshake (hello / isMaster).
-        $this->runHello();
+        // Determine the saslSupportedMechs key to include in hello when credentials
+        // are present — allows the server to advertise which SCRAM variants are
+        // available for this user, enabling correct mechanism negotiation.
+        // Monitoring connections skip auth entirely per the SDAM spec.
+        $username   = ! $skipAuth && isset($options->username) && $options->username !== ''
+            ? $options->username
+            : null;
+        $authSource = $options->authSource ?? 'admin';
+        $mechsKey   = $username !== null ? ($authSource . '.' . $username) : null;
 
-        // Authenticate if credentials were supplied.
-        if ($options?->authMechanism ?? null) {
+        // Run server handshake (hello / isMaster), optionally requesting saslSupportedMechs.
+        $helloBody = $this->runHello($mechsKey);
+
+        // Authenticate if credentials were supplied (and auth was not skipped).
+        if ($username !== null) {
             $this->state = self::STATE_AUTHENTICATING;
 
-            throw new LogicException('Authentication is not yet supported by the async driver');
+            $password  = $options->password ?? '';
+            $mechanism = isset($options->authMechanism)
+                ? AuthMechanismFactory::create($options->authMechanism)
+                : AuthMechanismFactory::detect(
+                    is_array($helloBody) ? $helloBody : (array) $helloBody,
+                    $username,
+                    $authSource,
+                );
+
+            $mechanism->authenticate($this, $username, $password, $authSource);
         }
 
         $this->state = self::STATE_READY;
@@ -318,13 +341,22 @@ final class Connection
 
     /**
      * Run the MongoDB hello handshake to discover server capabilities.
+     *
+     * @param string|null $saslSupportedMechs "authSource.username" key to request
+     *                                        mechanism negotiation from the server.
+     *
+     * @return array|object Decoded hello response body.
      */
-    private function runHello(): void
+    private function runHello(?string $saslSupportedMechs = null): array|object
     {
         $helloCmd = [
             'hello' => 1,
             '$db'   => 'admin',
         ];
+
+        if ($saslSupportedMechs !== null) {
+            $helloCmd['saslSupportedMechs'] = $saslSupportedMechs;
+        }
 
         [$bytes] = OpMsgEncoder::encodeWithRequestId($helloCmd);
 
@@ -340,6 +372,8 @@ final class Connection
         $this->minWireVersion = (int) self::extractHelloField($body, 'minWireVersion', 0);
         $serviceId            = self::extractHelloField($body, 'serviceId', null);
         $this->serviceId      = $serviceId !== null ? (string) $serviceId : null;
+
+        return $body;
     }
 
     private static function extractHelloField(array|object $body, string $key, mixed $default): mixed

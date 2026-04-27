@@ -132,12 +132,31 @@ final class Manager
             $srvDefaults = array_merge($srvDefaults, $srv->txtOptions);
         }
 
+        // Inject credentials from URI userinfo into the options map.
+        // username/password live in ConnectionString's own fields, not in getOptions().
+        // Code-level uriOptions can override them (e.g. passing ['username' => ...]).
+        $credentialOptions = [];
+        $username          = $this->connectionString->getUsername();
+
+        if ($username !== null) {
+            $credentialOptions['username'] = $username;
+            $credentialOptions['password'] = $this->connectionString->getPassword() ?? '';
+        }
+
         // Merge URI options from connection string with overrides
+        // Priority (lowest → highest): SRV defaults < TXT < URI options < credentials < code options
         $mergedOptions = array_merge(
             $srvDefaults,
             $this->connectionString->getOptions(),
+            $credentialOptions,
             $normalizedUriOptions,
         );
+
+        // Default authSource to the URI path database, then to 'admin'.
+        // Only applied when credentials are present and authSource was not explicitly set.
+        if (isset($mergedOptions['username']) && ! isset($mergedOptions['authSource'])) {
+            $mergedOptions['authSource'] = $this->connectionString->getDatabase() ?? 'admin';
+        }
 
         // Validate constraints that depend on both URI structure and merged options
         $this->validateMergedOptions($mergedOptions);

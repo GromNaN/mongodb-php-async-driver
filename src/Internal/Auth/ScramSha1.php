@@ -86,7 +86,7 @@ final class ScramSha1 implements AuthMechanism
             '$db'       => $authSource,
         ];
 
-        $startReply = $connection->sendCommand($authSource, $saslStartCmd);
+        $startReply = (array) $connection->sendCommand($authSource, $saslStartCmd);
 
         $this->assertCommandOk($startReply, 'saslStart');
 
@@ -168,7 +168,7 @@ final class ScramSha1 implements AuthMechanism
             '$db'            => $authSource,
         ];
 
-        $continueReply = $connection->sendCommand($authSource, $saslContinueCmd);
+        $continueReply = (array) $connection->sendCommand($authSource, $saslContinueCmd);
         $this->assertCommandOk($continueReply, 'saslContinue (step 2)');
 
         $serverFinalMsg = base64_decode((string) ($continueReply['payload'] ?? ''));
@@ -214,7 +214,7 @@ final class ScramSha1 implements AuthMechanism
             '$db'            => $authSource,
         ];
 
-        $ackReply = $connection->sendCommand($authSource, $finalAckCmd);
+        $ackReply = (array) $connection->sendCommand($authSource, $finalAckCmd);
         $this->assertCommandOk($ackReply, 'saslContinue (final ack)');
     }
 
