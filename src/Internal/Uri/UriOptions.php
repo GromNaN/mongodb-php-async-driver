@@ -7,22 +7,24 @@ namespace MongoDB\Internal\Uri;
 use Closure;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Exception\UnexpectedValueException as DriverUnexpectedValueException;
+use MongoDB\Internal\BSON\BsonType;
 
 use function array_filter;
+use function array_is_list;
 use function array_key_exists;
 use function array_map;
 use function array_values;
-use function ctype_digit;
 use function explode;
 use function get_debug_type;
 use function in_array;
 use function is_array;
 use function is_bool;
-use function is_float;
 use function is_int;
 use function is_string;
 use function mb_check_encoding;
 use function sprintf;
+use function strrpos;
+use function substr;
 use function trigger_error;
 
 use const E_USER_WARNING;
@@ -143,12 +145,17 @@ final class UriOptions
         // ----- String options -------------------------------------------------
         foreach (
             [
-                'replicaSet'            => 'replicaSet',
-                'authMechanism'         => 'authMechanism',
-                'authSource'            => 'authSource',
-                'readPreference'        => 'readPreference',
-                'tlsCAFile'             => 'tlsCAFile',
-                'tlsCertificateKeyFile' => 'tlsCertificateKeyFile',
+                'appname'                       => 'appname',
+                'username'                      => 'username',
+                'password'                      => 'password',
+                'replicaSet'                    => 'replicaSet',
+                'srvServiceName'                => 'srvServiceName',
+                'authMechanism'                 => 'authMechanism',
+                'authSource'                    => 'authSource',
+                'readPreference'                => 'readPreference',
+                'tlsCAFile'                     => 'tlsCAFile',
+                'tlsCertificateKeyFile'         => 'tlsCertificateKeyFile',
+                'tlsCertificateKeyFilePassword' => 'tlsCertificateKeyFilePassword',
             ] as $key => $prop
         ) {
             if (! isset($options[$key])) {
@@ -156,6 +163,13 @@ final class UriOptions
             }
 
             self::assertString($key, $options[$key]);
+
+            if ($key === 'replicaSet' && $options[$key] === '') {
+                throw new InvalidArgumentException(
+                    'Value for URI option "replicaSet" cannot be empty string.',
+                );
+            }
+
             // @phpstan-ignore-next-line (dynamic readonly assignment via Closure trick)
             self::assignReadonly($self, $prop, (string) $options[$key]);
         }
@@ -182,7 +196,9 @@ final class UriOptions
             [
                 'connectTimeoutMS',
                 'socketTimeoutMS',
+                'socketCheckIntervalMS',
                 'maxIdleTimeMS',
+                'srvMaxHosts',
                 'zlibCompressionLevel',
             ] as $key
         ) {
@@ -240,6 +256,10 @@ final class UriOptions
                 'tls',
                 'tlsAllowInvalidCertificates',
                 'tlsAllowInvalidHostnames',
+                'tlsDisableCertificateRevocationCheck',
+                'tlsDisableOCSPEndpointCheck',
+                'tlsInsecure',
+                'serverSelectionTryOnce',
                 'journal',
             ] as $key
         ) {
@@ -255,10 +275,8 @@ final class UriOptions
         if (isset($options['w'])) {
             $w = $options['w'];
             if (! is_string($w) && ! is_int($w)) {
-                $typeName = is_float($w) ? 'double' : get_debug_type($w);
-
                 throw new InvalidArgumentException(
-                    sprintf('Expected 32-bit integer or string for "w" URI option, %s given', $typeName),
+                    sprintf('Expected 32-bit integer or string for "w" URI option, %s given', BsonType::phpTypeName($w)),
                 );
             }
 
@@ -291,26 +309,26 @@ final class UriOptions
             self::assignReadonly($self, 'readPreferenceTags', []);
         }
 
-        // ----- compressors (string or array) ----------------------------------
+        // ----- compressors (string only from PHP API) -------------------------
         if (isset($options['compressors'])) {
             $compressors = $options['compressors'];
 
-            if (is_string($compressors)) {
-                if (! mb_check_encoding($compressors, 'UTF-8')) {
-                    throw new DriverUnexpectedValueException(
-                        sprintf('Detected invalid UTF-8 for field path "compressors": %s', $compressors),
-                    );
-                }
-
-                $compressors = array_filter(
-                    array_map('trim', explode(',', $compressors)),
-                    static fn ($s) => $s !== '',
-                );
-            } elseif (! is_array($compressors)) {
+            if (! is_string($compressors)) {
                 throw new InvalidArgumentException(
-                    sprintf('Option "compressors" must be a string or array, got %s.', get_debug_type($compressors)),
+                    sprintf('Expected string for "compressors" URI option, %s given', self::phpTypeName($compressors)),
                 );
             }
+
+            if (! mb_check_encoding($compressors, 'UTF-8')) {
+                throw new DriverUnexpectedValueException(
+                    sprintf('Detected invalid UTF-8 for field path "compressors": %s', $compressors),
+                );
+            }
+
+            $compressors = array_filter(
+                array_map('trim', explode(',', $compressors)),
+                static fn ($s) => $s !== '',
+            );
 
             $supported        = ['snappy', 'zlib', 'zstd'];
             $validCompressors = [];
@@ -327,14 +345,16 @@ final class UriOptions
             self::assignReadonly($self, 'compressors', []);
         }
 
-        // ----- authMechanismProperties (array) --------------------------------
+        // ----- authMechanismProperties (associative array or object) ----------
         if (isset($options['authMechanismProperties'])) {
             $props = $options['authMechanismProperties'];
-            if (! is_array($props)) {
+            // Only associative arrays (documents) are accepted; list arrays, scalars,
+            // and objects (including BSON types) are rejected to match ext-mongodb.
+            if (! is_array($props) || array_is_list($props)) {
                 throw new InvalidArgumentException(
                     sprintf(
-                        'Option "authMechanismProperties" must be an array, got %s.',
-                        get_debug_type($props),
+                        'Expected array or object for "authMechanismProperties" URI option, %s given',
+                        self::phpTypeName($props),
                     ),
                 );
             }
@@ -372,25 +392,23 @@ final class UriOptions
     private static function assertString(string $key, mixed $value): void
     {
         if (! is_string($value)) {
-            $typeName = is_int($value) ? '32-bit integer' : get_debug_type($value);
-
             throw new InvalidArgumentException(
-                sprintf('Expected string for "%s" URI option, %s given', $key, $typeName),
+                sprintf('Expected string for "%s" URI option, %s given', $key, self::phpTypeName($value)),
             );
         }
     }
 
     private static function assertNonNegativeInt(string $key, mixed $value): void
     {
-        if (! is_int($value) && ! ctype_digit((string) $value)) {
+        if (! is_int($value)) {
             throw new InvalidArgumentException(
-                sprintf('Option "%s" must be a non-negative integer, got %s.', $key, get_debug_type($value)),
+                sprintf('Expected 32-bit integer for "%s" URI option, %s given', $key, self::phpTypeName($value)),
             );
         }
 
-        if ((int) $value < 0) {
+        if ($value < 0) {
             throw new InvalidArgumentException(
-                sprintf('Option "%s" must be >= 0, got %d.', $key, (int) $value),
+                sprintf('Expected 32-bit integer for "%s" URI option, negative number given', $key),
             );
         }
     }
@@ -399,8 +417,32 @@ final class UriOptions
     {
         if (! is_bool($value)) {
             throw new InvalidArgumentException(
-                sprintf('Expected boolean for "%s" URI option, %s given', $key, get_debug_type($value)),
+                sprintf('Expected boolean for "%s" URI option, %s given', $key, self::phpTypeName($value)),
             );
         }
+    }
+
+    /**
+     * Return a human-readable PHP type name compatible with ext-mongodb error messages.
+     *
+     * Maps PHP 8 type names to the names used by libmongoc/ext-mongodb:
+     *   float        → "double"
+     *   int          → "32-bit integer"
+     *   assoc array  → "document"
+     *   BSON class   → short class name without namespace (e.g. "ObjectId")
+     */
+
+    /** @internal */
+    public static function phpTypeName(mixed $value): string
+    {
+        $type = get_debug_type($value);
+
+        return match ($type) {
+            'float' => 'double',
+            'int'   => '32-bit integer',
+            'bool'  => 'boolean',
+            'array' => array_is_list($value) ? 'array' : 'document',
+            default => (($pos = strrpos($type, '\\')) !== false) ? substr($type, $pos + 1) : $type,
+        };
     }
 }

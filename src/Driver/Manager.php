@@ -20,6 +20,7 @@ use function array_key_exists;
 use function array_merge;
 use function count;
 use function get_debug_type;
+use function is_array;
 use function is_bool;
 use function is_int;
 use function is_string;
@@ -61,12 +62,20 @@ final class Manager
             throw InvalidArgumentException::invalidDriverOptionType('serverApi', $driverOptions['serverApi'], ServerApi::class);
         }
 
-        // Validate driver driverOption: name, version, platform must be strings
+        // Validate driver driverOption: must be an array; name, version, platform must be strings
         if (isset($driverOptions['driver'])) {
+            $driver = $driverOptions['driver'];
+
+            if (! is_array($driver)) {
+                throw new InvalidArgumentException(
+                    sprintf('Expected "driver" driver option to be an array, %s given', UriOptions::phpTypeName($driver)),
+                );
+            }
+
             foreach (['name', 'version', 'platform'] as $field) {
-                if (isset($driverOptions['driver'][$field]) && ! is_string($driverOptions['driver'][$field])) {
+                if (isset($driver[$field]) && ! is_string($driver[$field])) {
                     throw new InvalidArgumentException(
-                        sprintf('Expected "%s" in "driver" driver option to be string, %s given', $field, get_debug_type($driverOptions['driver'][$field])),
+                        sprintf('Expected "%s" handshake option to be a string, %s given', $field, UriOptions::phpTypeName($driver[$field])),
                     );
                 }
             }
@@ -434,7 +443,7 @@ final class Manager
         }
 
         // appname max length is 128 bytes
-        if (isset($options['appname']) && strlen((string) $options['appname']) > 128) {
+        if (isset($options['appname']) && is_string($options['appname']) && strlen($options['appname']) > 128) {
             throw new InvalidArgumentException(
                 sprintf("Invalid appname value: '%s'", $options['appname']),
             );
@@ -442,6 +451,14 @@ final class Manager
 
         // srvMaxHosts validation
         if (isset($options['srvMaxHosts'])) {
+            // Type check before context checks so callers get a type error for invalid values.
+            if (! is_int($options['srvMaxHosts'])) {
+                throw new InvalidArgumentException(sprintf(
+                    'Expected 32-bit integer for "srvMaxHosts" URI option, %s given',
+                    UriOptions::phpTypeName($options['srvMaxHosts']),
+                ));
+            }
+
             if (! $isSrv) {
                 throw new InvalidArgumentException(
                     'Failed to parse URI options: srvmaxhosts must not be specified with a non-SRV URI',
@@ -462,10 +479,20 @@ final class Manager
         }
 
         // srvServiceName validation
-        if (isset($options['srvServiceName']) && ! $isSrv) {
-            throw new InvalidArgumentException(
-                'Failed to parse URI options: srvservicename must not be specified with a non-SRV URI',
-            );
+        if (isset($options['srvServiceName'])) {
+            // Type check before context check so callers get a type error for invalid values.
+            if (! is_string($options['srvServiceName'])) {
+                throw new InvalidArgumentException(sprintf(
+                    'Expected string for "srvServiceName" URI option, %s given',
+                    UriOptions::phpTypeName($options['srvServiceName']),
+                ));
+            }
+
+            if (! $isSrv) {
+                throw new InvalidArgumentException(
+                    'Failed to parse URI options: srvservicename must not be specified with a non-SRV URI',
+                );
+            }
         }
 
         // TLS conflict: tlsInsecure cannot be combined with other TLS options

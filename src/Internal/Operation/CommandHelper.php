@@ -15,7 +15,6 @@ use MongoDB\Driver\WriteConcern;
 use function array_key_first;
 use function is_array;
 use function is_object;
-use function lcfirst;
 
 /**
  * Utility class for preparing MongoDB command documents before wire transmission.
@@ -28,45 +27,6 @@ use function lcfirst;
  */
 final class CommandHelper
 {
-    // -----------------------------------------------------------------
-    // Command name sets
-    // -----------------------------------------------------------------
-
-    private const WRITE_COMMANDS = [
-        'insert'              => true,
-        'update'              => true,
-        'delete'              => true,
-        'findAndModify'       => true,
-        'findandmodify'       => true,
-        'bulkWrite'           => true,
-        'createIndexes'       => true,
-        'dropIndexes'         => true,
-        'dropIndex'           => true,
-        'create'              => true,
-        'drop'                => true,
-        'createCollection'    => true,
-        'dropCollection'      => true,
-        'renameCollection'    => true,
-        'createSearchIndexes' => true,
-        'updateSearchIndex'   => true,
-        'dropSearchIndex'     => true,
-    ];
-
-    private const READ_COMMANDS = [
-        'find'            => true,
-        'aggregate'       => true,
-        'count'           => true,
-        'distinct'        => true,
-        'mapReduce'       => true,
-        'getMore'         => true,
-        'listCollections' => true,
-        'listDatabases'   => true,
-        'listIndexes'     => true,
-        'explain'         => true,
-        'collStats'       => true,
-        'dbStats'         => true,
-    ];
-
     // -----------------------------------------------------------------
     // Public API
     // -----------------------------------------------------------------
@@ -179,24 +139,6 @@ final class CommandHelper
         }
 
         return $doc;
-    }
-
-    /**
-     * Return true when $commandName is a known write command.
-     */
-    public static function isWriteCommand(string $commandName): bool
-    {
-        return isset(self::WRITE_COMMANDS[lcfirst($commandName)])
-            || isset(self::WRITE_COMMANDS[$commandName]);
-    }
-
-    /**
-     * Return true when $commandName is a known read-only command.
-     */
-    public static function isReadCommand(string $commandName): bool
-    {
-        return isset(self::READ_COMMANDS[lcfirst($commandName)])
-            || isset(self::READ_COMMANDS[$commandName]);
     }
 
     /**

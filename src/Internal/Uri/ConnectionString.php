@@ -720,6 +720,13 @@ final class ConnectionString
             );
         }
 
+        // replicaSet may not be empty
+        if ($key === 'replicaSet' && $value === '') {
+            throw new InvalidArgumentException(
+                'Value for URI option "replicaSet" cannot be empty string.',
+            );
+        }
+
         // authMechanismProperties: parse "key:value,key:value" into associative array
         if ($key === 'authMechanismProperties') {
             return $this->parseAuthMechanismProperties($value);
