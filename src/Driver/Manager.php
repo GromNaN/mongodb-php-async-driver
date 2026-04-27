@@ -14,6 +14,7 @@ use MongoDB\Internal\Operation\OperationExecutor;
 use MongoDB\Internal\Session\SessionPool;
 use MongoDB\Internal\Topology\TopologyManager;
 use MongoDB\Internal\Uri\ConnectionString;
+use MongoDB\Internal\Uri\SrvResolver;
 use MongoDB\Internal\Uri\UriOptions;
 
 use function array_key_exists;
@@ -104,8 +105,36 @@ final class Manager
             $normalizedUriOptions['w'] = $safeValue ? 1 : 0;
         }
 
+        // Resolve mongodb+srv:// URIs via DNS before merging options.
+        // SRV provides the actual seed hosts; TXT provides default URI options.
+        // Priority (lowest → highest): SRV TLS default < TXT options < URI options < code options.
+        $resolvedHosts = $this->connectionString->getHosts();
+        $srvDefaults   = [];
+
+        if ($this->connectionString->isSrv()) {
+            $srvHost        = $resolvedHosts[0]['host'];
+            $uriOpts        = $this->connectionString->getOptions();
+            $srvServiceName = (string) ($normalizedUriOptions['srvServiceName'] ?? $uriOpts['srvServiceName'] ?? 'mongodb');
+            $srvMaxHosts    = (int) ($normalizedUriOptions['srvMaxHosts'] ?? $uriOpts['srvMaxHosts'] ?? 0);
+
+            $srv           = SrvResolver::resolve($srvHost, $srvServiceName, $srvMaxHosts);
+            $resolvedHosts = $srv->hosts;
+
+            // mongodb+srv:// implicitly enables TLS unless the user explicitly disables it.
+            if (
+                ! isset($uriOpts['tls']) && ! isset($uriOpts['ssl'])
+                && ! isset($normalizedUriOptions['tls']) && ! isset($normalizedUriOptions['ssl'])
+            ) {
+                $srvDefaults['tls'] = true;
+            }
+
+            // TXT options are defaults; URI and code options take precedence.
+            $srvDefaults = array_merge($srvDefaults, $srv->txtOptions);
+        }
+
         // Merge URI options from connection string with overrides
         $mergedOptions = array_merge(
+            $srvDefaults,
             $this->connectionString->getOptions(),
             $normalizedUriOptions,
         );
@@ -123,9 +152,9 @@ final class Manager
         // Single subscriber registry shared by topology and executor.
         $this->dispatcher = new Dispatcher();
 
-        // Initialize topology manager
+        // Initialize topology manager with resolved hosts (post-SRV for srv:// URIs)
         $this->topologyManager = new TopologyManager(
-            $this->connectionString->getHosts(),
+            $resolvedHosts,
             $this->uriOptions,
             $this->dispatcher,
         );
@@ -144,7 +173,7 @@ final class Manager
         // Topology start is deferred until first operation so that subscribers
         // registered via addSubscriber() receive the initial SDAM events.
 
-        $this->warnNonGenuineHosts($this->connectionString->getHosts());
+        $this->warnNonGenuineHosts($resolvedHosts);
     }
 
     public function __sleep(): array
