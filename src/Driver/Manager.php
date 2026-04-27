@@ -44,6 +44,57 @@ final class Manager
     private Dispatcher $dispatcher;
     private SessionPool $sessionPool;
 
+    /**
+     * @param array{
+     *     appname?: string,
+     *     authMechanism?: string,
+     *     authMechanismProperties?: array<string, string>,
+     *     authSource?: string,
+     *     compressors?: string,
+     *     connectTimeoutMS?: int,
+     *     directConnection?: bool,
+     *     heartbeatFrequencyMS?: int,
+     *     journal?: bool,
+     *     loadBalanced?: bool,
+     *     localThresholdMS?: int,
+     *     maxIdleTimeMS?: int,
+     *     maxPoolSize?: int,
+     *     maxStalenessSeconds?: int,
+     *     minPoolSize?: int,
+     *     password?: string,
+     *     readConcernLevel?: string,
+     *     readPreference?: string,
+     *     readPreferenceTags?: list<array<string, string>>,
+     *     replicaSet?: string,
+     *     retryReads?: bool,
+     *     retryWrites?: bool,
+     *     serverSelectionTimeoutMS?: int,
+     *     serverSelectionTryOnce?: bool,
+     *     socketCheckIntervalMS?: int,
+     *     socketTimeoutMS?: int,
+     *     srvMaxHosts?: int,
+     *     srvServiceName?: string,
+     *     ssl?: bool,
+     *     tls?: bool,
+     *     tlsAllowInvalidCertificates?: bool,
+     *     tlsAllowInvalidHostnames?: bool,
+     *     tlsCAFile?: string,
+     *     tlsCertificateKeyFile?: string,
+     *     tlsCertificateKeyFilePassword?: string,
+     *     tlsDisableCertificateRevocationCheck?: bool,
+     *     tlsDisableOCSPEndpointCheck?: bool,
+     *     tlsInsecure?: bool,
+     *     username?: string,
+     *     w?: int|string,
+     *     waitQueueTimeoutMS?: int,
+     *     wTimeoutMS?: int,
+     *     zlibCompressionLevel?: int,
+     * }|null $uriOptions
+     * @param array{
+     *     driver?: array{name?: string, version?: string, platform?: string},
+     *     serverApi?: ServerApi,
+     * }|null $driverOptions
+     */
     public function __construct(
         ?string $uri = null,
         ?array $uriOptions = null,
@@ -229,6 +280,12 @@ final class Manager
         $this->dispatcher->removeSubscriber($subscriber);
     }
 
+    /**
+     * @param array{
+     *     session?: Session,
+     *     writeConcern?: WriteConcern,
+     * }|null $options
+     */
     public function executeBulkWrite(
         string $namespace,
         BulkWrite $bulk,
@@ -241,6 +298,12 @@ final class Manager
         return SyncRunner::run(fn () => $this->executor->executeBulkWrite($namespace, $bulk, $writeConcern, $session, $explicitWriteConcern !== null));
     }
 
+    /**
+     * @param array{
+     *     session?: Session,
+     *     writeConcern?: WriteConcern,
+     * }|null $options
+     */
     public function executeBulkWriteCommand(
         BulkWriteCommand $bulkWriteCommand,
         ?array $options = null,
@@ -257,6 +320,12 @@ final class Manager
         return $result;
     }
 
+    /**
+     * @param array{
+     *     readPreference?: ReadPreference,
+     *     session?: Session,
+     * }|null $options
+     */
     public function executeCommand(
         string $db,
         Command $command,
@@ -268,6 +337,12 @@ final class Manager
         return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, $readPreference, $session));
     }
 
+    /**
+     * @param array{
+     *     readPreference?: ReadPreference,
+     *     session?: Session,
+     * }|null $options
+     */
     public function executeQuery(
         string $namespace,
         Query $query,
@@ -279,6 +354,13 @@ final class Manager
         return SyncRunner::run(fn () => $this->executor->executeQuery($namespace, $query, $readPreference, $session));
     }
 
+    /**
+     * @param array{
+     *     readConcern?: ReadConcern,
+     *     readPreference?: ReadPreference,
+     *     session?: Session,
+     * }|null $options
+     */
     public function executeReadCommand(
         string $db,
         Command $command,
@@ -291,6 +373,12 @@ final class Manager
         return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, retryRead: true));
     }
 
+    /**
+     * @param array{
+     *     session?: Session,
+     *     writeConcern?: WriteConcern,
+     * }|null $options
+     */
     public function executeWriteCommand(
         string $db,
         Command $command,
@@ -302,6 +390,14 @@ final class Manager
         return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, null, $session, null, $writeConcern));
     }
 
+    /**
+     * @param array{
+     *     readConcern?: ReadConcern,
+     *     readPreference?: ReadPreference,
+     *     session?: Session,
+     *     writeConcern?: WriteConcern,
+     * }|null $options
+     */
     public function executeReadWriteCommand(
         string $db,
         Command $command,
@@ -388,6 +484,18 @@ final class Manager
         });
     }
 
+    /**
+     * @param array{
+     *     causalConsistency?: bool,
+     *     defaultTransactionOptions?: array{
+     *         maxCommitTimeMS?: int,
+     *         readConcern?: ReadConcern,
+     *         readPreference?: ReadPreference,
+     *         writeConcern?: WriteConcern,
+     *     },
+     *     snapshot?: bool,
+     * }|null $options
+     */
     public function startSession(?array $options = null): Session
     {
         $lsid = $this->sessionPool->acquire();
@@ -401,6 +509,17 @@ final class Manager
         return null;
     }
 
+    /**
+     * @param array{
+     *     keyVaultClient?: Manager,
+     *     keyVaultNamespace?: string,
+     *     kmsProviders?: array<string, array<string, mixed>>,
+     *     schemaMap?: array<string, mixed>,
+     *     bypassAutoEncryption?: bool,
+     *     encryptedFieldsMap?: array<string, mixed>,
+     *     bypassQueryAnalysis?: bool,
+     * } $options
+     */
     public function createClientEncryption(array $options): ClientEncryption
     {
         return ClientEncryption::create();

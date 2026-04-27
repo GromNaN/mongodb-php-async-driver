@@ -64,6 +64,9 @@
         <exclude name="SlevomatCodingStandard.Exceptions.ReferenceThrowableOnly" />
 
         <exclude name="Squiz.Commenting.FunctionComment.WrongStyle"/>
+
+        <!-- Squiz does not understand multi-line array-shape @param annotations -->
+        <exclude name="Squiz.Commenting.FunctionComment.MissingParamName"/>
     </rule>
 
 
