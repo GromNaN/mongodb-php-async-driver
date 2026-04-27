@@ -10,6 +10,7 @@ use function array_filter;
 use function array_key_exists;
 use function array_map;
 use function array_merge;
+use function array_search;
 use function array_values;
 use function count;
 use function ctype_digit;
@@ -75,48 +76,53 @@ final class ConnectionString
     /**
      * Canonical option key spellings (all comparisons are case-insensitive).
      */
+    /**
+     * Maps canonical camelCase option keys → their lowercase equivalents.
+     * Fast-path: isset($key) checks canonical casing in O(1).
+     * Slow-path: array_search(strtolower($key)) resolves any other casing.
+     */
     private const OPTION_KEYS = [
-        'authmechanism'              => 'authMechanism',
-        'authsource'                 => 'authSource',
-        'authmechanismproperties'    => 'authMechanismProperties',
-        'replicaset'                 => 'replicaSet',
-        'connecttimeoutms'           => 'connectTimeoutMS',
-        'sockettimeoutms'            => 'socketTimeoutMS',
-        'serverselectiontimeoutms'   => 'serverSelectionTimeoutMS',
-        'localthresholdms'           => 'localThresholdMS',
-        'heartbeatfrequencyms'       => 'heartbeatFrequencyMS',
-        'minheartbeatfrequencyms'    => 'minHeartbeatFrequencyMS',
-        'maxpoolsize'                => 'maxPoolSize',
-        'minpoolsize'                => 'minPoolSize',
-        'maxidletimems'              => 'maxIdleTimeMS',
-        'waitqueuetimeoutms'         => 'waitQueueTimeoutMS',
-        'w'                          => 'w',
-        'wtimeoutms'                 => 'wTimeoutMS',
-        'journal'                    => 'journal',
-        'readpreference'             => 'readPreference',
-        'readpreferencetags'         => 'readPreferenceTags',
-        'readconcernlevel'           => 'readConcernLevel',
-        'maxstalenessseconds'        => 'maxStalenessSeconds',
-        'ssl'                        => 'ssl',
-        'tls'                        => 'tls',
-        'tlscafile'                  => 'tlsCAFile',
-        'tlscertificatekeyfile'      => 'tlsCertificateKeyFile',
-        'tlsallowinvalidcertificates' => 'tlsAllowInvalidCertificates',
-        'tlsallowinvalidhostnames'   => 'tlsAllowInvalidHostnames',
-        'compressors'                => 'compressors',
-        'zlibcompressionlevel'       => 'zlibCompressionLevel',
-        'retrywrites'                => 'retryWrites',
-        'retryreads'                 => 'retryReads',
-        'loadbalanced'               => 'loadBalanced',
-        'directconnection'           => 'directConnection',
-        'timeoutms'                  => 'timeoutMS',
-        'safe'                       => 'safe',
-        'appname'                    => 'appname',
-        'srvmaxhosts'                => 'srvMaxHosts',
-        'srvservicename'             => 'srvServiceName',
-        'tlsinsecure'                => 'tlsInsecure',
-        'tlsdisableocspendpointcheck'             => 'tlsDisableOCSPEndpointCheck',
-        'tlsdisablecertificaterevocationcheck'    => 'tlsDisableCertificateRevocationCheck',
+        'authMechanism'                      => 'authmechanism',
+        'authSource'                         => 'authsource',
+        'authMechanismProperties'            => 'authmechanismproperties',
+        'replicaSet'                         => 'replicaset',
+        'connectTimeoutMS'                   => 'connecttimeoutms',
+        'socketTimeoutMS'                    => 'sockettimeoutms',
+        'serverSelectionTimeoutMS'           => 'serverselectiontimeoutms',
+        'localThresholdMS'                   => 'localthresholdms',
+        'heartbeatFrequencyMS'               => 'heartbeatfrequencyms',
+        'minHeartbeatFrequencyMS'            => 'minheartbeatfrequencyms',
+        'maxPoolSize'                        => 'maxpoolsize',
+        'minPoolSize'                        => 'minpoolsize',
+        'maxIdleTimeMS'                      => 'maxidletimems',
+        'waitQueueTimeoutMS'                 => 'waitqueuetimeoutms',
+        'w'                                  => 'w',
+        'wTimeoutMS'                         => 'wtimeoutms',
+        'journal'                            => 'journal',
+        'readPreference'                     => 'readpreference',
+        'readPreferenceTags'                 => 'readpreferencetags',
+        'readConcernLevel'                   => 'readconcernlevel',
+        'maxStalenessSeconds'                => 'maxstalenessseconds',
+        'ssl'                                => 'ssl',
+        'tls'                                => 'tls',
+        'tlsCAFile'                          => 'tlscafile',
+        'tlsCertificateKeyFile'              => 'tlscertificatekeyfile',
+        'tlsAllowInvalidCertificates'        => 'tlsallowinvalidcertificates',
+        'tlsAllowInvalidHostnames'           => 'tlsallowinvalidhostnames',
+        'compressors'                        => 'compressors',
+        'zlibCompressionLevel'               => 'zlibcompressionlevel',
+        'retryWrites'                        => 'retrywrites',
+        'retryReads'                         => 'retryreads',
+        'loadBalanced'                       => 'loadbalanced',
+        'directConnection'                   => 'directconnection',
+        'timeoutMS'                          => 'timeoutms',
+        'safe'                               => 'safe',
+        'appname'                            => 'appname',
+        'srvMaxHosts'                        => 'srvmaxhosts',
+        'srvServiceName'                     => 'srvservicename',
+        'tlsInsecure'                        => 'tlsinsecure',
+        'tlsDisableOCSPEndpointCheck'        => 'tlsdisableocspendpointcheck',
+        'tlsDisableCertificateRevocationCheck' => 'tlsdisablecertificaterevocationcheck',
     ];
 
     /** Options whose values are integers */
@@ -628,14 +634,15 @@ final class ConnectionString
         return $options;
     }
 
-    /**
-     * Map a raw (possibly differently-cased) option key to its canonical camelCase form.
-     */
     public static function normalizeOptionKey(string $rawKey): string
     {
-        $lower = strtolower($rawKey);
+        // Fast path: $rawKey is already the canonical camelCase key.
+        if (isset(self::OPTION_KEYS[$rawKey])) {
+            return $rawKey;
+        }
 
-        return self::OPTION_KEYS[$lower] ?? $rawKey;
+        // Slow path: resolve any alternative casing via the lowercase values.
+        return array_search(strtolower($rawKey), self::OPTION_KEYS, true) ?: $rawKey;
     }
 
     /**
