@@ -76,6 +76,8 @@ These failures are expected and should not block commits:
 - **Use `hrtime(true)` for durations** — monotonic nanosecond integer. `microtime(true)` only for absolute wall-clock timestamps.
 - **No manual `use` statements** — write FQCNs in code, phpcbf adds imports automatically.
 - **`$str .=` in loops is NOT O(n²) in PHP** — since PHP 5.6+ the engine extends single-reference strings in-place with exponential buffer growth (amortized O(n)). Replacing `$str .= $part` with `$parts[] = $part; implode('', $parts)` adds array-allocation overhead and is equal or slightly slower. Do not suggest this refactor as a performance improvement.
+- **Prefer `??` and `??=` over `isset()` + ternary** — use the null-coalescing operator whenever possible for conciseness.
+- **PHPUnit attributes over annotations** — use PHP 8 attributes (`#[DataProvider('...')]`, `#[Group('...')]`, `#[RequiresPhp('...')]`, etc.) instead of docblock annotations (`@dataProvider`, `@group`). This is the modern PHPUnit 10+ style.
 
 ## Commit discipline
 
