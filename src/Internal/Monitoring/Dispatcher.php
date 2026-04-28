@@ -12,6 +12,17 @@ use MongoDB\Driver\Monitoring\CommandFailedEvent;
 use MongoDB\Driver\Monitoring\CommandStartedEvent;
 use MongoDB\Driver\Monitoring\CommandSubscriber;
 use MongoDB\Driver\Monitoring\CommandSucceededEvent;
+use MongoDB\Driver\Monitoring\ConnectionCheckedInEvent;
+use MongoDB\Driver\Monitoring\ConnectionCheckedOutEvent;
+use MongoDB\Driver\Monitoring\ConnectionCheckOutFailedEvent;
+use MongoDB\Driver\Monitoring\ConnectionCheckOutStartedEvent;
+use MongoDB\Driver\Monitoring\ConnectionClosedEvent;
+use MongoDB\Driver\Monitoring\ConnectionCreatedEvent;
+use MongoDB\Driver\Monitoring\ConnectionPoolClosedEvent;
+use MongoDB\Driver\Monitoring\ConnectionPoolCreatedEvent;
+use MongoDB\Driver\Monitoring\ConnectionPoolReadyEvent;
+use MongoDB\Driver\Monitoring\ConnectionPoolSubscriber;
+use MongoDB\Driver\Monitoring\ConnectionReadyEvent;
 use MongoDB\Driver\Monitoring\SDAMSubscriber;
 use MongoDB\Driver\Monitoring\Subscriber;
 use RuntimeException;
@@ -77,12 +88,11 @@ final class Dispatcher
         ?int $serverConnectionId,
         int $operationId,
     ): void {
-        if (self::isSensitiveCommand($cmdName, $cmd)) {
+        if ($this->isSensitiveCommand($cmdName, $cmd)) {
             $cmd = new stdClass();
         }
 
         self::dispatch(
-            $this->subscribers,
             CommandSubscriber::class,
             static fn (CommandSubscriber $subscriber, ?object &$event) => $subscriber->commandStarted(
                 $event ??= CommandStartedEvent::create(
@@ -110,12 +120,11 @@ final class Dispatcher
         ?int $serverConnectionId,
         int $operationId,
     ): void {
-        if (self::isSensitiveCommand($cmdName, $reply)) {
+        if ($this->isSensitiveCommand($cmdName, $reply)) {
             $reply = new stdClass();
         }
 
         self::dispatch(
-            $this->subscribers,
             CommandSubscriber::class,
             static fn (CommandSubscriber $subscriber, ?object &$event) => $subscriber->commandSucceeded(
                 $event ??= CommandSucceededEvent::create(
@@ -145,13 +154,11 @@ final class Dispatcher
         ?int $serverConnectionId,
         int $operationId = 0,
     ): void {
-        if ($reply !== null && self::isSensitiveCommand($cmdName, $reply)) {
+        if ($reply !== null && $this->isSensitiveCommand($cmdName, $reply)) {
             $reply = new stdClass();
         }
 
-        $event = null;
         self::dispatch(
-            $this->subscribers,
             CommandSubscriber::class,
             static fn (CommandSubscriber $subscriber, ?object &$event) => $subscriber->commandFailed(
                 $event ??= CommandFailedEvent::create(
@@ -170,6 +177,93 @@ final class Dispatcher
         );
     }
 
+    // -------------------------------------------------------------------------
+    // CMAP (Connection Monitoring and Pooling) typed dispatch methods
+    // -------------------------------------------------------------------------
+
+    /** @param array<string, mixed> $options */
+    public function dispatchConnectionPoolCreated(string $host, int $port, array $options): void
+    {
+        self::dispatch(
+            ConnectionPoolSubscriber::class,
+            static fn (ConnectionPoolSubscriber $s, ?object &$e) => $s->connectionPoolCreated($e ??= new ConnectionPoolCreatedEvent($host, $port, $options)),
+        );
+    }
+
+    public function dispatchConnectionPoolReady(string $host, int $port): void
+    {
+        self::dispatch(
+            ConnectionPoolSubscriber::class,
+            static fn (ConnectionPoolSubscriber $s, ?object &$e) => $s->connectionPoolReady($e ??= new ConnectionPoolReadyEvent($host, $port)),
+        );
+    }
+
+    public function dispatchConnectionPoolClosed(string $host, int $port): void
+    {
+        self::dispatch(
+            ConnectionPoolSubscriber::class,
+            static fn (ConnectionPoolSubscriber $s, ?object &$e) => $s->connectionPoolClosed($e ??= new ConnectionPoolClosedEvent($host, $port)),
+        );
+    }
+
+    public function dispatchConnectionCreated(string $host, int $port, int $connectionId): void
+    {
+        self::dispatch(
+            ConnectionPoolSubscriber::class,
+            static fn (ConnectionPoolSubscriber $s, ?object &$e) => $s->connectionCreated($e ??= new ConnectionCreatedEvent($connectionId, $host, $port)),
+        );
+    }
+
+    public function dispatchConnectionReady(string $host, int $port, int $connectionId, int $durationMicros): void
+    {
+        self::dispatch(
+            ConnectionPoolSubscriber::class,
+            static fn (ConnectionPoolSubscriber $s, ?object &$e) => $s->connectionReady($e ??= new ConnectionReadyEvent($connectionId, $host, $port, $durationMicros)),
+        );
+    }
+
+    /** @param ConnectionClosedEvent::REASON_* $reason */
+    public function dispatchConnectionClosed(string $host, int $port, int $connectionId, string $reason): void
+    {
+        self::dispatch(
+            ConnectionPoolSubscriber::class,
+            static fn (ConnectionPoolSubscriber $s, ?object &$e) => $s->connectionClosed($e ??= new ConnectionClosedEvent($connectionId, $host, $port, $reason)),
+        );
+    }
+
+    public function dispatchConnectionCheckOutStarted(string $host, int $port): void
+    {
+        self::dispatch(
+            ConnectionPoolSubscriber::class,
+            static fn (ConnectionPoolSubscriber $s, ?object &$e) => $s->connectionCheckOutStarted($e ??= new ConnectionCheckOutStartedEvent($host, $port)),
+        );
+    }
+
+    /** @param ConnectionCheckOutFailedEvent::REASON_* $reason */
+    public function dispatchConnectionCheckOutFailed(string $host, int $port, string $reason, int $durationMicros): void
+    {
+        self::dispatch(
+            ConnectionPoolSubscriber::class,
+            static fn (ConnectionPoolSubscriber $s, ?object &$e) => $s->connectionCheckOutFailed($e ??= new ConnectionCheckOutFailedEvent($host, $port, $reason, $durationMicros)),
+        );
+    }
+
+    public function dispatchConnectionCheckedOut(string $host, int $port, int $connectionId, int $durationMicros): void
+    {
+        self::dispatch(
+            ConnectionPoolSubscriber::class,
+            static fn (ConnectionPoolSubscriber $s, ?object &$e) => $s->connectionCheckedOut($e ??= new ConnectionCheckedOutEvent($connectionId, $host, $port, $durationMicros)),
+        );
+    }
+
+    public function dispatchConnectionCheckedIn(string $host, int $port, int $connectionId): void
+    {
+        self::dispatch(
+            ConnectionPoolSubscriber::class,
+            static fn (ConnectionPoolSubscriber $s, ?object &$e) => $s->connectionCheckedIn($e ??= new ConnectionCheckedInEvent($connectionId, $host, $port)),
+        );
+    }
+
     /**
      * Dispatch a SDAM monitoring event to all registered subscribers that
      * implement {@see SDAMSubscriber}.
@@ -184,7 +278,6 @@ final class Dispatcher
     public function dispatchSdamEvent(string $method, Closure $factory): void
     {
         self::dispatch(
-            $this->subscribers,
             SDAMSubscriber::class,
             static fn (SDAMSubscriber $subscriber, ?object &$event) => $subscriber->{$method}($event ??= $factory()),
         );
@@ -202,16 +295,15 @@ final class Dispatcher
      * subsequent subscribers.  This avoids unnecessary object allocation when
      * no subscribers are registered for the event type.
      *
-     * @param array<int|string, Subscriber>      $managerSubscribers Per-manager subscriber list.
      * @param class-string<TSubscriber>          $subscriberClass
      * @param callable(TSubscriber, object|null) $callback
      *
      * @template TSubscriber = object
      */
-    public static function dispatch(array $managerSubscribers, string $subscriberClass, Closure $callback): void
+    public function dispatch(string $subscriberClass, Closure $callback): void
     {
         $event = null;
-        foreach ($managerSubscribers as $subscriber) {
+        foreach ($this->subscribers as $subscriber) {
             if (! $subscriber instanceof $subscriberClass) {
                 continue;
             }
@@ -229,7 +321,7 @@ final class Dispatcher
             }
 
             // Skip if already notified via the manager subscriber list.
-            if (in_array($subscriber, $managerSubscribers, true)) {
+            if (in_array($subscriber, $this->subscribers, true)) {
                 continue;
             }
 
@@ -249,7 +341,7 @@ final class Dispatcher
      * copydbgetnonce, copydbsaslstart, copydb, and hello / isMaster when they contain
      * speculativeAuthenticate.
      */
-    public static function isSensitiveCommand(string $cmdName, object $cmd): bool
+    private function isSensitiveCommand(string $cmdName, object $cmd): bool
     {
         return match (strtolower($cmdName)) {
             'authenticate',

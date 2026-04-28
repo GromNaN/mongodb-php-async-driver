@@ -63,10 +63,13 @@ final class Connection
 
     /**
      * Create a new (not yet connected) Connection.
+     *
+     * @param int $connectionId Pool-scoped monotonically increasing connection ID (0 = untracked).
      */
     public function __construct(
         private readonly string $host,
         private readonly int $port,
+        private readonly int $connectionId = 0,
     ) {
         $this->lastUsedAt = time();
     }
@@ -349,6 +352,11 @@ final class Connection
         }
 
         $this->socket->close();
+    }
+
+    public function getConnectionId(): int
+    {
+        return $this->connectionId;
     }
 
     public function getHost(): string

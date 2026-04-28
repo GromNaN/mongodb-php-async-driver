@@ -12,9 +12,7 @@ use MongoDB\Driver\ServerApi;
 use MongoDB\Driver\Session;
 use MongoDB\Driver\WriteConcern;
 
-use function array_key_first;
 use function is_array;
-use function is_object;
 
 /**
  * Utility class for preparing MongoDB command documents before wire transmission.
@@ -27,10 +25,6 @@ use function is_object;
  */
 final class CommandHelper
 {
-    // -----------------------------------------------------------------
-    // Public API
-    // -----------------------------------------------------------------
-
     /**
      * Inject standard wire-protocol fields into a command document.
      *
@@ -148,16 +142,10 @@ final class CommandHelper
      */
     public static function getCommandName(array|object $command): string
     {
-        if ($command instanceof Document) {
-            $command = (array) $command->toPHP(['root' => 'array', 'document' => 'array']);
-        } elseif (is_object($command)) {
-            $command = (array) $command;
+        foreach ($command as $k => $v) {
+            return (string) $k;
         }
 
-        if ($command === []) {
-            throw new InvalidArgumentException('Empty command document');
-        }
-
-        return (string) array_key_first($command);
+        throw new InvalidArgumentException('Command document must not be empty');
     }
 }

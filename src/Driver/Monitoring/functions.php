@@ -31,6 +31,8 @@ if (! function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
 
     function mongoc_log(int $level, string $domain, string $message): void
     {
+        static $dispatcher;
+
         if ($level < 0 || $level > 6) {
             throw new InvalidArgumentException(
                 sprintf('Expected level to be >= 0 and <= 6, %d given', $level),
@@ -49,8 +51,8 @@ if (! function_exists('MongoDB\Driver\Monitoring\addSubscriber')) {
             );
         }
 
-        Dispatcher::dispatch(
-            [],
+        $dispatcher ??= new Dispatcher();
+        $dispatcher->dispatch(
             LogSubscriber::class,
             static fn (LogSubscriber $subscriber) => $subscriber->log($level, $domain, $message),
         );

@@ -44,8 +44,9 @@ class DispatcherTest extends TestCase
         addSubscriber($commandSubscriber);
         addSubscriber($sdamSubscriber);
 
-        $called = [];
-        Dispatcher::dispatch([], CommandSubscriber::class, static function (object $s) use (&$called): void {
+        $called     = [];
+        $dispatcher = new Dispatcher();
+        $dispatcher->dispatch(CommandSubscriber::class, static function (object $s) use (&$called): void {
             $called[] = $s;
         });
 
@@ -64,8 +65,10 @@ class DispatcherTest extends TestCase
 
         addSubscriber($global);
 
-        $called = [];
-        Dispatcher::dispatch([$manager], Subscriber::class, static function (object $s) use (&$called): void {
+        $called     = [];
+        $dispatcher = new Dispatcher();
+        $dispatcher->addSubscriber($manager);
+        $dispatcher->dispatch(Subscriber::class, static function (object $s) use (&$called): void {
             $called[] = $s;
         });
 
@@ -80,8 +83,10 @@ class DispatcherTest extends TestCase
 
         addSubscriber($global);
 
-        $order = [];
-        Dispatcher::dispatch([$manager], Subscriber::class, static function (object $s) use (&$order, $manager, $global): void {
+        $order      = [];
+        $dispatcher = new Dispatcher();
+        $dispatcher->addSubscriber($manager);
+        $dispatcher->dispatch(Subscriber::class, static function (object $s) use (&$order, $manager, $global): void {
             if ($s === $manager) {
                 $order[] = 'manager';
             } elseif ($s === $global) {
@@ -104,8 +109,9 @@ class DispatcherTest extends TestCase
         addSubscriber($throwing);
         addSubscriber($ok);
 
-        $called = [];
-        Dispatcher::dispatch([], Subscriber::class, static function (object $s) use (&$called, $throwing): void {
+        $called     = [];
+        $dispatcher = new Dispatcher();
+        $dispatcher->dispatch(Subscriber::class, static function (object $s) use (&$called, $throwing): void {
             if ($s === $throwing) {
                 throw new RuntimeException('subscriber error');
             }
@@ -126,8 +132,9 @@ class DispatcherTest extends TestCase
         $subscriber = $this->createMock(CommandSubscriber::class);
         addSubscriber($subscriber);
 
-        $received = null;
-        Dispatcher::dispatch([], CommandSubscriber::class, static function (object $s) use (&$received): void {
+        $received   = null;
+        $dispatcher = new Dispatcher();
+        $dispatcher->dispatch(CommandSubscriber::class, static function (object $s) use (&$received): void {
             $received = $s;
         });
 
@@ -143,8 +150,9 @@ class DispatcherTest extends TestCase
         $subscriber = $this->createMock(SDAMSubscriber::class);
         addSubscriber($subscriber);
 
-        $received = null;
-        Dispatcher::dispatch([], SDAMSubscriber::class, static function (object $s) use (&$received): void {
+        $received   = null;
+        $dispatcher = new Dispatcher();
+        $dispatcher->dispatch(SDAMSubscriber::class, static function (object $s) use (&$received): void {
             $received = $s;
         });
 
@@ -156,8 +164,9 @@ class DispatcherTest extends TestCase
         $commandSubscriber = $this->createMock(CommandSubscriber::class);
         addSubscriber($commandSubscriber);
 
-        $called = false;
-        Dispatcher::dispatch([], SDAMSubscriber::class, static function (object $s) use (&$called): void {
+        $called     = false;
+        $dispatcher = new Dispatcher();
+        $dispatcher->dispatch(SDAMSubscriber::class, static function (object $s) use (&$called): void {
             $called = true;
         });
 
@@ -173,8 +182,9 @@ class DispatcherTest extends TestCase
         $subscriber = $this->createMock(LogSubscriber::class);
         addSubscriber($subscriber);
 
-        $received = null;
-        Dispatcher::dispatch([], LogSubscriber::class, static function (object $s) use (&$received): void {
+        $received   = null;
+        $dispatcher = new Dispatcher();
+        $dispatcher->dispatch(LogSubscriber::class, static function (object $s) use (&$received): void {
             $received = $s;
         });
 
@@ -186,8 +196,9 @@ class DispatcherTest extends TestCase
         $commandSubscriber = $this->createMock(CommandSubscriber::class);
         addSubscriber($commandSubscriber);
 
-        $called = false;
-        Dispatcher::dispatch([], LogSubscriber::class, static function (object $s) use (&$called): void {
+        $called     = false;
+        $dispatcher = new Dispatcher();
+        $dispatcher->dispatch(LogSubscriber::class, static function (object $s) use (&$called): void {
             $called = true;
         });
 
@@ -200,8 +211,9 @@ class DispatcherTest extends TestCase
 
     public function testDispatchWithNoSubscribersIsNoop(): void
     {
-        $called = false;
-        Dispatcher::dispatch([], Subscriber::class, static function (object $s) use (&$called): void {
+        $called     = false;
+        $dispatcher = new Dispatcher();
+        $dispatcher->dispatch(Subscriber::class, static function (object $s) use (&$called): void {
             $called = true;
         });
 
@@ -221,7 +233,8 @@ class DispatcherTest extends TestCase
         addSubscriber($sub2);
 
         $createdCount = 0;
-        Dispatcher::dispatch([], Subscriber::class, static function (object $s, ?object &$event) use (&$createdCount): void {
+        $dispatcher   = new Dispatcher();
+        $dispatcher->dispatch(Subscriber::class, static function (object $s, ?object &$event) use (&$createdCount): void {
             if ($event !== null) {
                 return;
             }
@@ -240,8 +253,10 @@ class DispatcherTest extends TestCase
 
         addSubscriber($global);
 
-        $received = [];
-        Dispatcher::dispatch([$manager], Subscriber::class, static function (object $s, ?object &$event) use (&$received): void {
+        $received   = [];
+        $dispatcher = new Dispatcher();
+        $dispatcher->addSubscriber($manager);
+        $dispatcher->dispatch(Subscriber::class, static function (object $s, ?object &$event) use (&$received): void {
             $event ??= new stdClass();
             $received[] = $event;
         });

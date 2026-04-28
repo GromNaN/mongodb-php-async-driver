@@ -89,8 +89,9 @@ class SubscriberFunctionsTest extends TestCase
     /** @return Subscriber[] */
     private function collectDispatched(): array
     {
-        $collected = [];
-        Dispatcher::dispatch([], Subscriber::class, static function (Subscriber $s) use (&$collected): void {
+        $collected  = [];
+        $dispatcher = new Dispatcher();
+        $dispatcher->dispatch(Subscriber::class, static function (Subscriber $s) use (&$collected): void {
             $collected[] = $s;
         });
 

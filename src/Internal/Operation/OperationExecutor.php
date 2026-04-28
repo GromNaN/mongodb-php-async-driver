@@ -1287,6 +1287,7 @@ final class OperationExecutor
                 maxConnecting:      $this->options->maxConnecting,
                 waitQueueTimeoutMS: $this->options->waitQueueTimeoutMS,
                 options:            $this->options,
+                dispatcher:         $this->dispatcher,
             );
         }
 
