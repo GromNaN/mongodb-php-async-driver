@@ -973,6 +973,52 @@ final class OperationExecutor
         return $result;
     }
 
+    /**
+     * Send a `commitTransaction` command for the given session.
+     *
+     * Called from {@see Session::commitTransaction()} after state validation.
+     * The caller is responsible for transitioning the session state.
+     */
+    public function commitTransaction(Session $session): void
+    {
+        $this->ensureStarted();
+
+        $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
+        $pool   = $this->getOrCreatePool($server->host, $server->port);
+
+        $prepared = CommandHelper::prepareCommand(
+            command:   ['commitTransaction' => 1],
+            db:        'admin',
+            session:   $session,
+            serverApi: $this->serverApi,
+        );
+
+        $this->doSendCommand($pool, 'admin', 'commitTransaction', $prepared, $server);
+    }
+
+    /**
+     * Send an `abortTransaction` command for the given session.
+     *
+     * Called from {@see Session::abortTransaction()} after state validation.
+     * Errors are silently swallowed by the caller per the transactions spec.
+     */
+    public function abortTransaction(Session $session): void
+    {
+        $this->ensureStarted();
+
+        $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
+        $pool   = $this->getOrCreatePool($server->host, $server->port);
+
+        $prepared = CommandHelper::prepareCommand(
+            command:   ['abortTransaction' => 1],
+            db:        'admin',
+            session:   $session,
+            serverApi: $this->serverApi,
+        );
+
+        $this->doSendCommand($pool, 'admin', 'abortTransaction', $prepared, $server);
+    }
+
     // -------------------------------------------------------------------------
     // Private — core send/receive
     // -------------------------------------------------------------------------

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MongoDB\Internal\Operation;
 
 use MongoDB\BSON\Document;
+use MongoDB\BSON\Int64;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\ReadConcern;
 use MongoDB\Driver\ReadPreference;
@@ -117,6 +118,18 @@ final class CommandHelper
         // 6. Logical session ID.
         if ($session !== null) {
             $doc['lsid'] = $session->getLogicalSessionId();
+        }
+
+        // 6a. Transaction fields — injected when a session has an active transaction.
+        if ($session !== null && $session->isInTransaction()) {
+            $doc['txnNumber'] = new Int64($session->getTxnNumber());
+            $doc['autocommit'] = false;
+
+            // startTransaction: true only for the very first command in the transaction.
+            if ($session->getTransactionState() === Session::TRANSACTION_STARTING) {
+                $doc['startTransaction'] = true;
+                $session->startTransactionSent();
+            }
         }
 
         // 7. Stable API fields.
