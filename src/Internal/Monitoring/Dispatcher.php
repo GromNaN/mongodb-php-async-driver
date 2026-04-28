@@ -6,9 +6,7 @@ namespace MongoDB\Internal\Monitoring;
 
 use Closure;
 use Exception;
-use MongoDB\BSON\Document;
 use MongoDB\BSON\ObjectId;
-use MongoDB\BSON\PackedArray;
 use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Monitoring\CommandFailedEvent;
 use MongoDB\Driver\Monitoring\CommandStartedEvent;
@@ -42,10 +40,7 @@ use RuntimeException;
 use stdClass;
 use Throwable;
 
-use function array_is_list;
-use function array_map;
 use function in_array;
-use function is_array;
 use function spl_object_id;
 use function sprintf;
 use function str_contains;
@@ -479,47 +474,5 @@ final class Dispatcher
 
             default => false,
         };
-    }
-
-    /**
-     * Normalise doc-sequence items for APM without a full BSON round-trip.
-     *
-     * The PackedArray::fromPHP()->toPHP() pattern allocates the entire BSON blob
-     * for all items at once, which causes OOM for large batches (100 000+ ops).
-     * This method processes each item individually: Document/PackedArray values are
-     * decoded via their own toPHP(), PHP arrays with string keys become stdClass,
-     * and everything else is returned as-is.  The result matches what the round-trip
-     * produces but uses only the memory needed for one decoded item at a time.
-     *
-     * @param list<mixed> $items
-     *
-     * @return list<mixed>
-     */
-    public static function normalizeDocSeqForApm(array $items): array
-    {
-        $normalize = static function (mixed $value) use (&$normalize): mixed {
-            if ($value instanceof Document) {
-                $arr = $value->toPHP(['root' => 'array', 'document' => 'array']);
-
-                return (object) array_map($normalize, $arr);
-            }
-
-            if ($value instanceof PackedArray) {
-                return array_map(
-                    $normalize,
-                    $value->toPHP(['root' => 'array', 'document' => 'array']),
-                );
-            }
-
-            if (is_array($value)) {
-                $normalized = array_map($normalize, $value);
-
-                return array_is_list($value) ? $normalized : (object) $normalized;
-            }
-
-            return $value;
-        };
-
-        return array_map($normalize, $items);
     }
 }

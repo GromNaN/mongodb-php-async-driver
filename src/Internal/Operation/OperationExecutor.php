@@ -47,6 +47,7 @@ use MongoDB\Internal\Uri\UriOptions;
 use stdClass;
 use Throwable;
 
+use function array_is_list;
 use function array_map;
 use function array_values;
 use function assert;
@@ -1034,7 +1035,7 @@ final class OperationExecutor
             // Fall back to the doc sequence's own docs when the field is absent from the
             // prepared command (e.g. bulkWrite ops are no longer stored in the command body).
             $items = $prepared[$seq['id']] ?? $seq['docs'];
-            $commandDoc->{$seq['id']} = Dispatcher::normalizeDocSeqForApm($items);
+            $commandDoc->{$seq['id']} = self::normalizeDocSeqForApm($items);
         }
 
         $this->dispatcher->dispatchCommandStarted($cmdName, $commandDoc, $db, $requestId, $server->host, $server->port, $serverConnId, $operationId ?: $requestId);
@@ -1496,6 +1497,48 @@ final class OperationExecutor
             tags:              $sd->tags,
             executor:          $this,
         );
+    }
+
+    /**
+     * Normalise doc-sequence items for APM without a full BSON round-trip.
+     *
+     * The PackedArray::fromPHP()->toPHP() pattern allocates the entire BSON blob
+     * for all items at once, which causes OOM for large batches (100 000+ ops).
+     * This method processes each item individually: Document/PackedArray values are
+     * decoded via their own toPHP(), PHP arrays with string keys become stdClass,
+     * and everything else is returned as-is.  The result matches what the round-trip
+     * produces but uses only the memory needed for one decoded item at a time.
+     *
+     * @param list<mixed> $items
+     *
+     * @return list<mixed>
+     */
+    private static function normalizeDocSeqForApm(array $items): array
+    {
+        $normalize = static function (mixed $value) use (&$normalize): mixed {
+            if ($value instanceof Document) {
+                $arr = $value->toPHP(['root' => 'array', 'document' => 'array']);
+
+                return (object) array_map($normalize, $arr);
+            }
+
+            if ($value instanceof PackedArray) {
+                return array_map(
+                    $normalize,
+                    $value->toPHP(['root' => 'array', 'document' => 'array']),
+                );
+            }
+
+            if (is_array($value)) {
+                $normalized = array_map($normalize, $value);
+
+                return array_is_list($value) ? $normalized : (object) $normalized;
+            }
+
+            return $value;
+        };
+
+        return array_map($normalize, $items);
     }
 
     /**
