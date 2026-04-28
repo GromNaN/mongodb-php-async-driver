@@ -236,7 +236,10 @@ final class InternalServerDescription
      */
     private static function extractLastWriteDate(array $response): ?int
     {
-        $lwd = $response['lastWrite']['lastWriteDate'] ?? null;
+        $lastWrite = $response['lastWrite'] ?? null;
+        $lwd       = is_array($lastWrite)
+            ? ($lastWrite['lastWriteDate'] ?? null)
+            : ($lastWrite->lastWriteDate ?? null);
 
         if ($lwd === null) {
             return null;
