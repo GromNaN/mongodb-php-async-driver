@@ -7,7 +7,9 @@ namespace MongoDB\Internal\Monitoring;
 use Closure;
 use Exception;
 use MongoDB\BSON\Document;
+use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\PackedArray;
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Monitoring\CommandFailedEvent;
 use MongoDB\Driver\Monitoring\CommandStartedEvent;
 use MongoDB\Driver\Monitoring\CommandSubscriber;
@@ -23,8 +25,19 @@ use MongoDB\Driver\Monitoring\ConnectionPoolCreatedEvent;
 use MongoDB\Driver\Monitoring\ConnectionPoolReadyEvent;
 use MongoDB\Driver\Monitoring\ConnectionPoolSubscriber;
 use MongoDB\Driver\Monitoring\ConnectionReadyEvent;
+use MongoDB\Driver\Monitoring\LogSubscriber;
 use MongoDB\Driver\Monitoring\SDAMSubscriber;
+use MongoDB\Driver\Monitoring\ServerChangedEvent;
+use MongoDB\Driver\Monitoring\ServerClosedEvent;
+use MongoDB\Driver\Monitoring\ServerHeartbeatFailedEvent;
+use MongoDB\Driver\Monitoring\ServerHeartbeatStartedEvent;
+use MongoDB\Driver\Monitoring\ServerHeartbeatSucceededEvent;
+use MongoDB\Driver\Monitoring\ServerOpeningEvent;
 use MongoDB\Driver\Monitoring\Subscriber;
+use MongoDB\Driver\Monitoring\TopologyChangedEvent;
+use MongoDB\Driver\Monitoring\TopologyClosedEvent;
+use MongoDB\Driver\Monitoring\TopologyOpeningEvent;
+use MongoDB\Driver\ServerDescription;
 use RuntimeException;
 use stdClass;
 use Throwable;
@@ -34,6 +47,9 @@ use function array_map;
 use function in_array;
 use function is_array;
 use function spl_object_id;
+use function sprintf;
+use function str_contains;
+use function strstr;
 use function strtolower;
 
 /**
@@ -94,8 +110,8 @@ final class Dispatcher
 
         self::dispatch(
             CommandSubscriber::class,
-            static fn (CommandSubscriber $subscriber, ?object &$event) => $subscriber->commandStarted(
-                $event ??= CommandStartedEvent::create(
+            static fn (CommandSubscriber $subscriber, ?object &$e) => $subscriber->commandStarted(
+                $e ??= CommandStartedEvent::create(
                     commandName:        $cmdName,
                     command:            $cmd,
                     databaseName:       $db,
@@ -126,8 +142,8 @@ final class Dispatcher
 
         self::dispatch(
             CommandSubscriber::class,
-            static fn (CommandSubscriber $subscriber, ?object &$event) => $subscriber->commandSucceeded(
-                $event ??= CommandSucceededEvent::create(
+            static fn (CommandSubscriber $subscriber, ?object &$e) => $subscriber->commandSucceeded(
+                $e ??= CommandSucceededEvent::create(
                     commandName:        $cmdName,
                     reply:              $reply,
                     databaseName:       $db,
@@ -160,8 +176,8 @@ final class Dispatcher
 
         self::dispatch(
             CommandSubscriber::class,
-            static fn (CommandSubscriber $subscriber, ?object &$event) => $subscriber->commandFailed(
-                $event ??= CommandFailedEvent::create(
+            static fn (CommandSubscriber $subscriber, ?object &$e) => $subscriber->commandFailed(
+                $e ??= CommandFailedEvent::create(
                     commandName:        $cmdName,
                     databaseName:       $db,
                     error:              $exception instanceof Exception ? $exception : new RuntimeException($exception->getMessage(), $exception->getCode(), $exception),
@@ -264,23 +280,126 @@ final class Dispatcher
         );
     }
 
-    /**
-     * Dispatch a SDAM monitoring event to all registered subscribers that
-     * implement {@see SDAMSubscriber}.
-     *
-     * The event is created lazily: $factory is only called when at least one
-     * SDAMSubscriber is registered, avoiding object allocation in the common
-     * case where no monitoring is active.
-     *
-     * @param string  $method  Method name on SDAMSubscriber (e.g. 'serverChanged').
-     * @param Closure $factory Returns the event object when invoked.
-     */
-    public function dispatchSdamEvent(string $method, Closure $factory): void
+    // -------------------------------------------------------------------------
+    // SDAM (Server Discovery and Monitoring) typed dispatch methods
+    // -------------------------------------------------------------------------
+
+    public function dispatchTopologyOpening(ObjectId $topologyId): void
     {
         self::dispatch(
             SDAMSubscriber::class,
-            static fn (SDAMSubscriber $subscriber, ?object &$event) => $subscriber->{$method}($event ??= $factory()),
+            static fn (SDAMSubscriber $s, ?object &$e) => $s->topologyOpening($e ??= TopologyOpeningEvent::create($topologyId)),
         );
+    }
+
+    /** @param list<ServerDescription> $previousServers @param list<ServerDescription> $newServers */
+    public function dispatchTopologyChanged(ObjectId $topologyId, string $previousType, string $newType, array $previousServers = [], array $newServers = []): void
+    {
+        self::dispatch(
+            SDAMSubscriber::class,
+            static fn (SDAMSubscriber $s, ?object &$e) => $s->topologyChanged($e ??= TopologyChangedEvent::create($topologyId, $previousType, $newType, $previousServers, $newServers)),
+        );
+    }
+
+    public function dispatchTopologyClosed(ObjectId $topologyId): void
+    {
+        self::dispatch(
+            SDAMSubscriber::class,
+            static fn (SDAMSubscriber $s, ?object &$e) => $s->topologyClosed($e ??= TopologyClosedEvent::create($topologyId)),
+        );
+    }
+
+    public function dispatchServerOpening(string $host, int $port, ObjectId $topologyId): void
+    {
+        self::dispatch(
+            SDAMSubscriber::class,
+            static fn (SDAMSubscriber $s, ?object &$e) => $s->serverOpening($e ??= ServerOpeningEvent::create($host, $port, $topologyId)),
+        );
+    }
+
+    public function dispatchServerClosed(string $host, int $port, ObjectId $topologyId): void
+    {
+        self::dispatch(
+            SDAMSubscriber::class,
+            static fn (SDAMSubscriber $s, ?object &$e) => $s->serverClosed($e ??= ServerClosedEvent::create($host, $port, $topologyId)),
+        );
+    }
+
+    public function dispatchServerChanged(string $host, int $port, ObjectId $topologyId, ServerDescription $previous, ServerDescription $new): void
+    {
+        self::dispatch(
+            SDAMSubscriber::class,
+            static fn (SDAMSubscriber $s, ?object &$e) => $s->serverChanged($e ??= ServerChangedEvent::create($host, $port, $topologyId, $previous, $new)),
+        );
+    }
+
+    public function dispatchServerHeartbeatStarted(string $host, int $port, bool $awaited): void
+    {
+        self::dispatch(
+            SDAMSubscriber::class,
+            static fn (SDAMSubscriber $s, ?object &$e) => $s->serverHeartbeatStarted($e ??= ServerHeartbeatStartedEvent::create($host, $port, $awaited)),
+        );
+    }
+
+    public function dispatchServerHeartbeatSucceeded(string $host, int $port, int $durationMicros, object $reply, bool $awaited): void
+    {
+        self::dispatch(
+            SDAMSubscriber::class,
+            static fn (SDAMSubscriber $s, ?object &$e) => $s->serverHeartbeatSucceeded($e ??= ServerHeartbeatSucceededEvent::create($host, $port, $durationMicros, $reply, $awaited)),
+        );
+    }
+
+    public function dispatchServerHeartbeatFailed(string $host, int $port, int $durationMicros, Exception $error, bool $awaited): void
+    {
+        self::dispatch(
+            SDAMSubscriber::class,
+            static fn (SDAMSubscriber $s, ?object &$e) => $s->serverHeartbeatFailed($e ??= ServerHeartbeatFailedEvent::create($host, $port, $durationMicros, $error, $awaited)),
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Log dispatch
+    // -------------------------------------------------------------------------
+
+    /**
+     * Dispatch a log message to all global {@see LogSubscriber} instances.
+     *
+     * This is a static method because log events have no manager scope —
+     * they mirror the process-wide mongoc_log() callback in libmongoc.
+     *
+     * @throws InvalidArgumentException if $level is out of range or $domain / $message contain null bytes.
+     */
+    public static function log(int $level, string $domain, string $message): void
+    {
+        if ($level < 0 || $level > 6) {
+            throw new InvalidArgumentException(
+                sprintf('Expected level to be >= 0 and <= 6, %d given', $level),
+            );
+        }
+
+        if (str_contains($domain, "\0")) {
+            throw new InvalidArgumentException(
+                sprintf('Domain cannot contain null bytes. Unexpected null byte after "%s".', strstr($domain, "\0", true)),
+            );
+        }
+
+        if (str_contains($message, "\0")) {
+            throw new InvalidArgumentException(
+                sprintf('Message cannot contain null bytes. Unexpected null byte after "%s".', strstr($message, "\0", true)),
+            );
+        }
+
+        foreach (self::$globalSubscribers as $subscriber) {
+            if (! $subscriber instanceof LogSubscriber) {
+                continue;
+            }
+
+            try {
+                $subscriber->log($level, $domain, $message);
+            } catch (Throwable) {
+                // Subscribers must not interfere with driver operation.
+            }
+        }
     }
 
     /**

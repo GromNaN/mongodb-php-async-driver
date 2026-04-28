@@ -10,12 +10,6 @@ use Amp\TimeoutCancellation;
 use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\ConnectionTimeoutException as DriverConnectionTimeoutException;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
-use MongoDB\Driver\Monitoring\ServerChangedEvent;
-use MongoDB\Driver\Monitoring\ServerClosedEvent;
-use MongoDB\Driver\Monitoring\ServerOpeningEvent;
-use MongoDB\Driver\Monitoring\TopologyChangedEvent;
-use MongoDB\Driver\Monitoring\TopologyClosedEvent;
-use MongoDB\Driver\Monitoring\TopologyOpeningEvent;
 use MongoDB\Driver\ReadPreference;
 use MongoDB\Driver\ServerDescription;
 use MongoDB\Internal\Monitoring\Dispatcher;
@@ -101,7 +95,7 @@ final class TopologyManager
         }
 
         $this->started = true;
-        $this->dispatcher->dispatchSdamEvent('topologyOpening', fn () => TopologyOpeningEvent::create($this->topologyId));
+        $this->dispatcher->dispatchTopologyOpening($this->topologyId);
 
         // Register all seed servers as Unknown placeholders so the initial
         // topologyChanged event can include them in newServers.
@@ -123,12 +117,13 @@ final class TopologyManager
             fn (InternalServerDescription $s) => $this->buildPublicServerDescription($s),
             $this->servers,
         ));
-        $this->dispatcher->dispatchSdamEvent('topologyChanged', fn () => TopologyChangedEvent::create(
-            topologyId:           $this->topologyId,
-            previousTopologyType: TopologyType::Unknown->value,
-            newTopologyType:      $this->topologyType->value,
-            newServers:           $initialServers,
-        ));
+        $this->dispatcher->dispatchTopologyChanged(
+            $this->topologyId,
+            TopologyType::Unknown->value,
+            $this->topologyType->value,
+            [],
+            $initialServers,
+        );
 
         // Now fire serverOpening for each seed and start its monitor.
         foreach ($this->seeds as $seed) {
@@ -136,11 +131,7 @@ final class TopologyManager
             $port    = (int) ($seed['port'] ?? 27017);
             $address = $host . ':' . $port;
 
-            $this->dispatcher->dispatchSdamEvent('serverOpening', fn () => ServerOpeningEvent::create(
-                $host,
-                $port,
-                $this->topologyId,
-            ));
+            $this->dispatcher->dispatchServerOpening($host, $port, $this->topologyId);
 
             $monitor = $this->createMonitor($host, $port);
 
@@ -158,16 +149,12 @@ final class TopologyManager
             $monitor->stop();
 
             $sd = $this->servers[$address] ?? null;
-            $this->dispatcher->dispatchSdamEvent('serverClosed', fn () => ServerClosedEvent::create(
-                $sd?->host ?? '',
-                $sd?->port ?? 0,
-                $this->topologyId,
-            ));
+            $this->dispatcher->dispatchServerClosed($sd?->host ?? '', $sd?->port ?? 0, $this->topologyId);
         }
 
         $this->monitors = [];
         $this->stopped  = true;
-        $this->dispatcher->dispatchSdamEvent('topologyClosed', fn () => TopologyClosedEvent::create($this->topologyId));
+        $this->dispatcher->dispatchTopologyClosed($this->topologyId);
     }
 
     // -------------------------------------------------------------------------
@@ -280,13 +267,13 @@ final class TopologyManager
             $previousSd->type !== ($this->servers[$address]->type ?? InternalServerDescription::TYPE_UNKNOWN)
             || $previousSd->roundTripTimeMs !== ($this->servers[$address]->roundTripTimeMs ?? null)
         ) {
-            $this->dispatcher->dispatchSdamEvent('serverChanged', fn () => ServerChangedEvent::create(
-                host:                $sd->host,
-                port:                $sd->port,
-                topologyId:          $this->topologyId,
-                previousDescription: $this->buildPublicServerDescription($previousSd),
-                newDescription:      $this->buildPublicServerDescription($this->servers[$address] ?? $sd),
-            ));
+            $this->dispatcher->dispatchServerChanged(
+                $sd->host,
+                $sd->port,
+                $this->topologyId,
+                $this->buildPublicServerDescription($previousSd),
+                $this->buildPublicServerDescription($this->servers[$address] ?? $sd),
+            );
         }
 
         // Fire topologyChanged event if the topology type changed.
@@ -296,13 +283,13 @@ final class TopologyManager
                 $this->servers,
             ));
 
-            $this->dispatcher->dispatchSdamEvent('topologyChanged', fn () => TopologyChangedEvent::create(
-                topologyId:           $this->topologyId,
-                previousTopologyType: $previousType->value,
-                newTopologyType:      $this->topologyType->value,
-                previousServers:      [],
-                newServers:           $newServers,
-            ));
+            $this->dispatcher->dispatchTopologyChanged(
+                $this->topologyId,
+                $previousType->value,
+                $this->topologyType->value,
+                [],
+                $newServers,
+            );
         }
 
         // Ensure monitors exist for any newly-discovered servers (e.g. RS members).
@@ -311,11 +298,7 @@ final class TopologyManager
                 continue;
             }
 
-            $this->dispatcher->dispatchSdamEvent('serverOpening', fn () => ServerOpeningEvent::create(
-                $knownSd->host,
-                $knownSd->port,
-                $this->topologyId,
-            ));
+            $this->dispatcher->dispatchServerOpening($knownSd->host, $knownSd->port, $this->topologyId);
 
             $monitor = $this->createMonitor($knownSd->host, $knownSd->port);
 
@@ -437,8 +420,7 @@ final class TopologyManager
      */
     private function createMonitor(string $host, int $port): ServerMonitor
     {
-        $weak        = WeakReference::create($this);
-        $subscribers = $this->dispatcher;
+        $weak = WeakReference::create($this);
 
         return new ServerMonitor(
             host:                    $host,
@@ -448,9 +430,7 @@ final class TopologyManager
             },
             heartbeatFrequencyMs:    $this->options->heartbeatFrequencyMS,
             minHeartbeatFrequencyMs: $this->options->minHeartbeatFrequencyMS,
-            onHeartbeat:             static function (string $method, object $event) use ($subscribers): void {
-                $subscribers->dispatchSdamEvent($method, static fn () => $event);
-            },
+            dispatcher:              $this->dispatcher,
             options:                 $this->options,
         );
     }

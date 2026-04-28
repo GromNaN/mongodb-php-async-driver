@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Tests\Driver\Monitoring;
 
+use MongoDB\Driver\Exception\InvalidArgumentException;
 use MongoDB\Driver\Monitoring\CommandSubscriber;
 use MongoDB\Driver\Monitoring\LogSubscriber;
 use MongoDB\Driver\Monitoring\SDAMSubscriber;
@@ -263,5 +264,59 @@ class DispatcherTest extends TestCase
 
         $this->assertCount(2, $received);
         $this->assertSame($received[0], $received[1], 'The same event instance must be shared across all subscribers');
+    }
+
+    // -------------------------------------------------------------------------
+    // Dispatcher::log()
+    // -------------------------------------------------------------------------
+
+    public function testLogDispatchesToGlobalLogSubscribers(): void
+    {
+        $subscriber = $this->createMock(LogSubscriber::class);
+        $subscriber->expects($this->once())->method('log')->with(3, 'test', 'hello');
+
+        addSubscriber($subscriber);
+        Dispatcher::log(3, 'test', 'hello');
+    }
+
+    public function testLogIgnoresNonLogSubscribers(): void
+    {
+        $command = $this->createMock(CommandSubscriber::class);
+        $command->expects($this->never())->method($this->anything());
+
+        addSubscriber($command);
+        Dispatcher::log(0, 'domain', 'message');
+    }
+
+    public function testLogSwallowsSubscriberExceptions(): void
+    {
+        $throwing = $this->createMock(LogSubscriber::class);
+        $throwing->method('log')->willThrowException(new RuntimeException('boom'));
+
+        $ok      = $this->createMock(LogSubscriber::class);
+        $ok->expects($this->once())->method('log');
+
+        addSubscriber($throwing);
+        addSubscriber($ok);
+
+        Dispatcher::log(1, 'dom', 'msg'); // must not throw
+    }
+
+    public function testLogThrowsOnInvalidLevel(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        Dispatcher::log(7, 'dom', 'msg');
+    }
+
+    public function testLogThrowsOnNullByteInDomain(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        Dispatcher::log(0, "do\0main", 'msg');
+    }
+
+    public function testLogThrowsOnNullByteInMessage(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        Dispatcher::log(0, 'dom', "mes\0sage");
     }
 }

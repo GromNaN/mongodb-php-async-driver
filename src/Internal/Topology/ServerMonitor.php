@@ -7,10 +7,8 @@ namespace MongoDB\Internal\Topology;
 use Closure;
 use Exception;
 use MongoDB\Driver\Exception\ConnectionException;
-use MongoDB\Driver\Monitoring\ServerHeartbeatFailedEvent;
-use MongoDB\Driver\Monitoring\ServerHeartbeatStartedEvent;
-use MongoDB\Driver\Monitoring\ServerHeartbeatSucceededEvent;
 use MongoDB\Internal\Connection\Connection;
+use MongoDB\Internal\Monitoring\Dispatcher;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
 use MongoDB\Internal\Uri\UriOptions;
@@ -42,12 +40,12 @@ final class ServerMonitor
     private ?Connection $connection = null;
 
     /**
-     * @param string       $host                    Hostname or IP of the target server.
-     * @param int          $port                    TCP port.
-     * @param Closure      $onUpdate                Called with {@see InternalServerDescription} after each check.
-     * @param int          $heartbeatFrequencyMs    Interval between successive checks (default 10 s).
-     * @param int          $minHeartbeatFrequencyMs Minimum wait between checks after a failure (default 500 ms).
-     * @param Closure|null $onHeartbeat             Called with (string $method, object $event) for heartbeat events.
+     * @param string          $host                    Hostname or IP of the target server.
+     * @param int             $port                    TCP port.
+     * @param Closure         $onUpdate                Called with {@see InternalServerDescription} after each check.
+     * @param int             $heartbeatFrequencyMs    Interval between successive checks (default 10 s).
+     * @param int             $minHeartbeatFrequencyMs Minimum wait between checks after a failure (default 500 ms).
+     * @param Dispatcher|null $dispatcher              Dispatcher for heartbeat APM events.
      */
     public function __construct(
         private string $host,
@@ -55,7 +53,7 @@ final class ServerMonitor
         private Closure $onUpdate,
         private int $heartbeatFrequencyMs = 10_000,
         private int $minHeartbeatFrequencyMs = 500,
-        private ?Closure $onHeartbeat = null,
+        private ?Dispatcher $dispatcher = null,
         private ?UriOptions $options = null,
     ) {
     }
@@ -156,11 +154,7 @@ final class ServerMonitor
     {
         $startNs = hrtime(true);
 
-        $this->fireHeartbeat('serverHeartbeatStarted', ServerHeartbeatStartedEvent::create(
-            host:    $this->host,
-            port:    $this->port,
-            awaited: false,
-        ));
+        $this->dispatcher?->dispatchServerHeartbeatStarted($this->host, $this->port, false);
 
         try {
             $conn = $this->getConnection();
@@ -177,26 +171,14 @@ final class ServerMonitor
             $body     = $decoded['body'];
             $response = is_array($body) ? $body : (array) $body;
 
-            $this->fireHeartbeat('serverHeartbeatSucceeded', ServerHeartbeatSucceededEvent::create(
-                host:           $this->host,
-                port:           $this->port,
-                durationMicros: $durationUs,
-                reply:          (object) $response,
-                awaited:        false,
-            ));
+            $this->dispatcher?->dispatchServerHeartbeatSucceeded($this->host, $this->port, $durationUs, (object) $response, false);
 
             return InternalServerDescription::fromHello($this->host, $this->port, $response, $rttMs);
         } catch (Throwable $e) {
             $durationUs = intdiv(hrtime(true) - $startNs, 1_000);
             $exception  = $e instanceof Exception ? $e : new RuntimeException($e->getMessage(), $e->getCode(), $e);
 
-            $this->fireHeartbeat('serverHeartbeatFailed', ServerHeartbeatFailedEvent::create(
-                host:           $this->host,
-                port:           $this->port,
-                durationMicros: $durationUs,
-                error:          $exception,
-                awaited:        false,
-            ));
+            $this->dispatcher?->dispatchServerHeartbeatFailed($this->host, $this->port, $durationUs, $exception, false);
 
             // Discard the broken connection so the next check opens a fresh one.
             $this->closeConnection();
@@ -209,15 +191,6 @@ final class ServerMonitor
                 port: $this->port,
             ))->withError($e);
         }
-    }
-
-    private function fireHeartbeat(string $method, object $event): void
-    {
-        if ($this->onHeartbeat === null) {
-            return;
-        }
-
-        ($this->onHeartbeat)($method, $event);
     }
 
     // -------------------------------------------------------------------------
