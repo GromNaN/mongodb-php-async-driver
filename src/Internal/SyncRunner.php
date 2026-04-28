@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace MongoDB\Internal\Connection;
+namespace MongoDB\Internal;
 
 use Fiber;
 use Revolt\EventLoop;
