@@ -131,7 +131,7 @@ class RetryableOperationsTest extends IntegrationTestCase
         $result = $this->manager->executeBulkWrite(
             $this->dbName . '.' . $this->collection,
             $bulk,
-            $wc,
+            ['writeConcern' => $wc],
         );
 
         $this->assertFalse($result->isAcknowledged());

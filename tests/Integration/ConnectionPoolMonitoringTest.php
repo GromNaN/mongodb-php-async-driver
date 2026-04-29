@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Tests\Integration;
 
+use MongoDB\Driver\Command;
 use MongoDB\Driver\Manager;
 use MongoDB\Driver\Monitoring\ConnectionCheckedInEvent;
 use MongoDB\Driver\Monitoring\ConnectionCheckedOutEvent;
@@ -17,7 +18,6 @@ use MongoDB\Driver\Monitoring\ConnectionPoolCreatedEvent;
 use MongoDB\Driver\Monitoring\ConnectionPoolReadyEvent;
 use MongoDB\Driver\Monitoring\ConnectionPoolSubscriber;
 use MongoDB\Driver\Monitoring\ConnectionReadyEvent;
-use MongoDB\Driver\Query;
 
 use function array_filter;
 use function array_map;
@@ -109,7 +109,7 @@ class ConnectionPoolMonitoringTest extends IntegrationTestCase
         $manager->addSubscriber($subscriber);
 
         // Execute a command to trigger connection creation.
-        $manager->executeQuery('admin.$cmd', new Query(['ping' => 1], ['limit' => 1]));
+        $manager->executeCommand('admin', new Command(['ping' => 1]));
 
         $types = [];
         foreach ($subscriber->events as $event) {
@@ -215,9 +215,9 @@ class ConnectionPoolMonitoringTest extends IntegrationTestCase
         $manager = new Manager($uri);
         $manager->addSubscriber($subscriber);
 
-        $q = new Query(['ping' => 1], ['limit' => 1]);
-        $manager->executeQuery('admin.$cmd', $q);
-        $manager->executeQuery('admin.$cmd', $q);
+        $cmd = new Command(['ping' => 1]);
+        $manager->executeCommand('admin', $cmd);
+        $manager->executeCommand('admin', $cmd);
 
         // Only one physical connection should have been created for two queries.
         $this->assertSame(1, $subscriber->createdCount, 'Only one connection should be created for sequential queries');
