@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Topology;
 
+use MongoDB\BSON\ObjectId;
+
 use function array_keys;
 use function count;
 use function in_array;
@@ -249,7 +251,7 @@ final class SdamStateMachine
             case InternalServerDescription::TYPE_RS_PRIMARY:
                 // Staleness check using setVersion / electionId (SDAM spec §3.6).
                 $newSetVersion  = $newSd->helloResponse['setVersion']  ?? null;
-                $newElectionOid = $newSd->helloResponse['electionId']['$oid'] ?? null;
+                $newElectionOid = self::extractElectionId($newSd->helloResponse);
                 $maxWireVersion = (int) ($newSd->helloResponse['maxWireVersion'] ?? 0);
                 $postSixDotZero = $maxWireVersion >= 17;
 
@@ -700,8 +702,8 @@ final class SdamStateMachine
             return false; // Missing TV in either → non-stale.
         }
 
-        $errorPid  = $errorTv['processId']['$oid']  ?? null;
-        $serverPid = $serverTv['processId']['$oid'] ?? null;
+        $errorPid  = self::extractOidString($errorTv['processId']  ?? null);
+        $serverPid = self::extractOidString($serverTv['processId'] ?? null);
 
         if ($errorPid !== $serverPid) {
             return false; // Different processId → non-stale (treat as restart).
@@ -712,6 +714,42 @@ final class SdamStateMachine
 
         // Stale when errorCounter is not strictly greater than serverCounter.
         return $errorCounter <= $serverCounter;
+    }
+
+    /**
+     * Extract the hex string of an electionId from a hello response.
+     *
+     * Handles both the real BSON form (ObjectId object) and the spec-fixture
+     * form (JSON-decoded array with a '$oid' key).
+     */
+    private static function extractElectionId(array $helloResponse): ?string
+    {
+        $raw = $helloResponse['electionId'] ?? null;
+
+        return self::extractOidString($raw);
+    }
+
+    /**
+     * Return the canonical hex string for an OID value, regardless of whether
+     * it arrives as a BSON ObjectId object or as a {'$oid': '...'} array.
+     */
+    private static function extractOidString(mixed $raw): ?string
+    {
+        if ($raw === null) {
+            return null;
+        }
+
+        // Real BSON ObjectId from the wire protocol.
+        if ($raw instanceof ObjectId) {
+            return (string) $raw;
+        }
+
+        // Spec-fixture form: JSON-decoded {'$oid': '...'} array.
+        if (is_array($raw)) {
+            return isset($raw['$oid']) ? (string) $raw['$oid'] : null;
+        }
+
+        return null;
     }
 
     /**

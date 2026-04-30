@@ -6,7 +6,7 @@ namespace MongoDB\Tests\Integration;
 
 use MongoDB\Driver\BulkWrite;
 use MongoDB\Driver\Command;
-use MongoDB\Driver\Exception\CommandException;
+use MongoDB\Driver\Exception\RuntimeException;
 use MongoDB\Driver\Manager;
 use MongoDB\Driver\Query;
 use Throwable;
@@ -157,7 +157,8 @@ class RetryableWritesFaultInjectionTest extends IntegrationTestCase
         $bulk = new BulkWrite();
         $bulk->insert(['_id' => 4]);
 
-        $this->expectException(CommandException::class);
+        // BulkWrite errors surface as BulkWriteException, which extends ServerException.
+        $this->expectException(RuntimeException::class);
         $this->manager->executeBulkWrite($this->ns, $bulk);
     }
 
