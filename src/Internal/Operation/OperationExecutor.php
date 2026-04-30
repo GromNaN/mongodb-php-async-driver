@@ -62,6 +62,7 @@ use function is_array;
 use function is_object;
 use function is_string;
 use function iterator_to_array;
+use function max;
 use function round;
 use function sprintf;
 use function strlen;
@@ -150,9 +151,10 @@ final class OperationExecutor
     ): CursorInterface {
         $this->ensureStarted();
 
+        $deadlineNs     = $this->computeDeadlineNs();
         $readPreference ??= new ReadPreference(ReadPreference::PRIMARY);
 
-        $server = $this->topology->selectServer($readPreference);
+        $server = $this->topology->selectServer($readPreference, $this->remainingSelectionMs($deadlineNs));
         $pool   = $this->getOrCreatePool($server->host, $server->port);
 
         $rawCmd  = $command->getDocument();
@@ -181,11 +183,11 @@ final class OperationExecutor
             && $this->serverSupportsRetry($server);
 
         if (! $canRetry) {
-            return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer);
+            return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer, deadlineNs: $deadlineNs);
         }
 
         try {
-            return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer);
+            return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer, deadlineNs: $deadlineNs);
         } catch (Throwable $e) {
             if (! RetryableError::isRetryable($e)) {
                 throw $e;
@@ -193,10 +195,10 @@ final class OperationExecutor
         }
 
         // One retry with a freshly selected server.
-        $server = $this->topology->selectServer($readPreference);
+        $server = $this->topology->selectServer($readPreference, $this->remainingSelectionMs($deadlineNs));
         $pool   = $this->getOrCreatePool($server->host, $server->port);
 
-        return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer);
+        return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer, deadlineNs: $deadlineNs);
     }
 
     /**
@@ -238,8 +240,9 @@ final class OperationExecutor
             $findCmd[$optKey] = $opts[$optKey];
         }
 
-        $server = $this->topology->selectServer($readPreference);
-        $pool   = $this->getOrCreatePool($server->host, $server->port);
+        $deadlineNs = $this->computeDeadlineNs();
+        $server     = $this->topology->selectServer($readPreference, $this->remainingSelectionMs($deadlineNs));
+        $pool       = $this->getOrCreatePool($server->host, $server->port);
 
         $prepared = CommandHelper::prepareCommand(
             command:        $findCmd,
@@ -256,11 +259,11 @@ final class OperationExecutor
             && $this->serverSupportsRetry($server);
 
         if (! $canRetry) {
-            return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer, $query);
+            return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer, $query, $deadlineNs);
         }
 
         try {
-            return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer, $query);
+            return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer, $query, $deadlineNs);
         } catch (Throwable $e) {
             if (! RetryableError::isRetryable($e)) {
                 throw $e;
@@ -268,10 +271,10 @@ final class OperationExecutor
         }
 
         // One retry with a freshly selected server.
-        $server = $this->topology->selectServer($readPreference);
+        $server = $this->topology->selectServer($readPreference, $this->remainingSelectionMs($deadlineNs));
         $pool   = $this->getOrCreatePool($server->host, $server->port);
 
-        return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer, $query);
+        return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer, $query, $deadlineNs);
     }
 
     /**
@@ -298,8 +301,9 @@ final class OperationExecutor
 
         [$db, $collection] = $this->splitNamespace($namespace);
 
-        $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
-        $pool   = $this->getOrCreatePool($server->host, $server->port);
+        $deadlineNs = $this->computeDeadlineNs();
+        $server     = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY), $this->remainingSelectionMs($deadlineNs));
+        $pool       = $this->getOrCreatePool($server->host, $server->port);
 
         $canRetryWrites = $this->options->retryWrites
             && $session === null
@@ -391,7 +395,7 @@ final class OperationExecutor
                 }
 
                 try {
-                    $result = $this->executeBatchWithRetry($pool, $server, $db, 'insert', $insertCmd, $session, $batchIsRetryable);
+                    $result = $this->executeBatchWithRetry($pool, $server, $db, 'insert', $insertCmd, $session, $batchIsRetryable, $deadlineNs);
 
                     $totalInserted += (int) ($result['n'] ?? count($docs));
                     $acknowledged   = ! ($result['acknowledged'] ?? true) ? false : $acknowledged;
@@ -494,7 +498,7 @@ final class OperationExecutor
                 }
 
                 try {
-                    $result = $this->executeBatchWithRetry($pool, $server, $db, 'update', $updateCmd, $session, $batchIsRetryable);
+                    $result = $this->executeBatchWithRetry($pool, $server, $db, 'update', $updateCmd, $session, $batchIsRetryable, $deadlineNs);
 
                     $upsertedInBatch = (array) ($result['upserted'] ?? []);
                     $totalMatched  += (int) ($result['n'] ?? 0) - count($upsertedInBatch);
@@ -587,7 +591,7 @@ final class OperationExecutor
                 }
 
                 try {
-                    $result = $this->executeBatchWithRetry($pool, $server, $db, 'delete', $deleteCmd, $session, $batchIsRetryable);
+                    $result = $this->executeBatchWithRetry($pool, $server, $db, 'delete', $deleteCmd, $session, $batchIsRetryable, $deadlineNs);
 
                     $totalDeleted += (int) ($result['n'] ?? 0);
 
@@ -718,8 +722,9 @@ final class OperationExecutor
             );
         }
 
-        $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
-        $pool   = $this->getOrCreatePool($server->host, $server->port);
+        $deadlineNs = $this->computeDeadlineNs();
+        $server     = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY), $this->remainingSelectionMs($deadlineNs));
+        $pool       = $this->getOrCreatePool($server->host, $server->port);
 
         $options        = $bulk->getOptions();
         $ordered        = (bool) ($options['ordered'] ?? true);
@@ -862,6 +867,7 @@ final class OperationExecutor
                     $server,
                     $operationId,
                     [['id' => 'ops', 'docs' => $remappedOps]],
+                    $deadlineNs,
                 );
             } catch (CommandException $e) {
                 throw BulkWriteCommandException::create(
@@ -1041,7 +1047,26 @@ final class OperationExecutor
         InternalServerDescription $server,
         int $operationId = 0,
         array $docSequences = [],
+        ?int $deadlineNs = null,
     ): array {
+        // CSOT: check whether the deadline has already elapsed before sending.
+        $socketTimeoutSecs = null;
+        if ($deadlineNs !== null) {
+            $remainingNs = $deadlineNs - hrtime(true);
+            if ($remainingNs <= 0) {
+                throw new ExecutionTimeoutException('Operation exceeded timeoutMS', 50);
+            }
+
+            // Inject maxTimeMS (server-side timeout) when not already set by the caller.
+            // The spec requires: maxTimeMS = remaining ms, minimum 1.
+            if (! isset($prepared['maxTimeMS'])) {
+                $prepared['maxTimeMS'] = max(1, intdiv($remainingNs, 1_000_000));
+            }
+
+            // Use remaining time as the socket read timeout.
+            $socketTimeoutSecs = $remainingNs / 1e9;
+        }
+
         // Detect unacknowledged writes (writeConcern w=0). Per the Command Monitoring spec,
         // APM events for unacknowledged writes must use a synthetic {ok: 1} reply.
         // Per PHPC-1163, unacknowledged writes must also omit the implicit session lsid.
@@ -1090,7 +1115,7 @@ final class OperationExecutor
         try {
             [$bytes] = OpMsgEncoder::encodeWithRequestId($bodyForEncoding, $docSequences);
 
-            $responseBytes = $conn->sendMessage($bytes);
+            $responseBytes = $conn->sendMessage($bytes, $socketTimeoutSecs);
             $durationUs    = intdiv(hrtime(true) - $startNs, 1_000);
 
             // Decode without automatic error checking so we can capture the
@@ -1192,8 +1217,9 @@ final class OperationExecutor
         ?Session $session = null,
         ?Server $callingServer = null,
         ?Query $debugQuery = null,
+        ?int $deadlineNs = null,
     ): CursorInterface {
-        $body = $this->doSendCommand($pool, $db, $cmdName, $prepared, $server);
+        $body = $this->doSendCommand($pool, $db, $cmdName, $prepared, $server, deadlineNs: $deadlineNs);
 
         $this->advanceSessionFromResponse($session, $body);
 
@@ -1431,9 +1457,10 @@ final class OperationExecutor
         array $prepared,
         ?Session $session,
         bool $retryable,
+        ?int $deadlineNs = null,
     ): array {
         try {
-            $cursor = $this->sendCommand($pool, $db, $cmdName, $prepared, $server, 0, null, $session);
+            $cursor = $this->sendCommand($pool, $db, $cmdName, $prepared, $server, 0, null, $session, deadlineNs: $deadlineNs);
 
             return (array) (iterator_to_array($cursor)[0] ?? []);
         } catch (Throwable $e) {
@@ -1443,10 +1470,10 @@ final class OperationExecutor
         }
 
         // One retry: select a fresh server and pool.
-        $retryServer = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
+        $retryServer = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY), $this->remainingSelectionMs($deadlineNs));
         $retryPool   = $this->getOrCreatePool($retryServer->host, $retryServer->port);
 
-        $cursor = $this->sendCommand($retryPool, $db, $cmdName, $prepared, $retryServer, 0, null, $session);
+        $cursor = $this->sendCommand($retryPool, $db, $cmdName, $prepared, $retryServer, 0, null, $session, deadlineNs: $deadlineNs);
 
         return (array) (iterator_to_array($cursor)[0] ?? []);
     }
@@ -1579,6 +1606,33 @@ final class OperationExecutor
         };
 
         return array_map($normalize, $items);
+    }
+
+    /**
+     * Compute a CSOT deadline in nanoseconds from timeoutMS, or null if unset.
+     *
+     * Called once per top-level operation; the returned value is threaded through
+     * all internal calls (server selection, doSendCommand).
+     */
+    private function computeDeadlineNs(): ?int
+    {
+        return $this->options->timeoutMS !== null
+            ? hrtime(true) + $this->options->timeoutMS * 1_000_000
+            : null;
+    }
+
+    /**
+     * Convert a CSOT deadline to a remaining server-selection timeout in ms.
+     *
+     * Returns null to use the topology's configured serverSelectionTimeoutMS.
+     */
+    private function remainingSelectionMs(?int $deadlineNs): ?int
+    {
+        if ($deadlineNs === null) {
+            return null;
+        }
+
+        return max(0, intdiv($deadlineNs - hrtime(true), 1_000_000));
     }
 
     /**

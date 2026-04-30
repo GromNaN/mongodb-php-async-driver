@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MongoDB\Internal\Connection;
 
+use Amp\Cancellation;
 use Amp\CancelledException;
 use Amp\Socket\Certificate;
 use Amp\Socket\ClientTlsContext;
@@ -242,9 +243,13 @@ final class Connection
      * **Slow path:** if the initial chunk does not yet contain the complete
      * message, the remaining bytes are read via {@see readExactly()}.
      *
+     * @param float|null $timeoutSecs Per-call socket timeout in seconds. When provided,
+     *                                overrides the connection-level socketTimeoutMS for
+     *                                this single round-trip (used by CSOT).
+     *
      * @throws ConnectionException on I/O / framing errors.
      */
-    public function sendMessage(string $bytes): string
+    public function sendMessage(string $bytes, ?float $timeoutSecs = null): string
     {
         if ($this->state === self::STATE_CLOSED) {
             throw new ConnectionException('Cannot send message: connection is closed');
@@ -253,11 +258,9 @@ final class Connection
         // Write the outgoing frame.
         $this->socket->write($bytes);
 
-        // Read the first chunk — large enough to capture the entire response
-        // for typical short commands in one suspension.
-        $cancellation = $this->socketTimeoutSecs > 0.0
-            ? new TimeoutCancellation($this->socketTimeoutSecs)
-            : null;
+        // Determine effective timeout: per-call override wins, then connection default.
+        $effectiveSecs = $timeoutSecs ?? ($this->socketTimeoutSecs > 0.0 ? $this->socketTimeoutSecs : null);
+        $cancellation  = $effectiveSecs !== null ? new TimeoutCancellation($effectiveSecs) : null;
 
         $buffer = '';
 
@@ -294,7 +297,7 @@ final class Connection
         }
 
         // Slow path: read the remaining bytes.
-        $buffer .= $this->readExactly($messageLength - strlen($buffer));
+        $buffer .= $this->readExactly($messageLength - strlen($buffer), $cancellation);
 
         $this->markUsed();
 
@@ -424,13 +427,16 @@ final class Connection
      * Read exactly $length bytes from the socket, blocking until all bytes
      * are available or the connection closes.
      *
+     * @param Cancellation|null $cancellation Optional pre-built cancellation (e.g. from CSOT).
+     *                                             Falls back to the connection-level socketTimeoutSecs.
+     *
      * @throws ConnectionException if the connection closes before $length bytes are received.
      */
-    private function readExactly(int $length): string
+    private function readExactly(int $length, ?Cancellation $cancellation = null): string
     {
-        $buffer      = '';
-        $remaining   = $length;
-        $cancellation = $this->socketTimeoutSecs > 0.0
+        $buffer    = '';
+        $remaining = $length;
+        $cancellation ??= $this->socketTimeoutSecs > 0.0
             ? new TimeoutCancellation($this->socketTimeoutSecs)
             : null;
 
