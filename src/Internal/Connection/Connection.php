@@ -16,12 +16,16 @@ use MongoDB\Driver\Exception\ConnectionException;
 use MongoDB\Driver\Exception\ConnectionTimeoutException;
 use MongoDB\Internal\Auth\AuthMechanismFactory;
 use MongoDB\Internal\Protocol\MessageHeader;
+use MongoDB\Internal\Protocol\OpCompressedDecoder;
+use MongoDB\Internal\Protocol\OpCompressedEncoder;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
 use MongoDB\Internal\Uri\UriOptions;
 
 use function Amp\Socket\connect;
 use function Amp\Socket\connectTls;
+use function array_filter;
+use function array_values;
 use function is_array;
 use function min;
 use function sprintf;
@@ -61,6 +65,12 @@ final class Connection
     private int $lastUsedAt;
     /** Socket read/write timeout in seconds (0 = no timeout). */
     private float $socketTimeoutSecs = 0.0;
+    /**
+     * Compressor ID negotiated with the server during the hello handshake.
+     */
+    private ?int $negotiatedCompressorId = null;
+    /** zlib compression level passed to gzcompress(); -1 = zlib default. */
+    private int $zlibCompressionLevel = -1;
 
     /**
      * Create a new (not yet connected) Connection.
@@ -170,8 +180,14 @@ final class Connection
         $authSource = $options->authSource ?? 'admin';
         $mechsKey   = $username !== null ? ($authSource . '.' . $username) : null;
 
+        // Capture zlib compression level for use after negotiation.
+        if (isset($options->zlibCompressionLevel)) {
+            $this->zlibCompressionLevel = $options->zlibCompressionLevel;
+        }
+
         // Run server handshake (hello / isMaster), optionally requesting saslSupportedMechs.
-        $helloBody = $this->runHello($mechsKey, $options?->clientMetadata);
+        $clientCompressors = $options?->compressors ?? [];
+        $helloBody = $this->runHello($mechsKey, $options?->clientMetadata, $clientCompressors);
 
         // Authenticate if credentials were supplied (and auth was not skipped).
         if ($username !== null) {
@@ -256,7 +272,7 @@ final class Connection
         }
 
         // Write the outgoing frame.
-        $this->socket->write($bytes);
+        $this->socket->write($this->maybeCompress($bytes));
 
         // Determine effective timeout: per-call override wins, then connection default.
         $effectiveSecs = $timeoutSecs ?? ($this->socketTimeoutSecs > 0.0 ? $this->socketTimeoutSecs : null);
@@ -293,7 +309,7 @@ final class Connection
         if (strlen($buffer) >= $messageLength) {
             $this->markUsed();
 
-            return substr($buffer, 0, $messageLength);
+            return $this->maybeDecompress(substr($buffer, 0, $messageLength));
         }
 
         // Slow path: read the remaining bytes.
@@ -301,7 +317,36 @@ final class Connection
 
         $this->markUsed();
 
-        return $buffer;
+        return $this->maybeDecompress($buffer);
+    }
+
+    /**
+     * Compress an outgoing OP_MSG frame when a compressor has been negotiated
+     * and the connection is in STATE_READY (post-handshake). Auth and hello
+     * commands are never compressed per the compression spec §4.7.
+     */
+    private function maybeCompress(string $bytes): string
+    {
+        if ($this->negotiatedCompressorId !== null && $this->state === self::STATE_READY) {
+            return OpCompressedEncoder::encode($bytes, $this->zlibCompressionLevel);
+        }
+
+        return $bytes;
+    }
+
+    /**
+     * Decompress an incoming frame if it is an OP_COMPRESSED message.
+     * Plain OP_MSG frames are returned unchanged.
+     *
+     * @throws ConnectionException if decompression fails.
+     */
+    private function maybeDecompress(string $bytes): string
+    {
+        if (OpCompressedDecoder::isCompressed($bytes)) {
+            return OpCompressedDecoder::decode($bytes);
+        }
+
+        return $bytes;
     }
 
     // -------------------------------------------------------------------------
@@ -385,7 +430,9 @@ final class Connection
      *
      * @return array|object Decoded hello response body.
      */
-    private function runHello(?string $saslSupportedMechs = null, ?array $clientMetadata = null): array|object
+
+    /** @param list<string> $clientCompressors Ordered list of compressors from UriOptions (e.g. ['zlib']). */
+    private function runHello(?string $saslSupportedMechs = null, ?array $clientMetadata = null, array $clientCompressors = []): array|object
     {
         $helloCmd = [
             'hello' => 1,
@@ -398,6 +445,14 @@ final class Connection
 
         if ($clientMetadata !== null) {
             $helloCmd['client'] = $clientMetadata;
+        }
+
+        // Advertise supported compressors to the server (compression spec §4.1.1).
+        // Per T4-C scope, only zlib is implemented; filter to avoid advertising
+        // algorithms we cannot actually use.
+        $advertisedCompressors = array_values(array_filter($clientCompressors, static fn ($c) => $c === 'zlib'));
+        if ($advertisedCompressors !== []) {
+            $helloCmd['compression'] = $advertisedCompressors;
         }
 
         [$bytes] = OpMsgEncoder::encodeWithRequestId($helloCmd);
@@ -414,6 +469,22 @@ final class Connection
         $this->minWireVersion = (int) self::extractHelloField($body, 'minWireVersion', 0);
         $serviceId            = self::extractHelloField($body, 'serviceId', null);
         $this->serviceId      = $serviceId !== null ? (string) $serviceId : null;
+
+        // Negotiate compressor: pick the first algorithm returned by the server
+        // that we actually implement (zlib = ID 2).
+        if ($advertisedCompressors !== []) {
+            $serverCompressors = self::extractHelloField($body, 'compression', []);
+            if (! is_array($serverCompressors)) {
+                $serverCompressors = [];
+            }
+
+            foreach ($serverCompressors as $serverAlgo) {
+                if ($serverAlgo === 'zlib') {
+                    $this->negotiatedCompressorId = MessageHeader::COMPRESSOR_ZLIB;
+                    break;
+                }
+            }
+        }
 
         return $body;
     }

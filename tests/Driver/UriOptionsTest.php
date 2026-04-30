@@ -689,9 +689,16 @@ class UriOptionsTest extends TestCase
         return [
             'int'    => [1,              '32-bit integer'],
             'bool'   => [true,           'boolean'],
-            'array'  => [['zlib'],       'array'],
             'object' => [new stdClass(), 'stdClass'],
         ];
+    }
+
+    public function testCompressorsAcceptsArrayFromConnectionString(): void
+    {
+        // ConnectionString pre-parses the compressors option into a list<string>;
+        // UriOptions must accept it directly (no re-splitting needed).
+        $opts = UriOptions::fromArray(['compressors' => ['zlib', 'snappy']]);
+        self::assertSame(['zlib', 'snappy'], $opts->compressors);
     }
 
     // =========================================================================

@@ -25,6 +25,12 @@ final class MessageHeader
     public const OP_REPLY      = 1;    // legacy
     public const OP_COMPRESSED = 2012;
 
+    // Compressor IDs as defined in the MongoDB compression spec §4.4.
+    public const COMPRESSOR_NOOP   = 0;
+    public const COMPRESSOR_SNAPPY = 1;
+    public const COMPRESSOR_ZLIB   = 2;
+    public const COMPRESSOR_ZSTD   = 3;
+
     public function __construct(
         public readonly int $messageLength,
         public readonly int $requestId,

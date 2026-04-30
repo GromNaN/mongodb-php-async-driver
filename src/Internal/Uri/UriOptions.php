@@ -343,26 +343,26 @@ final class UriOptions
             self::assignReadonly($self, 'readPreferenceTags', []);
         }
 
-        // ----- compressors (string only from PHP API) -------------------------
+        // ----- compressors (string from PHP API, list<string> from ConnectionString) ---
         if (isset($options['compressors'])) {
             $compressors = $options['compressors'];
 
-            if (! is_string($compressors)) {
+            if (is_string($compressors)) {
+                if (! mb_check_encoding($compressors, 'UTF-8')) {
+                    throw new DriverUnexpectedValueException(
+                        sprintf('Detected invalid UTF-8 for field path "compressors": %s', $compressors),
+                    );
+                }
+
+                $compressors = array_filter(
+                    array_map('trim', explode(',', $compressors)),
+                    static fn ($s) => $s !== '',
+                );
+            } elseif (! is_array($compressors)) {
                 throw new InvalidArgumentException(
                     sprintf('Expected string for "compressors" URI option, %s given', self::phpTypeName($compressors)),
                 );
             }
-
-            if (! mb_check_encoding($compressors, 'UTF-8')) {
-                throw new DriverUnexpectedValueException(
-                    sprintf('Detected invalid UTF-8 for field path "compressors": %s', $compressors),
-                );
-            }
-
-            $compressors = array_filter(
-                array_map('trim', explode(',', $compressors)),
-                static fn ($s) => $s !== '',
-            );
 
             $supported        = ['snappy', 'zlib', 'zstd'];
             $validCompressors = [];
