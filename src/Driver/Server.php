@@ -45,7 +45,7 @@ final class Server
         string $host,
         int $port,
         int $type,
-        ?int $latency,
+        int|float|null $latency,
         ServerDescription $serverDescription,
         array $info = [],
         array $tags = [],
@@ -56,7 +56,7 @@ final class Server
         $instance->host = $host;
         $instance->port = $port;
         $instance->type = $type;
-        $instance->latency = $latency;
+        $instance->latency = $latency !== null ? (int) $latency : null;
         $instance->serverDescription = $serverDescription;
         $instance->info = $info;
         $instance->tags = $tags;
@@ -148,7 +148,7 @@ final class Server
         $readConcern    = $options['readConcern'] ?? null;
         $session        = $options['session'] ?? null;
 
-        return $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, null, $this);
+        return $this->executor->executeCommand($db, $command, $readPreference, $session, $readConcern, null, $this, retryRead: true);
     }
 
     public function executeWriteCommand(string $db, Command $command, ?array $options = null): CursorInterface

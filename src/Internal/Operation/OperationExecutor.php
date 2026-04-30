@@ -1175,6 +1175,7 @@ final class OperationExecutor
                 $e,
             );
             $this->dispatcher->dispatchCommandFailed($cmdName, $wrapped, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
+            $conn->close();
             $pool->release($conn);
 
             throw $wrapped;
@@ -1186,6 +1187,7 @@ final class OperationExecutor
                 $e,
             );
             $this->dispatcher->dispatchCommandFailed($cmdName, $wrapped, $db, $requestId, $durationUs, $server->host, $server->port, null, $serverConnId, $operationId ?: $requestId);
+            $conn->close();
             $pool->release($conn);
 
             throw $wrapped;

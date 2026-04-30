@@ -197,7 +197,7 @@ final class Cursor implements CursorInterface
 
     public function rewind(): void
     {
-        if ($this->started && $this->position > 0) {
+        if ($this->started) {
             throw new LogicException('Cursors cannot rewind after starting iteration');
         }
 
