@@ -7,6 +7,7 @@ namespace MongoDB\Driver;
 use MongoDB\BSON\Timestamp;
 use MongoDB\BSON\TimestampInterface;
 use MongoDB\Internal\Operation\OperationExecutor;
+use MongoDB\Internal\Session\LogicalSessionId;
 use MongoDB\Internal\SyncRunner;
 use Throwable;
 
@@ -23,7 +24,7 @@ final class Session
     public const string TRANSACTION_COMMITTED = 'committed';
     public const string TRANSACTION_ABORTED = 'aborted';
 
-    private object $logicalSessionId;
+    private LogicalSessionId $logicalSessionId;
     private ?object $clusterTime;
     private ?Timestamp $operationTime;
     private string $transactionState;
@@ -51,7 +52,7 @@ final class Session
 
     /** @internal Creates a new Session instance. */
     public static function createFromInternal(
-        object $logicalSessionId,
+        LogicalSessionId $logicalSessionId,
         ?object $clusterTime = null,
         ?Timestamp $operationTime = null,
         string $transactionState = self::TRANSACTION_NONE,
