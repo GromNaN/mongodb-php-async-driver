@@ -183,6 +183,7 @@ final class InternalServerDescription
         $ismaster         = (bool) ($response['ismaster']  ?? $response['isWritablePrimary'] ?? false);
         $secondary        = (bool) ($response['secondary']   ?? false);
         $arbiterOnly      = (bool) ($response['arbiterOnly'] ?? false);
+        $hidden           = (bool) ($response['hidden']       ?? false);
         $loadBalanced     = (bool) ($response['loadBalanced'] ?? false);
 
         if ($msg === 'isdbgrid') {
@@ -195,6 +196,9 @@ final class InternalServerDescription
             if ($ismaster) {
                 $type    = self::TYPE_RS_PRIMARY;
                 $primary = true;
+            } elseif ($hidden) {
+                // Hidden members report secondary:true but must be classified as RSOther.
+                $type = self::TYPE_RS_OTHER;
             } elseif ($secondary) {
                 $type = self::TYPE_RS_SECONDARY;
             } elseif ($arbiterOnly) {
