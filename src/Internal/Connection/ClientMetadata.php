@@ -10,12 +10,10 @@ use Throwable;
 use function file_exists;
 use function filter_var;
 use function getenv;
-use function hash;
 use function is_array;
 use function is_int;
 use function is_string;
 use function php_uname;
-use function serialize;
 use function str_starts_with;
 use function strlen;
 use function substr;
@@ -48,9 +46,6 @@ final class ClientMetadata
 
     private static ?string $version = null;
 
-    /** @var array<string, array<mixed>> */
-    private static array $cache = [];
-
     /**
      * Build the `client` document for the hello command.
      *
@@ -70,12 +65,6 @@ final class ClientMetadata
      */
     public static function build(?string $appName, array $driverInfo): array
     {
-        $cacheKey = hash('xxh3', ($appName ?? '') . "\0" . serialize($driverInfo));
-
-        if (isset(self::$cache[$cacheKey])) {
-            return self::$cache[$cacheKey];
-        }
-
         $meta = [
             'driver'   => [
                 'name'    => self::buildDriverName($driverInfo),
@@ -94,7 +83,7 @@ final class ClientMetadata
             $meta['env'] = $env;
         }
 
-        return self::$cache[$cacheKey] = self::enforceLimit($meta);
+        return self::enforceLimit($meta);
     }
 
     // -------------------------------------------------------------------------

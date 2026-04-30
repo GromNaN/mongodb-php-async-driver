@@ -40,7 +40,6 @@ use RuntimeException;
 use stdClass;
 use Throwable;
 
-use function in_array;
 use function spl_object_id;
 use function sprintf;
 use function str_contains;
@@ -435,7 +434,7 @@ final class Dispatcher
             }
 
             // Skip if already notified via the manager subscriber list.
-            if (in_array($subscriber, $this->subscribers, true)) {
+            if (isset($this->subscribers[spl_object_id($subscriber)])) {
                 continue;
             }
 

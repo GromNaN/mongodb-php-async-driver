@@ -7,9 +7,7 @@ namespace MongoDB\Internal\Session;
 use MongoDB\BSON\Binary;
 use stdClass;
 
-use function array_filter;
 use function array_pop;
-use function array_values;
 use function chr;
 use function max;
 use function ord;
@@ -58,8 +56,6 @@ final class SessionPool
      */
     public function acquire(): object
     {
-        $this->prune();
-
         // Pop the most-recently-used session from the end of the list (LIFO).
         while ($this->pool !== []) {
             $entry = array_pop($this->pool);
@@ -86,19 +82,6 @@ final class SessionPool
         $entry->lastUse = time();
 
         $this->pool[] = $entry;
-    }
-
-    /**
-     * Remove all expired sessions from the pool.
-     */
-    public function prune(): void
-    {
-        $this->pool = array_values(
-            array_filter(
-                $this->pool,
-                fn (object $entry): bool => ! $this->isExpired($entry->lastUse),
-            ),
-        );
     }
 
     /**

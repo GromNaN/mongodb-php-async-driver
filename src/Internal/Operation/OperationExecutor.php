@@ -1540,8 +1540,8 @@ final class OperationExecutor
     private function buildPublicServer(InternalServerDescription $sd): Server
     {
         // Map the internal type string to the public integer constant.
-        $typeMap = [
-            InternalServerDescription::TYPE_STANDALONE   => Server::TYPE_STANDALONE,
+        $publicType = match ($sd->type) {
+            InternalServerDescription::TYPE_STANDALONE    => Server::TYPE_STANDALONE,
             InternalServerDescription::TYPE_MONGOS        => Server::TYPE_MONGOS,
             InternalServerDescription::TYPE_RS_PRIMARY    => Server::TYPE_RS_PRIMARY,
             InternalServerDescription::TYPE_RS_SECONDARY  => Server::TYPE_RS_SECONDARY,
@@ -1550,9 +1550,8 @@ final class OperationExecutor
             InternalServerDescription::TYPE_RS_GHOST      => Server::TYPE_RS_GHOST,
             InternalServerDescription::TYPE_LOAD_BALANCER => Server::TYPE_LOAD_BALANCER,
             InternalServerDescription::TYPE_UNKNOWN       => Server::TYPE_UNKNOWN,
-        ];
-
-        $publicType = $typeMap[$sd->type] ?? Server::TYPE_UNKNOWN;
+            default                                       => Server::TYPE_UNKNOWN,
+        };
 
         $serverDescription = ServerDescription::createFromInternal(
             host:           $sd->host,
