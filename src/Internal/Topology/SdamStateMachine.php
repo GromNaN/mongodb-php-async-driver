@@ -6,6 +6,7 @@ namespace MongoDB\Internal\Topology;
 
 use function array_keys;
 use function count;
+use function in_array;
 use function is_array;
 use function max;
 use function strrpos;
@@ -538,6 +539,179 @@ final class SdamStateMachine
         }
 
         return TopologyType::ReplicaSetNoPrimary;
+    }
+
+    /**
+     * Apply an application-level error to the topology (SDAM spec §4.1).
+     *
+     * Handles network errors, command errors with SDAM-triggering codes, and
+     * pool generation tracking.  Timeout errors are always ignored.
+     *
+     * @param TopologyType                             $topologyType          Current topology type.
+     * @param array<string, InternalServerDescription> $servers               Current server map.
+     * @param string                                   $address               "host:port" of the server that raised the error.
+     * @param array                                    $error                 The applicationError spec entry.
+     * @param int                                      $currentPoolGeneration Current pool generation for this server.
+     * @param string|null                              $replicaSetName        Known replica-set name.
+     * @param int|null                                 $maxSetVersion         Highest setVersion seen from a primary.
+     * @param string|null                              $maxElectionId         Highest electionId seen.
+     *
+     * @return array{type: TopologyType, servers: array<string, InternalServerDescription>, setName: string|null, maxSetVersion: int|null, maxElectionId: string|null, clearPool: bool}
+     */
+    public static function applyApplicationError(
+        TopologyType $topologyType,
+        array $servers,
+        string $address,
+        array $error,
+        int $currentPoolGeneration,
+        ?string $replicaSetName = null,
+        ?int $maxSetVersion = null,
+        ?string $maxElectionId = null,
+    ): array {
+        $noOp = static fn (): array => [
+            'type'          => $topologyType,
+            'servers'       => $servers,
+            'setName'       => $replicaSetName,
+            'maxSetVersion' => $maxSetVersion,
+            'maxElectionId' => $maxElectionId,
+            'clearPool'     => false,
+        ];
+
+        // Stale generation check: if the error was produced by a connection
+        // from an older pool generation, it is stale and must be ignored.
+        if (isset($error['generation']) && (int) $error['generation'] < $currentPoolGeneration) {
+            return $noOp();
+        }
+
+        $type           = $error['type'];
+        $maxWireVersion = (int) ($error['maxWireVersion'] ?? 0);
+
+        // Timeout errors never affect the topology (CSOT spec §4.2).
+        if ($type === 'timeout') {
+            return $noOp();
+        }
+
+        $markUnknown        = false;
+        $clearPool          = false;
+        $helloResponseUpdate = [];
+
+        if ($type === 'network') {
+            // Any network error (before or after handshake) marks the server
+            // Unknown and bumps the pool generation.
+            $markUnknown = true;
+            $clearPool   = true;
+        } elseif ($type === 'command') {
+            $response = $error['response'] ?? [];
+            $ok       = (int) ($response['ok'] ?? 1);
+
+            // ok:1 responses (e.g. with writeErrors) are ignored.
+            if ($ok !== 1) {
+                $code = isset($response['code']) ? (int) $response['code'] : null;
+
+                // SDAM-triggering error codes (prefer code over errmsg).
+                // Only act when the numeric code is in this set; errmsg alone is ignored.
+                $sdamCodes = [
+                    91,    // ShutdownInProgress
+                    189,   // PrimarySteppedDown
+                    10058, // LegacyNotPrimary
+                    10107, // NotWritablePrimary
+                    11600, // InterruptedAtShutdown
+                    11602, // InterruptedDueToReplStateChange
+                    13435, // NotPrimaryNoSecondaryOk
+                    13436, // NotPrimaryOrSecondary
+                ];
+
+                // "Node is shutting down" codes always clear the pool regardless
+                // of wire version — the server is going away and will not push
+                // a new hello via the streaming protocol.
+                $shutdownCodes = [91, 11600]; // ShutdownInProgress, InterruptedAtShutdown
+
+                if ($code !== null && in_array($code, $sdamCodes, true)) {
+                    if ($maxWireVersion < 8) {
+                        // Pre-4.2: mark Unknown and bump pool generation.
+                        $markUnknown = true;
+                        $clearPool   = true;
+                    } else {
+                        // Post-4.2: use topologyVersion to determine staleness.
+                        // Shutdown codes (91, 11600) still respect the staleness check
+                        // but bump the pool generation when non-stale.
+                        $errorTv  = $response['topologyVersion'] ?? null;
+                        $serverTv = ($servers[$address] ?? null)?->helloResponse['topologyVersion'] ?? null;
+
+                        if (! self::isTopologyVersionStale($errorTv, $serverTv)) {
+                            $markUnknown = true;
+                            // "Node is shutting down" errors clear the pool even in post-4.2:
+                            // the server is going away and will not push a new hello.
+                            $clearPool = in_array($code, $shutdownCodes, true);
+                            if ($errorTv !== null) {
+                                $helloResponseUpdate = ['topologyVersion' => $errorTv];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($markUnknown && isset($servers[$address])) {
+            $currentSd = $servers[$address];
+            $unknownSd = new InternalServerDescription(
+                host:          $currentSd->host,
+                port:          $currentSd->port,
+                type:          InternalServerDescription::TYPE_UNKNOWN,
+                helloResponse: $helloResponseUpdate,
+            );
+
+            $result = self::applyServerDescription(
+                $topologyType,
+                $servers,
+                $unknownSd,
+                $replicaSetName,
+                $maxSetVersion,
+                $maxElectionId,
+            );
+
+            return [
+                'type'          => $result['type'],
+                'servers'       => $result['servers'],
+                'setName'       => $result['setName'],
+                'maxSetVersion' => $result['maxSetVersion'],
+                'maxElectionId' => $result['maxElectionId'],
+                'clearPool'     => $clearPool,
+            ];
+        }
+
+        return $noOp();
+    }
+
+    /**
+     * Return true when a command error's topologyVersion is stale compared to
+     * the server's current topologyVersion.
+     *
+     * "Stale" means the error's counter is NOT strictly greater than the
+     * server's counter (with the same processId).  A missing topologyVersion
+     * in either the error or the server is always treated as non-stale.
+     *
+     * @param array|null $errorTv  topologyVersion from the error response.
+     * @param mixed      $serverTv topologyVersion from the server's hello response.
+     */
+    private static function isTopologyVersionStale(mixed $errorTv, mixed $serverTv): bool
+    {
+        if (! is_array($errorTv) || ! is_array($serverTv)) {
+            return false; // Missing TV in either → non-stale.
+        }
+
+        $errorPid  = $errorTv['processId']['$oid']  ?? null;
+        $serverPid = $serverTv['processId']['$oid'] ?? null;
+
+        if ($errorPid !== $serverPid) {
+            return false; // Different processId → non-stale (treat as restart).
+        }
+
+        $errorCounter  = (int) ($errorTv['counter']['$numberLong']  ?? 0);
+        $serverCounter = (int) ($serverTv['counter']['$numberLong'] ?? 0);
+
+        // Stale when errorCounter is not strictly greater than serverCounter.
+        return $errorCounter <= $serverCounter;
     }
 
     /**

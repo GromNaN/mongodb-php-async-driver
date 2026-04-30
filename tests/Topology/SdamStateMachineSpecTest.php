@@ -10,7 +10,9 @@ use MongoDB\Internal\Topology\TopologyType;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
+use function array_fill_keys;
 use function array_key_exists;
+use function array_keys;
 use function basename;
 use function count;
 use function explode;
@@ -33,8 +35,9 @@ use function trim;
  * SDAM state-machine spec tests.
  *
  * Drives all JSON fixtures from the Server Discovery and Monitoring spec to
- * verify that SdamStateMachine::applyServerDescription() produces the correct
- * topology state after processing each phase's hello responses.
+ * verify that SdamStateMachine::applyServerDescription() and
+ * SdamStateMachine::applyApplicationError() produce the correct topology state
+ * after processing each phase's hello responses or application errors.
  *
  * @see tests/references/specifications/source/server-discovery-and-monitoring/tests/
  */
@@ -80,47 +83,78 @@ class SdamStateMachineSpecTest extends TestCase
 
         // Determine initial topology type and seeds from the URI.
         [$topologyType, $servers, $setName] = $this->initFromUri($data['uri']);
-        $maxSetVersion = null;
-        $maxElectionId = null;
+        $maxSetVersion   = null;
+        $maxElectionId   = null;
+        $poolGenerations = array_fill_keys(array_keys($servers), 0);
 
         foreach ($data['phases'] as $phase) {
-            // Phases with applicationErrors test connection-pool generation
-            // tracking, which is outside the scope of the pure state-machine test.
-            if (! array_key_exists('responses', $phase)) {
-                $this->markTestSkipped(sprintf(
-                    '%s: phase has no responses (applicationErrors or other non-SM phase)',
-                    basename($fixtureFile),
-                ));
+            if (array_key_exists('responses', $phase)) {
+                foreach ($phase['responses'] as [$address, $helloDoc]) {
+                    if (str_starts_with($address, '[')) {
+                        // IPv6 bracket notation: [::1]:27017
+                        $close = strpos($address, ']');
+                        $host  = substr($address, 0, $close + 1);
+                        $port  = (int) substr($address, $close + 2);
+                    } else {
+                        [$host, $portStr] = explode(':', $address);
+                        $port = (int) $portStr;
+                    }
+
+                    // A null or ok:0 response marks the server Unknown.
+                    if (! $helloDoc || ($helloDoc['ok'] ?? 1) !== 1) {
+                        $sd = new InternalServerDescription(
+                            host: $host,
+                            port: $port,
+                            type: InternalServerDescription::TYPE_UNKNOWN,
+                        );
+                    } else {
+                        $sd = InternalServerDescription::fromHello($host, $port, $helloDoc, 0);
+                    }
+
+                    $result        = SdamStateMachine::applyServerDescription($topologyType, $servers, $sd, $setName, $maxSetVersion, $maxElectionId);
+                    $topologyType  = $result['type'];
+                    $servers       = $result['servers'];
+                    $setName       = $result['setName'];
+                    $maxSetVersion = $result['maxSetVersion'];
+                    $maxElectionId = $result['maxElectionId'];
+                }
+            } elseif (array_key_exists('applicationErrors', $phase)) {
+                foreach ($phase['applicationErrors'] as $error) {
+                    $address    = strtolower($error['address']);
+                    $currentGen = $poolGenerations[$address] ?? 0;
+
+                    $result = SdamStateMachine::applyApplicationError(
+                        $topologyType,
+                        $servers,
+                        $address,
+                        $error,
+                        $currentGen,
+                        $setName,
+                        $maxSetVersion,
+                        $maxElectionId,
+                    );
+
+                    $topologyType  = $result['type'];
+                    $servers       = $result['servers'];
+                    $setName       = $result['setName'];
+                    $maxSetVersion = $result['maxSetVersion'];
+                    $maxElectionId = $result['maxElectionId'];
+
+                    if (! $result['clearPool']) {
+                        continue;
+                    }
+
+                    $poolGenerations[$address] = $currentGen + 1;
+                }
             }
 
-            foreach ($phase['responses'] as [$address, $helloDoc]) {
-                if (str_starts_with($address, '[')) {
-                    // IPv6 bracket notation: [::1]:27017
-                    $close = strpos($address, ']');
-                    $host  = substr($address, 0, $close + 1);
-                    $port  = (int) substr($address, $close + 2);
-                } else {
-                    [$host, $portStr] = explode(':', $address);
-                    $port = (int) $portStr;
+            // Initialize pool generation counter for newly-discovered servers.
+            foreach (array_keys($servers) as $addr) {
+                if (isset($poolGenerations[$addr])) {
+                    continue;
                 }
 
-                // A null or ok:0 response marks the server Unknown.
-                if (! $helloDoc || ($helloDoc['ok'] ?? 1) !== 1) {
-                    $sd = new InternalServerDescription(
-                        host: $host,
-                        port: $port,
-                        type: InternalServerDescription::TYPE_UNKNOWN,
-                    );
-                } else {
-                    $sd = InternalServerDescription::fromHello($host, $port, $helloDoc, 0);
-                }
-
-                $result        = SdamStateMachine::applyServerDescription($topologyType, $servers, $sd, $setName, $maxSetVersion, $maxElectionId);
-                $topologyType  = $result['type'];
-                $servers       = $result['servers'];
-                $setName       = $result['setName'];
-                $maxSetVersion = $result['maxSetVersion'];
-                $maxElectionId = $result['maxElectionId'];
+                $poolGenerations[$addr] = 0;
             }
 
             $outcome = $phase['outcome'];
@@ -144,7 +178,7 @@ class SdamStateMachineSpecTest extends TestCase
                 );
             }
 
-            // Assert individual server types.
+            // Assert individual server types and pool generations.
             foreach ($outcome['servers'] as $addr => $expectedServer) {
                 $this->assertArrayHasKey(
                     $addr,
@@ -156,11 +190,18 @@ class SdamStateMachineSpecTest extends TestCase
                     $servers[$addr]->type,
                     sprintf('%s: server %s type', basename($fixtureFile), $addr),
                 );
+                if (! isset($expectedServer['pool']['generation'])) {
+                    continue;
+                }
+
+                $this->assertSame(
+                    $expectedServer['pool']['generation'],
+                    $poolGenerations[$addr] ?? 0,
+                    sprintf('%s: server %s pool.generation', basename($fixtureFile), $addr),
+                );
             }
         }
 
-        // If we get here without assertions, the fixture had only
-        // applicationErrors phases and was already marked skipped.
         $this->addToAssertionCount(1);
     }
 
@@ -191,12 +232,14 @@ class SdamStateMachineSpecTest extends TestCase
         $replicaSet   = $opts['replicaset']    ?? null;
         $loadBalanced = strtolower((string) ($opts['loadbalanced'] ?? 'false')) === 'true';
 
-        // Collect seeds from the authority section.
-        $authority = $parsed['host'] ?? '';
-        $port      = $parsed['port'] ?? 27017;
-
         // Multiple hosts may be comma-separated in the raw URI.
         $hostsRaw = $this->extractHosts($uri);
+
+        // For a LoadBalanced topology the spec mandates that seed servers are
+        // immediately set to LoadBalancer type (no hello response required).
+        $initialServerType = $loadBalanced
+            ? InternalServerDescription::TYPE_LOAD_BALANCER
+            : InternalServerDescription::TYPE_UNKNOWN;
 
         $servers = [];
         foreach ($hostsRaw as $hostPort) {
@@ -221,7 +264,7 @@ class SdamStateMachineSpecTest extends TestCase
             $servers[$address] = new InternalServerDescription(
                 host: $h,
                 port: (int) $p,
-                type: InternalServerDescription::TYPE_UNKNOWN,
+                type: $initialServerType,
             );
         }
 
