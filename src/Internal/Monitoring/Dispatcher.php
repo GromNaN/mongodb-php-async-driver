@@ -90,7 +90,7 @@ final class Dispatcher
 
     public function dispatchCommandStarted(
         string $cmdName,
-        object $cmd,
+        Closure $cmdFactory,
         string $db,
         int $requestId,
         string $host,
@@ -98,24 +98,29 @@ final class Dispatcher
         ?int $serverConnectionId,
         int $operationId,
     ): void {
-        if ($this->isSensitiveCommand($cmdName, $cmd)) {
-            $cmd = new stdClass();
-        }
-
         self::dispatch(
             CommandSubscriber::class,
-            static fn (CommandSubscriber $subscriber, ?object &$e) => $subscriber->commandStarted(
-                $e ??= CommandStartedEvent::create(
-                    commandName:        $cmdName,
-                    command:            $cmd,
-                    databaseName:       $db,
-                    requestId:          $requestId,
-                    operationId:        $operationId ?: $requestId,
-                    host:               $host,
-                    port:               $port,
-                    serverConnectionId: $serverConnectionId,
-                ),
-            ),
+            function (CommandSubscriber $subscriber, ?object &$e) use ($cmdName, $cmdFactory, $db, $requestId, $host, $port, $serverConnectionId, $operationId): void {
+                if ($e === null) {
+                    $cmd = $cmdFactory();
+                    if ($this->isSensitiveCommand($cmdName, $cmd)) {
+                        $cmd = new stdClass();
+                    }
+
+                    $e = CommandStartedEvent::create(
+                        commandName:        $cmdName,
+                        command:            $cmd,
+                        databaseName:       $db,
+                        requestId:          $requestId,
+                        operationId:        $operationId ?: $requestId,
+                        host:               $host,
+                        port:               $port,
+                        serverConnectionId: $serverConnectionId,
+                    );
+                }
+
+                $subscriber->commandStarted($e);
+            },
         );
     }
 

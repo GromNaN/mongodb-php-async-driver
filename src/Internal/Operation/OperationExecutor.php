@@ -1097,20 +1097,31 @@ final class OperationExecutor
             unset($bodyForEncoding[$seq['id']]);
         }
 
-        // Build APM command doc from the (small) body only.
-        // Re-add doc-sequence fields item-by-item using normalizeDocSeqForApm() instead of the
-        // PackedArray::fromPHP()->toPHP() round-trip, which builds the entire BSON blob in one
-        // allocation before decoding it and causes OOM for large batches (e.g. 100 000 ops).
-        $commandDoc = Document::fromPHP($bodyForEncoding)->toPHP(['root' => 'object', 'document' => 'object']);
-        assert($commandDoc instanceof stdClass);
-        foreach ($docSequences as $seq) {
-            // Fall back to the doc sequence's own docs when the field is absent from the
-            // prepared command (e.g. bulkWrite ops are no longer stored in the command body).
-            $items = $prepared[$seq['id']] ?? $seq['docs'];
-            $commandDoc->{$seq['id']} = self::normalizeDocSeqForApm($items);
-        }
+        $this->dispatcher->dispatchCommandStarted(
+            $cmdName,
+            static function () use ($bodyForEncoding, $docSequences, $prepared): object {
+                // Build APM command doc from the (small) body only.
+                // Re-add doc-sequence fields item-by-item using normalizeDocSeqForApm() instead of the
+                // PackedArray::fromPHP()->toPHP() round-trip, which builds the entire BSON blob in one
+                // allocation before decoding it and causes OOM for large batches (e.g. 100 000 ops).
+                $commandDoc = Document::fromPHP($bodyForEncoding)->toPHP(['root' => 'object', 'document' => 'object']);
+                assert($commandDoc instanceof stdClass);
+                foreach ($docSequences as $seq) {
+                    // Fall back to the doc sequence's own docs when the field is absent from the
+                    // prepared command (e.g. bulkWrite ops are no longer stored in the command body).
+                    $items = $prepared[$seq['id']] ?? $seq['docs'];
+                    $commandDoc->{$seq['id']} = self::normalizeDocSeqForApm($items);
+                }
 
-        $this->dispatcher->dispatchCommandStarted($cmdName, $commandDoc, $db, $requestId, $server->host, $server->port, $serverConnId, $operationId ?: $requestId);
+                return $commandDoc;
+            },
+            $db,
+            $requestId,
+            $server->host,
+            $server->port,
+            $serverConnId,
+            $operationId ?: $requestId,
+        );
 
         try {
             [$bytes] = OpMsgEncoder::encodeWithRequestId($bodyForEncoding, $docSequences);
