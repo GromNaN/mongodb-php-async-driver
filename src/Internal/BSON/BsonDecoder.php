@@ -90,7 +90,7 @@ final class BsonDecoder
         $noRootPersistable     = array_key_exists('root', $typeMap) && $typeMap['root'] === 'object';
         $noDocumentPersistable = array_key_exists('document', $typeMap) && $typeMap['document'] === 'object';
 
-        $typeMap = array_merge(self::DEFAULT_TYPE_MAP, array_filter($typeMap, static fn ($v) => $v !== null));
+        $typeMap = $typeMap === [] ? self::DEFAULT_TYPE_MAP : array_merge(self::DEFAULT_TYPE_MAP, array_filter($typeMap, static fn ($v) => $v !== null));
 
         $offset = 0;
 
