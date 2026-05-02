@@ -227,10 +227,10 @@ final class OperationExecutor
         foreach (
             [
                 'sort', 'projection', 'skip', 'limit', 'batchSize',
-                'singleBatch', 'comment', 'maxTimeMS', 'hint', 'let',
+                'singleBatch', 'comment', 'maxTimeMS', 'hint', 'let', 'allowDiskUse',
                 'allowPartialResults', 'noCursorTimeout', 'tailable',
                 'awaitData', 'oplogReplay', 'returnKey', 'showRecordId',
-                'snapshot', 'min', 'max',
+                'snapshot', 'min', 'max', 'rawData',
             ] as $optKey
         ) {
             if (! isset($opts[$optKey])) {
@@ -238,6 +238,11 @@ final class OperationExecutor
             }
 
             $findCmd[$optKey] = $opts[$optKey];
+        }
+
+        // Spec: if batchSize equals limit, increase batchSize by one to avoid a superfluous getMore.
+        if (isset($findCmd['batchSize'], $findCmd['limit']) && $findCmd['batchSize'] === $findCmd['limit']) {
+            $findCmd['batchSize'] = $findCmd['limit'] + 1;
         }
 
         $deadlineNs = $this->computeDeadlineNs();
@@ -376,6 +381,10 @@ final class OperationExecutor
                     $insertBase['bypassDocumentValidation'] = true;
                 }
 
+                if (isset($bulkOptions['rawData'])) {
+                    $insertBase['rawData'] = $bulkOptions['rawData'];
+                }
+
                 $insertCmd = CommandHelper::prepareCommand(
                     command:      $insertBase,
                     db:           $db,
@@ -479,6 +488,10 @@ final class OperationExecutor
                     $updateBase['bypassDocumentValidation'] = true;
                 }
 
+                if (isset($bulkOptions['rawData'])) {
+                    $updateBase['rawData'] = $bulkOptions['rawData'];
+                }
+
                 $updateCmd = CommandHelper::prepareCommand(
                     command:      $updateBase,
                     db:           $db,
@@ -570,6 +583,10 @@ final class OperationExecutor
 
                 if (isset($bulkOptions['let'])) {
                     $deleteBase['let'] = $bulkOptions['let'];
+                }
+
+                if (isset($bulkOptions['rawData'])) {
+                    $deleteBase['rawData'] = $bulkOptions['rawData'];
                 }
 
                 $deleteCmd = CommandHelper::prepareCommand(
@@ -1237,11 +1254,11 @@ final class OperationExecutor
         $this->advanceSessionFromResponse($session, $body);
 
         // Pass batchSize and comment through to getMore commands (spec requirement).
-        // find uses top-level batchSize; aggregate uses cursor.batchSize.
+        // find uses top-level batchSize; aggregate uses cursor.batchSize (array or stdClass).
         $cursorOpt = $prepared['cursor'] ?? null;
         $batchSize = isset($prepared['batchSize'])
             ? (int) $prepared['batchSize']
-            : (int) ((is_array($cursorOpt) ? ($cursorOpt['batchSize'] ?? 0) : 0));
+            : (int) (is_array($cursorOpt) ? ($cursorOpt['batchSize'] ?? 0) : ($cursorOpt->batchSize ?? 0));
         $comment = $prepared['comment'] ?? null;
 
         return $this->buildCursor($body, $db, $cmdName, $pool, $server, $maxAwaitTimeMS, $debugCommand, $session, $batchSize, $comment, $callingServer, $debugQuery);
