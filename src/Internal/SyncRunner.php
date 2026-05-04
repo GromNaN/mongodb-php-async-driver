@@ -6,6 +6,7 @@ namespace MongoDB\Internal;
 
 use Fiber;
 use Revolt\EventLoop;
+use Revolt\EventLoop\Suspension;
 use Throwable;
 
 use function Amp\async;
@@ -25,15 +26,27 @@ use function Amp\async;
 final class SyncRunner
 {
     /**
+     * Reusable worker fiber for the synchronous entry-point.
+     *
+     * In synchronous mode only one SyncRunner::run() is active at a time
+     * (nested calls from inside the event loop take the async() path), so a
+     * single pooled fiber is enough.  The fiber loops forever: each iteration
+     * it suspends waiting for a [$callable, $suspension] pair, executes it,
+     * resolves the suspension, and suspends again ready for the next call.
+     * This avoids allocating a new Fiber (and its C stack) on every run().
+     */
+    private static ?Fiber $fiber = null;
+
+    /**
      * Execute $operation and return its result, bridging sync ↔ async.
      *
      * - If a Revolt event-loop is already running (i.e. we are inside a fiber),
      *   the callable is wrapped in `\Amp\async()` and awaited in place – the
      *   current fiber suspends while other fibers can make progress.
      *
-     * - If no event-loop is running (the typical synchronous entry-point), a
-     *   Revolt suspension is used: the operation is queued as a fiber, and
-     *   `suspension->suspend()` drives the event loop until the fiber completes.
+     * - If no event-loop is running (the typical synchronous entry-point), the
+     *   operation is dispatched to a reusable worker fiber; the main context
+     *   suspends via a Revolt suspension until the fiber completes.
      *
      * @param callable(): T $operation
      *
@@ -51,28 +64,41 @@ final class SyncRunner
             return async($operation)->await();
         }
 
-        // Synchronous entry-point.
-        // 1. Obtain a suspension for the current (main) context.
-        // 2. Queue the operation as a fiber; when done it resumes / throws the suspension.
-        // 3. suspension->suspend() drives the event loop until resumed.
-        $suspension = EventLoop::getSuspension();
+        // Synchronous entry-point: lazily create (or recreate after a fatal
+        // termination) the single reusable worker fiber.
+        if (self::$fiber === null || self::$fiber->isTerminated()) {
+            self::$fiber = new Fiber(static function (): void {
+                while (true) {
+                    /** @var array{callable(): mixed, Suspension} $task */
+                    $task        = Fiber::suspend();
+                    [$op, $susp] = $task;
 
-        EventLoop::queue(static function () use ($operation, $suspension): void {
-            // This runs as a regular callback (main context) inside the event loop.
-            // We start our own fiber here so that async()->await() inside
-            // $operation works correctly.
-            $fiber = new Fiber(static function () use ($operation, $suspension): void {
-                try {
-                    $suspension->resume($operation());
-                } catch (Throwable $e) {
-                    $suspension->throw($e);
+                    try {
+                        $susp->resume($op());
+                    } catch (Throwable $e) {
+                        $susp->throw($e);
+                    }
                 }
             });
 
-            $fiber->start();
-            // The fiber may suspend internally (e.g. via delay()), in which case
-            // the event loop will resume it when the timer fires.  The suspension
-            // will be resolved only after $operation() returns or throws.
+            // Advance the fiber to its first Fiber::suspend() so it is ready
+            // to accept work.
+            self::$fiber->start();
+        }
+
+        $suspension = EventLoop::getSuspension();
+
+        // Queue a callback that hands [$operation, $suspension] to the worker
+        // fiber.  We must go through EventLoop::queue() so the resume happens
+        // inside a running event-loop tick, which lets async I/O within the
+        // operation interact correctly with the loop.
+        $fiber = self::$fiber;
+
+        EventLoop::queue(static function () use ($operation, $suspension, $fiber): void {
+            $fiber->resume([$operation, $suspension]);
+            // The fiber may suspend internally (e.g. waiting for network I/O),
+            // in which case the event loop resumes it when the I/O completes.
+            // The suspension is resolved only after $operation() returns or throws.
         });
 
         return $suspension->suspend();
