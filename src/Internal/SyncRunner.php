@@ -40,7 +40,8 @@ final class SyncRunner
     /**
      * Execute $operation and return its result, bridging sync ↔ async.
      *
-     * - If a Revolt event-loop is already running (i.e. we are inside a fiber),
+     * - If a Revolt event-loop is already running, OR if the call originates
+     *   from inside any PHP fiber (e.g. a destructor triggered mid-operation),
      *   the callable is wrapped in `\Amp\async()` and awaited in place – the
      *   current fiber suspends while other fibers can make progress.
      *
@@ -58,9 +59,10 @@ final class SyncRunner
      */
     public static function run(callable $operation): mixed
     {
-        if (EventLoop::getDriver()->isRunning()) {
-            // Already inside an async context – delegate to Amp futures so
-            // the current fiber suspends cleanly without blocking the loop.
+        if (EventLoop::getDriver()->isRunning() || Fiber::getCurrent() !== null) {
+            // Already inside an async context (event loop running or we are
+            // inside a fiber) – delegate to Amp futures so the current fiber
+            // suspends cleanly without blocking the loop.
             return async($operation)->await();
         }
 
