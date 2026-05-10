@@ -18,6 +18,7 @@ use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use stdClass;
 
+use function ord;
 use function pack;
 
 use const PHP_INT_MAX;
@@ -302,6 +303,33 @@ class BsonEncoderDecoderTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         $doc->get('js');
+    }
+
+    // -------------------------------------------------------------------------
+    // PHP array vs object BSON type selection
+    // -------------------------------------------------------------------------
+
+    /**
+     * Regression: an empty PHP array passed as a query option such as `sort`
+     * must encode as BSON document (0x03), not BSON array (0x04).
+     * `array_is_list([]) === true`, so without an explicit `(object)` cast the
+     * encoder would produce type 0x04, which MongoDB rejects with
+     * "Expected field sort to be of type object".
+     *
+     * The BSON type byte sits at offset 4 (after the 4-byte document-length
+     * prefix) and identifies the type of the first element in the document.
+     */
+    public function testEmptyPhpArrayEncodesAsBsonArray(): void
+    {
+        $bson = BsonEncoder::encode(['val' => []]);
+        // offset 4 = type byte of the first element
+        $this->assertSame(0x04, ord($bson[4]), 'Empty PHP array must encode as BSON array (0x04)');
+    }
+
+    public function testEmptyPhpObjectEncodesAsBsonDocument(): void
+    {
+        $bson = BsonEncoder::encode(['val' => (object) []]);
+        $this->assertSame(0x03, ord($bson[4]), '(object)[] must encode as BSON document (0x03)');
     }
 
     // -------------------------------------------------------------------------

@@ -224,6 +224,9 @@ final class OperationExecutor
 
         $opts = $query->getOptions();
 
+        // Options that must be BSON documents (not arrays) even when empty.
+        $documentOpts = ['sort' => true, 'projection' => true, 'hint' => true, 'min' => true, 'max' => true, 'let' => true];
+
         foreach (
             [
                 'sort', 'projection', 'skip', 'limit', 'batchSize',
@@ -237,7 +240,12 @@ final class OperationExecutor
                 continue;
             }
 
-            $findCmd[$optKey] = $opts[$optKey];
+            $v = $opts[$optKey];
+            // PHP arrays for document-type fields must be cast to objects so
+            // BsonEncoder produces a BSON document (0x03) rather than an array
+            // (0x04). An empty PHP array is a list, so without this cast an
+            // empty sort/projection would be rejected by the server.
+            $findCmd[$optKey] = ($documentOpts[$optKey] ?? false) && is_array($v) ? (object) $v : $v;
         }
 
         // Spec: if batchSize equals limit, increase batchSize by one to avoid a superfluous getMore.
