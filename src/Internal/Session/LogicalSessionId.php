@@ -28,6 +28,16 @@ final class LogicalSessionId implements Serializable
     /** Monotonic nanosecond timestamp of the last time this session was used. */
     private(set) int $lastUse;
 
+    /**
+     * Highest txnNumber ever sent on this lsid (retryable writes OR explicit
+     * transactions).  Stored here so the pool can carry the high-water mark
+     * across round-trips: a new Session that re-uses this lsid must start its
+     * txnNumber above this value to avoid collisions on the server.
+     *
+     * Intentionally excluded from {@see bsonSerialize()} — never sent to the server.
+     */
+    public int $txnNumber = 0;
+
     public function __construct(public readonly Binary $id)
     {
         $this->lastUse = hrtime(true);

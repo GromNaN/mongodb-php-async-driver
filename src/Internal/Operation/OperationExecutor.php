@@ -51,7 +51,6 @@ use function array_is_list;
 use function array_map;
 use function array_values;
 use function assert;
-use function bin2hex;
 use function count;
 use function explode;
 use function get_object_vars;
@@ -86,9 +85,6 @@ final class OperationExecutor
 {
     /** @var array<string, ConnectionPool> Keyed by "host:port". */
     private array $pools = [];
-
-    /** @var array<string, int> txnNumber counter per lsid id (hex), for retryable writes. */
-    private array $txnNumbers = [];
 
     /**
      * @param TopologyManager $topology    Live topology manager.
@@ -1431,13 +1427,15 @@ final class OperationExecutor
 
     /**
      * Increment and return the txnNumber for the given server session lsid.
-     * The lsid's id is a BSON Binary; its raw bytes are used as a pool key.
+     *
+     * The counter lives on the LogicalSessionId itself so pool round-trips
+     * preserve the high-water mark: when the same lsid is later re-acquired
+     * for an explicit Session (e.g. a transaction), Session::startTransaction()
+     * will increment above this value, avoiding server-side txnNumber collisions.
      */
-    private function nextTxnNumber(object $lsid): int
+    private function nextTxnNumber(LogicalSessionId $lsid): int
     {
-        $key = bin2hex($lsid->id->getData());
-
-        return $this->txnNumbers[$key] = ($this->txnNumbers[$key] ?? 0) + 1;
+        return ++$lsid->txnNumber;
     }
 
     /**

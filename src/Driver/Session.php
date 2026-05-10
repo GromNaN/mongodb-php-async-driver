@@ -32,9 +32,6 @@ final class Session
     private ?Server $server;
     private ?array $transactionOptions;
 
-    /** Monotonically increasing counter; incremented each time startTransaction() is called. */
-    private int $txnNumber = 0;
-
     /**
      * Executor used to send commitTransaction / abortTransaction commands.
      * Null only in unit-test contexts where no real executor is available.
@@ -97,7 +94,7 @@ final class Session
     /** @internal Returns the current transaction number (used by CommandHelper). */
     public function getTxnNumber(): int
     {
-        return $this->txnNumber;
+        return $this->logicalSessionId->txnNumber;
     }
 
     public function isInTransaction(): bool
@@ -138,7 +135,7 @@ final class Session
             throw new Exception\RuntimeException('Transaction already in progress');
         }
 
-        $this->txnNumber++;
+        $this->logicalSessionId->txnNumber++;
         $this->server             = null;   // unpin — first op will pin
         $this->dirty              = false;
         $this->transactionState   = self::TRANSACTION_STARTING;
