@@ -39,6 +39,7 @@ use MongoDB\Internal\Monitoring\Dispatcher;
 use MongoDB\Internal\Protocol\OpMsgDecoder;
 use MongoDB\Internal\Protocol\OpMsgEncoder;
 use MongoDB\Internal\Protocol\RequestIdGenerator;
+use MongoDB\Internal\Session\LogicalSessionId;
 use MongoDB\Internal\Session\SessionPool;
 use MongoDB\Internal\SyncRunner;
 use MongoDB\Internal\Topology\InternalServerDescription;

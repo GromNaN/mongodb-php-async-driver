@@ -8,6 +8,7 @@ use MongoDB\BSON\Timestamp;
 use MongoDB\BSON\TimestampInterface;
 use MongoDB\Internal\Operation\OperationExecutor;
 use MongoDB\Internal\Session\LogicalSessionId;
+use MongoDB\Internal\Session\SessionPool;
 use MongoDB\Internal\SyncRunner;
 use Throwable;
 
@@ -39,6 +40,15 @@ final class Session
     private ?OperationExecutor $executor;
 
     /**
+     * Pool to return the lsid to when the session ends.
+     * Null only in unit-test contexts where no real pool is available.
+     */
+    private ?SessionPool $sessionPool;
+
+    /** Prevents double-return to the pool if endSession() is called more than once. */
+    private bool $ended = false;
+
+    /**
      * Private constructor. Use the internal factory to create instances.
      *
      * @see \MongoDB\Internal\Session\SessionFactory
@@ -57,6 +67,7 @@ final class Session
         ?Server $server = null,
         ?array $transactionOptions = null,
         ?OperationExecutor $executor = null,
+        ?SessionPool $sessionPool = null,
     ): static {
         $instance = new static();
         $instance->logicalSessionId   = $logicalSessionId;
@@ -67,6 +78,7 @@ final class Session
         $instance->server             = $server;
         $instance->transactionOptions = $transactionOptions;
         $instance->executor           = $executor;
+        $instance->sessionPool        = $sessionPool;
 
         return $instance;
     }
@@ -284,11 +296,38 @@ final class Session
 
     public function endSession(): void
     {
+        if ($this->ended) {
+            return;
+        }
+
+        $this->ended = true;
+
         if ($this->isInTransaction()) {
             $this->abortTransaction();
         }
 
         $this->transactionState = self::TRANSACTION_NONE;
+
+        // Release the server session back to the pool unless it is dirty.
+        // Dirty sessions MUST NOT be released per the driver sessions spec.
+        if ($this->dirty || $this->sessionPool === null) {
+            return;
+        }
+
+        $this->sessionPool->release($this->logicalSessionId);
+    }
+
+    /**
+     * Releases the lsid back to the pool when the Session object is garbage-collected,
+     * in case endSession() was never called explicitly (e.g. Doctrine ODM).
+     */
+    public function __destruct()
+    {
+        if ($this->ended) {
+            return;
+        }
+
+        $this->endSession();
     }
 
     public function advanceClusterTime(array|object $clusterTime): void

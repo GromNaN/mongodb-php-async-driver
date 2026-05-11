@@ -506,7 +506,7 @@ final class Manager
     {
         $lsid = $this->sessionPool->acquire();
 
-        return Session::createFromInternal($lsid, executor: $this->executor);
+        return Session::createFromInternal($lsid, executor: $this->executor, sessionPool: $this->sessionPool);
     }
 
     public function getEncryptedFieldsMap(): array|object|null
