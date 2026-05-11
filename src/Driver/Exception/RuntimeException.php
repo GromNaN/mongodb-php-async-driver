@@ -20,4 +20,18 @@ class RuntimeException extends BaseRuntimeException implements Exception
 
         return in_array($errorLabel, $this->errorLabels, true);
     }
+
+    /** @internal Adds a driver-side error label to this exception. */
+    final public function addErrorLabel(string $label): void
+    {
+        if (! is_array($this->errorLabels)) {
+            $this->errorLabels = [];
+        }
+
+        if (in_array($label, $this->errorLabels, true)) {
+            return;
+        }
+
+        $this->errorLabels[] = $label;
+    }
 }
