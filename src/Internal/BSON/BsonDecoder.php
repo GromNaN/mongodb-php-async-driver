@@ -201,9 +201,7 @@ final class BsonDecoder
             $type = $typeByte;
 
             $key       = self::readCString($bson, $offset);
-            $fieldPath = $hasFieldPaths
-                ? ($parentFieldPath === '' ? $key : $parentFieldPath . '.' . $key)
-                : '';
+            $fieldPath = $parentFieldPath === '' ? $key : $parentFieldPath . '.' . $key;
 
             $value = self::decodeElement($bson, $offset, $type, $typeMap, $handlePersistable, $fieldPath, $noRootPersistable, $noDocumentPersistable, $preserveInt64);
 
@@ -336,6 +334,12 @@ final class BsonDecoder
 
     private static function readInt32Unsigned(string $bson, int &$offset): int
     {
+        if ($offset + 4 > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes for int32 at offset %d', $offset),
+            );
+        }
+
         /** @var array{1: int} $u */
         $u = unpack('V', $bson, $offset);
         $offset += 4;
@@ -356,6 +360,12 @@ final class BsonDecoder
 
     private static function readInt64(string $bson, int &$offset, bool $preserveInt64 = false): int|Int64
     {
+        if ($offset + 8 > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes for int64 at offset %d', $offset),
+            );
+        }
+
         /** @var array{1: int} $u */
         $u = unpack('P', $bson, $offset);
         $offset += 8;
@@ -369,6 +379,12 @@ final class BsonDecoder
 
     private static function readDouble(string $bson, int &$offset): float
     {
+        if ($offset + 8 > strlen($bson)) {
+            throw new RuntimeException(
+                sprintf('Not enough bytes for double at offset %d', $offset),
+            );
+        }
+
         /** @var array{1: float} $u */
         $u = unpack('e', $bson, $offset);
         $offset += 8;
