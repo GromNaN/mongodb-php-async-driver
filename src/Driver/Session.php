@@ -10,6 +10,7 @@ use MongoDB\Internal\Operation\OperationExecutor;
 use MongoDB\Internal\Session\LogicalSessionId;
 use MongoDB\Internal\Session\SessionPool;
 use MongoDB\Internal\SyncRunner;
+use stdClass;
 use Throwable;
 
 use function hrtime;
@@ -85,7 +86,10 @@ final class Session
 
     public function getLogicalSessionId(): object
     {
-        return $this->logicalSessionId;
+        $lsid     = new stdClass();
+        $lsid->id = $this->logicalSessionId->id;
+
+        return $lsid;
     }
 
     public function getClusterTime(): ?object
@@ -181,7 +185,30 @@ final class Session
 
         // IN_PROGRESS or re-commit of COMMITTED: send the command.
         if ($this->executor !== null) {
-            SyncRunner::run(fn () => $this->executor->commitTransaction($this));
+            try {
+                SyncRunner::run(fn () => $this->executor->commitTransaction($this));
+            } catch (Exception\RuntimeException $e) {
+                // Driver-side error label augmentation per the transactions spec.
+                $code = $e->getCode();
+                if ($code === 251 /* NoSuchTransaction */) {
+                    // Server has already aborted the transaction; whole transaction can be retried.
+                    $e->addErrorLabel('TransientTransactionError');
+                } elseif (
+                    $code === 64 /* WriteConcernFailed */ ||
+                    $code === 50 /* MaxTimeMSExpired */
+                ) {
+                    $e->addErrorLabel('UnknownTransactionCommitResult');
+                }
+
+                // Per the transactions spec, a TransientTransactionError on commit means
+                // the server has already aborted the transaction. Reset state so the caller
+                // can retry the whole transaction with a fresh startTransaction().
+                if ($e->hasErrorLabel('TransientTransactionError')) {
+                    $this->transactionState = self::TRANSACTION_ABORTED;
+                }
+
+                throw $e;
+            }
         }
 
         $this->transactionState = self::TRANSACTION_COMMITTED;
