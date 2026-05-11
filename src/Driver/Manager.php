@@ -608,6 +608,14 @@ final class Manager
             }
         }
 
+        // journal=true conflicts with w=0
+        if (
+            isset($options['journal']) && $options['journal'] === true &&
+            isset($options['w']) && $options['w'] === 0
+        ) {
+            throw new InvalidArgumentException('Journal conflicts with w value: 0');
+        }
+
         // authSource may not be empty
         if (array_key_exists('authSource', $options) && $options['authSource'] === '') {
             throw new InvalidArgumentException(
