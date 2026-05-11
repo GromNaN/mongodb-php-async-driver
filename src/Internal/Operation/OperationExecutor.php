@@ -1014,11 +1014,15 @@ final class OperationExecutor
         $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY));
         $pool   = $this->getOrCreatePool($server->host, $server->port);
 
+        $transactionOptions = $session->getTransactionOptions();
+        $writeConcern       = $transactionOptions['writeConcern'] ?? null;
+
         $prepared = CommandHelper::prepareCommand(
-            command:   ['commitTransaction' => 1],
-            db:        'admin',
-            session:   $session,
-            serverApi: $this->serverApi,
+            command:      ['commitTransaction' => 1],
+            db:           'admin',
+            session:      $session,
+            serverApi:    $this->serverApi,
+            writeConcern: $writeConcern,
         );
 
         $this->doSendCommand($pool, 'admin', 'commitTransaction', $prepared, $server);
