@@ -88,7 +88,7 @@ final class ServerDescription
             'type'             => $this->type,
             'hello_response'   => $this->hello_response,
             'last_update_time' => $this->last_update_time,
-            'round_trip_time'  => $this->round_trip_time,
+            'round_trip_time'  => $this->round_trip_time !== null ? (int) $this->round_trip_time : null,
         ];
     }
 }
