@@ -528,7 +528,7 @@ final class Manager
      */
     public function createClientEncryption(array $options): ClientEncryption
     {
-        return ClientEncryption::create();
+        return new ClientEncryption($options);
     }
 
     public function __debugInfo(): array
