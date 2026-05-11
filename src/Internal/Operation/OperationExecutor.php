@@ -908,48 +908,93 @@ final class OperationExecutor
             $nDeleted  += (int) ($body['nDeleted']  ?? 0);
 
             // Per-operation results / errors from cursor (idx is relative to this batch).
-            $resultsCursor = $this->buildCursor($body, 'admin', 'bulkWrite', $pool, $server);
+            // Pass session so getMore commands include the same lsid (required when inside a transaction).
+            $resultsCursor = $this->buildCursor($body, 'admin', 'bulkWrite', $pool, $server, session: $session);
 
-            foreach ($resultsCursor as $doc) {
-                $doc       = is_array($doc) ? $doc : (array) $doc;
-                $ok        = (int) ($doc['ok'] ?? 1);
-                $globalIdx = $batchStart + (int) ($doc['idx'] ?? 0);
+            try {
+                foreach ($resultsCursor as $doc) {
+                    $doc       = is_array($doc) ? $doc : (array) $doc;
+                    $ok        = (int) ($doc['ok'] ?? 1);
+                    $globalIdx = $batchStart + (int) ($doc['idx'] ?? 0);
 
-                if ($ok === 0) {
-                    $writeErrors[$globalIdx] = WriteError::create(
-                        code:    (int) ($doc['code']   ?? 0),
-                        index:   $globalIdx,
-                        message: (string) ($doc['errmsg'] ?? ''),
-                        info:    isset($doc['errInfo']) ? (object) $doc['errInfo'] : new stdClass(),
-                    );
-                    continue;
-                }
-
-                if (! $verboseResults) {
-                    continue;
-                }
-
-                $op = $allOps[$globalIdx] ?? [];
-
-                if (isset($op['insert'])) {
-                    if (isset($insertedIds[$globalIdx])) {
-                        $insertResultsMap[(string) $globalIdx] = (object) ['insertedId' => $insertedIds[$globalIdx]];
-                    }
-                } elseif (isset($op['update'])) {
-                    $res = (object) [
-                        'matchedCount'  => new Int64($doc['n'] ?? 0),
-                        'modifiedCount' => new Int64($doc['nModified'] ?? 0),
-                    ];
-                    $upserted = $doc['upserted'] ?? null;
-                    if ($upserted !== null) {
-                        $upsertedArr     = is_array($upserted) ? $upserted : (array) $upserted;
-                        $res->upsertedId = $upsertedArr['_id'] ?? null;
+                    if ($ok === 0) {
+                        $writeErrors[$globalIdx] = WriteError::create(
+                            code:    (int) ($doc['code']   ?? 0),
+                            index:   $globalIdx,
+                            message: (string) ($doc['errmsg'] ?? ''),
+                            info:    isset($doc['errInfo']) ? (object) $doc['errInfo'] : new stdClass(),
+                        );
+                        continue;
                     }
 
-                    $updateResultsMap[(string) $globalIdx] = $res;
-                } elseif (isset($op['delete'])) {
-                    $deleteResultsMap[(string) $globalIdx] = (object) ['deletedCount' => new Int64($doc['n'] ?? 0)];
+                    if (! $verboseResults) {
+                        continue;
+                    }
+
+                    $op = $allOps[$globalIdx] ?? [];
+
+                    if (isset($op['insert'])) {
+                        if (isset($insertedIds[$globalIdx])) {
+                            $insertResultsMap[(string) $globalIdx] = (object) ['insertedId' => $insertedIds[$globalIdx]];
+                        }
+                    } elseif (isset($op['update'])) {
+                        $res = (object) [
+                            'matchedCount'  => new Int64($doc['n'] ?? 0),
+                            'modifiedCount' => new Int64($doc['nModified'] ?? 0),
+                        ];
+                        $upserted = $doc['upserted'] ?? null;
+                        if ($upserted !== null) {
+                            $upsertedArr     = is_array($upserted) ? $upserted : (array) $upserted;
+                            $res->upsertedId = $upsertedArr['_id'] ?? null;
+                        }
+
+                        $updateResultsMap[(string) $globalIdx] = $res;
+                    } elseif (isset($op['delete'])) {
+                        $deleteResultsMap[(string) $globalIdx] = (object) ['deletedCount' => new Int64($doc['n'] ?? 0)];
+                    }
                 }
+            } catch (CommandException $getMoreError) {
+                // Send killCursors to release the server-side cursor after a getMore failure.
+                $deadCursorId = (int) (string) $resultsCursor->getId();
+                if ($deadCursorId !== 0) {
+                    $cursorNs   = $resultsCursor->getNamespace();
+                    $collection = explode('.', $cursorNs, 2)[1] ?? $cursorNs;
+
+                    try {
+                        $killCmd      = ['killCursors' => $collection, 'cursors' => [new Int64($deadCursorId)]];
+                        $killPrepared = CommandHelper::prepareCommand(command: $killCmd, db: 'admin', session: $session, serverApi: $this->serverApi);
+                        $this->doSendCommand($pool, 'admin', 'killCursors', $killPrepared, $server);
+                    } catch (Throwable) {
+                        // Swallow killCursors errors — best effort.
+                    }
+                }
+
+                // Build partial result from accumulated data and wrap as BulkWriteCommandException.
+                $insertResultsDoc = $verboseResults && $insertResultsMap !== []
+                    ? Document::fromPHP((object) $insertResultsMap) : null;
+                $updateResultsDoc = $verboseResults && $updateResultsMap !== []
+                    ? Document::fromPHP((object) $updateResultsMap) : null;
+                $deleteResultsDoc = $verboseResults && $deleteResultsMap !== []
+                    ? Document::fromPHP((object) $deleteResultsMap) : null;
+
+                $partialResult = BulkWriteCommandResult::createFromInternal(
+                    insertedCount: $acknowledged ? $nInserted : 0,
+                    matchedCount:  $acknowledged ? $nMatched : 0,
+                    modifiedCount: $acknowledged ? $nModified : 0,
+                    upsertedCount: $acknowledged ? $nUpserted : 0,
+                    deletedCount:  $acknowledged ? $nDeleted : 0,
+                    acknowledged:  $acknowledged,
+                    insertResults: $insertResultsDoc,
+                    updateResults: $updateResultsDoc,
+                    deleteResults: $deleteResultsDoc,
+                );
+
+                throw BulkWriteCommandException::create(
+                    message:       $getMoreError->getMessage(),
+                    code:          $getMoreError->getCode(),
+                    errorReply:    Document::fromPHP($getMoreError->getResultDocument()),
+                    partialResult: $partialResult,
+                );
             }
 
             // Write concern error from top-level response body.
