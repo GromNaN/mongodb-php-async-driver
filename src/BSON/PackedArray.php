@@ -27,6 +27,7 @@ use function get_debug_type;
 use function is_array;
 use function is_int;
 use function json_decode;
+use function ltrim;
 use function sprintf;
 use function strlen;
 use function substr;
@@ -80,8 +81,15 @@ final class PackedArray implements IteratorAggregate, ArrayAccess, Type, Stringa
         try {
             $phpValue = json_decode($json, associative: false, depth: 101, flags: JSON_THROW_ON_ERROR);
         } catch (JsonException $e) {
+            // PHP doesn't expose the byte offset from json_decode, so we
+            // approximate it: find the first non-whitespace character, which
+            // is where the parser would have stopped for immediately-invalid input.
+            $trimmed = ltrim($json);
+            $pos     = strlen($json) - strlen($trimmed);
+            $char    = $trimmed !== '' ? $trimmed[0] : '';
+
             throw new DriverUnexpectedValueException(
-                sprintf('Got parse error at "%s", position 1: "SPECIAL_EXPECTED"', substr($json, 0, 1)),
+                sprintf('Got parse error at "%s", position %d: "SPECIAL_EXPECTED"', $char, $pos),
                 previous: $e,
             );
         }

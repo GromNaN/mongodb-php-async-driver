@@ -141,4 +141,37 @@ class DocumentTest extends TestCase
         $json = str_repeat('{"a":', 100) . '{}' . str_repeat('}', 100);
         Document::fromJSON($json);
     }
+
+    /**
+     * Regression: fromJSON() error messages must report the correct byte
+     * position and character, not always "position 1" + first char of input.
+     *
+     * PHP's json_decode doesn't expose byte offset, so we approximate it by
+     * finding the first non-whitespace character (the point where an
+     * immediately-invalid JSON string would fail).
+     */
+    public function testFromJSONParseErrorPositionAtStart(): void
+    {
+        // "wrong" starts with 'w' at position 0.
+        try {
+            Document::fromJSON('wrong');
+            $this->fail('Expected UnexpectedValueException');
+        } catch (UnexpectedValueException $e) {
+            $this->assertStringContainsString('position 0', $e->getMessage());
+            $this->assertStringContainsString('"w"', $e->getMessage());
+        }
+    }
+
+    public function testFromJSONParseErrorPositionAfterLeadingWhitespace(): void
+    {
+        // 13 chars of leading whitespace ("\n" + 12 spaces), then "wrong".
+        $json = "\n            wrong";
+        try {
+            Document::fromJSON($json);
+            $this->fail('Expected UnexpectedValueException');
+        } catch (UnexpectedValueException $e) {
+            $this->assertStringContainsString('position 13', $e->getMessage());
+            $this->assertStringContainsString('"w"', $e->getMessage());
+        }
+    }
 }
