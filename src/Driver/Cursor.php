@@ -147,6 +147,12 @@ final class Cursor implements CursorInterface
         return new Int64($this->cursorId);
     }
 
+    /** @internal Returns the cursor's full namespace (db.collection). */
+    public function getNamespace(): string
+    {
+        return $this->namespace;
+    }
+
     public function getServer(): Server
     {
         if ($this->server === null) {
@@ -208,7 +214,7 @@ final class Cursor implements CursorInterface
 
     public function rewind(): void
     {
-        if ($this->started) {
+        if ($this->started && $this->position > 0) {
             throw new LogicException('Cursors cannot rewind after starting iteration');
         }
 
