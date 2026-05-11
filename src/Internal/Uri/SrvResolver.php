@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MongoDB\Internal\Uri;
 
 use MongoDB\Driver\Exception\InvalidArgumentException;
-use MongoDB\Driver\Exception\RuntimeException;
 
 use function array_shift;
 use function array_slice;
@@ -66,8 +65,8 @@ final class SrvResolver
         $srvRecords = @dns_get_record($srvFqdn, DNS_SRV);
 
         if ($srvRecords === false || count($srvRecords) === 0) {
-            throw new RuntimeException(
-                sprintf('Failed to resolve SRV record for "%s". No records returned.', $srvFqdn),
+            throw new InvalidArgumentException(
+                sprintf('Failed to look up SRV record "%s"', $srvFqdn),
             );
         }
 
