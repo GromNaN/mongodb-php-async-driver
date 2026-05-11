@@ -27,6 +27,13 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
     /** @var int Static counter, initialized to a random value on first use. */
     private static int $counter = -1;
 
+    /**
+     * 5-byte random value fixed per process (matches the MongoDB ObjectId spec).
+     * Generated once on first use; all ObjectIds in the same process share it,
+     * making IDs monotonically comparable within the same second.
+     */
+    private static string $processRandom = '';
+
     /** Hex-encoded 12-byte ObjectId. */
     public readonly string $oid;
 
@@ -132,16 +139,16 @@ final class ObjectId implements ObjectIdInterface, JsonSerializable, Type, Strin
     private static function generate(): string
     {
         if (self::$counter === -1) {
-            self::$counter = random_int(0, 0xFFFFFF);
+            self::$counter       = random_int(0, 0xFFFFFF);
+            self::$processRandom = random_bytes(5);
         }
 
         $timestamp = pack('N', time());
-        $random    = random_bytes(5);
         $counter   = self::$counter = self::$counter + 1 & 0xFFFFFF;
         $counterBytes = pack('N', $counter);
         // We only need the last 3 bytes of the 4-byte packed int.
         $counterBytes = substr($counterBytes, 1, 3);
 
-        return $timestamp . $random . $counterBytes;
+        return $timestamp . self::$processRandom . $counterBytes;
     }
 }
