@@ -7,6 +7,17 @@ DRIVER_TESTS="$REPO_ROOT/tests/references/mongo-php-driver/tests"
 PREPEND_FILE="$REPO_ROOT/tests/Phpt/prepend.php"
 RUN_TESTS="$REPO_ROOT/tests/references/mongo-php-driver/run-tests.php"
 
+# Optional first argument: MongoDB URI (mongodb:// or mongodb+srv://).
+# When present it is exported as MONGODB_URI so phpt tests pick it up via
+# `getenv('MONGODB_URI') ?: 'mongodb://127.0.0.1/'` in utils/basic.inc.
+# All remaining arguments are treated as glob patterns, as before.
+MONGODB_URI="${MONGODB_URI:-}"
+if [[ $# -gt 0 && ( "$1" == mongodb://* || "$1" == mongodb+srv://* ) ]]; then
+    MONGODB_URI="$1"
+    shift
+fi
+export MONGODB_URI
+
 # Build absolute paths of tests to skip
 SKIP_PATHS=$(php -r "
 \$skip = require '$REPO_ROOT/tests/Phpt/skip_list.php';
