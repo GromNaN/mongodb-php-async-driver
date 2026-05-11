@@ -374,4 +374,101 @@ return [
 
     'bson/bson-packedarray-get_properties-001.phpt'
         => 'C extension exposes $data via a custom get_properties handler; userland PackedArray stores BSON as a private field, get_object_vars() returns empty array',
+
+    // -------------------------------------------------------------------------
+    // Cursor: fork-based behavior (pcntl_fork) — not implementable in userland
+    // -------------------------------------------------------------------------
+
+    'cursor/bug1274-001.phpt'
+        => 'Tests forked-process cursor reset (cursor in parent not killed when child destructs); requires libmongoc per-process client reset hooks not available in userland',
+
+    'cursor/bug1274-002.phpt'
+        => 'Tests child process can continue iterating cursor opened in parent after fork; requires libmongoc per-process client reset hooks not available in userland',
+
+    'cursor/bug1274-003.phpt'
+        => 'Tests child process does not reset parent client multiple times; requires libmongoc per-process client reset hooks not available in userland',
+
+    'cursor/bug1274-004.phpt'
+        => 'Tests forked cursor with disableClientPersistence=true; requires libmongoc per-process client reset hooks not available in userland',
+
+    'cursor/bug1274-005.phpt'
+        => 'Tests child cursor iteration with disableClientPersistence=true after fork; requires libmongoc per-process client reset hooks not available in userland',
+
+    'cursor/bug1274-006.phpt'
+        => 'Tests child does not reset parent client multiple times with disableClientPersistence=true; requires libmongoc per-process client reset hooks not available in userland',
+
+    'cursor/bug1529-001.phpt'
+        => 'Tests that client reset in forked child also resets keyVaultClient; requires pcntl_fork + libmongocrypt + libmongoc client reset hooks not available in userland',
+
+    // -------------------------------------------------------------------------
+    // Cursor destructor: killCursors on server — requires sending OP_MSG killCursors
+    // -------------------------------------------------------------------------
+
+    'cursor/cursor-destruct-001.phpt'
+        => 'Tests that destructing a live cursor sends killCursors to the server; our cursor destructor does not send killCursors to the server',
+
+    // -------------------------------------------------------------------------
+    // Manager: fork-based client isolation (pcntl_fork) — not implementable in userland
+    // -------------------------------------------------------------------------
+
+    'manager/bug0912-001.phpt'
+        => 'Tests that forked child process creates its own connection rather than inheriting parent connection; requires libmongoc per-process client isolation not available in userland',
+
+    // -------------------------------------------------------------------------
+    // Manager: mongodb.debug INI setting — C extension debug logging feature
+    // -------------------------------------------------------------------------
+
+    'manager/manager-debug-001.phpt'
+        => 'Tests mongodb.debug INI setting writing debug log files; this is a C extension feature controlled by php.ini, not implemented in userland driver',
+
+    'manager/manager-debug-002.phpt'
+        => 'Tests mongodb.debug=stderr output format (connection string and version); this is a C extension feature, not implemented in userland driver',
+
+    'manager/manager-debug-003.phpt'
+        => 'Tests mongodb.debug=stderr date format; this is a C extension feature, not implemented in userland driver',
+
+    'manager/manager-debug-004.phpt'
+        => 'Tests mongodb.debug=stderr output with crypt_shared; this is a C extension feature, not implemented in userland driver',
+
+    // -------------------------------------------------------------------------
+    // Manager: executeBulkWrite WriteResult after network error — complex partial-write state
+    // -------------------------------------------------------------------------
+
+    'manager/manager-executeBulkWrite_error-005.phpt'
+        => 'Tests that WriteResult is accessible after a network error mid-bulk-write; requires partial write result propagation from connection-level errors not yet implemented',
+
+    // -------------------------------------------------------------------------
+    // Manager: getEncryptedFieldsMap — autoEncryption/CSE feature not implemented
+    // -------------------------------------------------------------------------
+
+    'manager/manager-getencryptedfieldsmap-001.phpt'
+        => 'Tests Manager::getEncryptedFieldsMap() with autoEncryption options; client-side field-level encryption is not implemented in this userland driver',
+
+    // -------------------------------------------------------------------------
+    // Manager: createClientEncryption error — CSE option validation not implemented
+    // -------------------------------------------------------------------------
+
+    'manager/manager-createClientEncryption-error-001.phpt'
+        => 'Tests ClientEncryption constructor option validation (keyVaultNamespace, kmsProviders); client-side encryption is not implemented in this userland driver',
+
+    // -------------------------------------------------------------------------
+    // Manager: autoEncryption with crypt_shared library — CSE feature not implemented
+    // -------------------------------------------------------------------------
+
+    'manager/manager-ctor-auto_encryption-002.phpt'
+        => 'Tests Manager construction with crypt_shared library; client-side field-level encryption is not implemented in this userland driver',
+
+    // -------------------------------------------------------------------------
+    // APM: TopologyClosedEvent debug output — format mismatch
+    // -------------------------------------------------------------------------
+
+    'apm/topologyClosedEvent-001.phpt'
+        => 'Tests TopologyClosedEvent var_dump output format; requires exact debug output format matching C extension, which our driver may not produce',
+
+    // -------------------------------------------------------------------------
+    // ServerDescription: var_export — requires __set_state and public properties
+    // -------------------------------------------------------------------------
+
+    'serverDescription/serverDescription-var_export-001.phpt'
+        => 'var_export() on ServerDescription requires __set_state() and accessible properties; C extension exposes internal properties via custom get_properties handler; userland uses private fields',
 ];
