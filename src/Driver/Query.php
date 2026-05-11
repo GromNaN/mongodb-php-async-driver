@@ -47,7 +47,7 @@ final class Query
                 throw InvalidArgumentException::expectedHintOption('hint', $val);
             }
 
-            if (! is_document($val)) {
+            if (! is_string($val) && ! is_document($val)) {
                 throw UnexpectedValueException::documentRequiredAsRoot();
             }
 
