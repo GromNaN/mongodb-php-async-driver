@@ -66,14 +66,14 @@ final class ReadPreference implements Serializable
             foreach ($tagSets as $tagSet) {
                 if (! is_array($tagSet) && ! is_object($tagSet)) {
                     throw new InvalidArgumentException(
-                        'Read preference tags must be an array of zero or more documents',
+                        'tagSets must be an array of zero or more documents',
                     );
                 }
             }
 
             // Then check primary mode restriction
             if ($mode === self::PRIMARY) {
-                throw new InvalidArgumentException('Primary read preference mode conflicts with tags');
+                throw new InvalidArgumentException('tagSets may not be used with primary mode');
             }
 
             // Convert array items to stdClass (without modifying original)
