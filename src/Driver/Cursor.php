@@ -66,6 +66,17 @@ final class Cursor implements CursorInterface
     /** True after the first call to next(), preventing rewind(). */
     private bool $started = false;
 
+    /**
+     * True once rewind() has been called at least once.
+     *
+     * Before rewind() is called, key() MUST return null per the PHP Iterator
+     * contract.  This prevents PHPUnit's Count constraint from trying to
+     * restore the iterator position with a second rewind() call after
+     * iterator_count(), which would throw "Cursors cannot rewind after
+     * starting iteration".
+     */
+    private bool $rewound = false;
+
     /** @internal Debug context — database name for __debugInfo(). */
     private string $debugDatabase = '';
 
@@ -152,7 +163,7 @@ final class Cursor implements CursorInterface
 
     public function key(): ?int
     {
-        if (! $this->valid()) {
+        if (! $this->rewound || ! $this->valid()) {
             return null;
         }
 
@@ -201,6 +212,7 @@ final class Cursor implements CursorInterface
             throw new LogicException('Cursors cannot rewind after starting iteration');
         }
 
+        $this->rewound  = true;
         $this->position = 0;
 
         // When the server returns an empty first batch (e.g. batchSize:0 on aggregate),
