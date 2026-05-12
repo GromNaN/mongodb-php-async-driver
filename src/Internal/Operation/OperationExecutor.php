@@ -744,14 +744,28 @@ final class OperationExecutor
             );
         }
 
-        $deadlineNs = $this->computeDeadlineNs();
-        $server     = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY), $this->remainingSelectionMs($deadlineNs));
-        $pool       = $this->getOrCreatePool($server->host, $server->port);
-
         $options        = $bulk->getOptions();
         $ordered        = (bool) ($options['ordered'] ?? true);
         $verboseResults = (bool) ($options['verboseResults'] ?? false);
         $acknowledged   = $writeConcern === null || $writeConcern->getW() !== 0;
+
+        if ($writeConcern !== null && $writeConcern->getW() === 0) {
+            if ($verboseResults) {
+                throw new InvalidArgumentException(
+                    'Cannot request unacknowledged write concern and verbose results',
+                );
+            }
+
+            if ($ordered) {
+                throw new InvalidArgumentException(
+                    'Cannot request unacknowledged write concern and ordered writes',
+                );
+            }
+        }
+
+        $deadlineNs = $this->computeDeadlineNs();
+        $server     = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY), $this->remainingSelectionMs($deadlineNs));
+        $pool       = $this->getOrCreatePool($server->host, $server->port);
 
         $allOps      = $bulk->getOps();
         $allNsInfo   = $bulk->getNsInfo();
@@ -792,6 +806,8 @@ final class OperationExecutor
         $insertResultsMap   = [];
         $updateResultsMap   = [];
         $deleteResultsMap   = [];
+        // True once at least one write returns ok:1; partialResult is null when false.
+        $anyWriteSucceeded  = false;
 
         while ($batchStart < $totalOps) {
             // Build the ops slice for this batch, respecting maxWriteBatchSize and maxMessageSizeBytes.
@@ -927,6 +943,8 @@ final class OperationExecutor
                         continue;
                     }
 
+                    $anyWriteSucceeded = true;
+
                     if (! $verboseResults) {
                         continue;
                     }
@@ -939,8 +957,8 @@ final class OperationExecutor
                         }
                     } elseif (isset($op['update'])) {
                         $res = (object) [
-                            'matchedCount'  => new Int64($doc['n'] ?? 0),
-                            'modifiedCount' => new Int64($doc['nModified'] ?? 0),
+                            'matchedCount'  => (int) ($doc['n'] ?? 0),
+                            'modifiedCount' => (int) ($doc['nModified'] ?? 0),
                         ];
                         $upserted = $doc['upserted'] ?? null;
                         if ($upserted !== null) {
@@ -950,7 +968,7 @@ final class OperationExecutor
 
                         $updateResultsMap[(string) $globalIdx] = $res;
                     } elseif (isset($op['delete'])) {
-                        $deleteResultsMap[(string) $globalIdx] = (object) ['deletedCount' => new Int64($doc['n'] ?? 0)];
+                        $deleteResultsMap[(string) $globalIdx] = (object) ['deletedCount' => (int) ($doc['n'] ?? 0)];
                     }
                 }
             } catch (CommandException $getMoreError) {
@@ -970,14 +988,11 @@ final class OperationExecutor
                 }
 
                 // Build partial result from accumulated data and wrap as BulkWriteCommandException.
-                $insertResultsDoc = $verboseResults && $insertResultsMap !== []
-                    ? Document::fromPHP((object) $insertResultsMap) : null;
-                $updateResultsDoc = $verboseResults && $updateResultsMap !== []
-                    ? Document::fromPHP((object) $updateResultsMap) : null;
-                $deleteResultsDoc = $verboseResults && $deleteResultsMap !== []
-                    ? Document::fromPHP((object) $deleteResultsMap) : null;
+                $insertResultsDoc = $verboseResults ? Document::fromPHP((object) $insertResultsMap) : null;
+                $updateResultsDoc = $verboseResults ? Document::fromPHP((object) $updateResultsMap) : null;
+                $deleteResultsDoc = $verboseResults ? Document::fromPHP((object) $deleteResultsMap) : null;
 
-                $partialResult = BulkWriteCommandResult::createFromInternal(
+                $partialResult = $anyWriteSucceeded ? BulkWriteCommandResult::createFromInternal(
                     insertedCount: $acknowledged ? $nInserted : 0,
                     matchedCount:  $acknowledged ? $nMatched : 0,
                     modifiedCount: $acknowledged ? $nModified : 0,
@@ -987,7 +1002,7 @@ final class OperationExecutor
                     insertResults: $insertResultsDoc,
                     updateResults: $updateResultsDoc,
                     deleteResults: $deleteResultsDoc,
-                );
+                ) : null;
 
                 throw BulkWriteCommandException::create(
                     message:       $getMoreError->getMessage(),
@@ -1014,12 +1029,9 @@ final class OperationExecutor
             }
         }
 
-        $insertResultsDoc = $verboseResults && $insertResultsMap !== []
-            ? Document::fromPHP((object) $insertResultsMap) : null;
-        $updateResultsDoc = $verboseResults && $updateResultsMap !== []
-            ? Document::fromPHP((object) $updateResultsMap) : null;
-        $deleteResultsDoc = $verboseResults && $deleteResultsMap !== []
-            ? Document::fromPHP((object) $deleteResultsMap) : null;
+        $insertResultsDoc = $verboseResults ? Document::fromPHP((object) $insertResultsMap) : null;
+        $updateResultsDoc = $verboseResults ? Document::fromPHP((object) $updateResultsMap) : null;
+        $deleteResultsDoc = $verboseResults ? Document::fromPHP((object) $deleteResultsMap) : null;
 
         $result = BulkWriteCommandResult::createFromInternal(
             insertedCount: $acknowledged ? $nInserted : 0,
@@ -1037,7 +1049,7 @@ final class OperationExecutor
             throw BulkWriteCommandException::create(
                 message:            'Bulk write failed',
                 code:               0,
-                partialResult:      $result,
+                partialResult:      $anyWriteSucceeded ? $result : null,
                 writeErrors:        $writeErrors,
                 writeConcernErrors: $writeConcernErrors,
             );
