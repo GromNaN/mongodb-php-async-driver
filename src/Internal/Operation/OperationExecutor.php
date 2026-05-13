@@ -980,7 +980,7 @@ final class OperationExecutor
                 // ok:0 (fatal command error) — check if retryable before throwing.
                 if (! ((int) ($resultArr['ok'] ?? 0) === 1)) {
                     // Retry once on a retryable command error (first batch only).
-                    if ($canRetry && ! $retried && $batchStart === 0 && RetryableError::isRetryable($e, $server)) {
+                    if ($canRetry && ! $retried && $batchStart === 0 && RetryableError::isRetryable($e, $server, forWrite: true)) {
                         $retried = true;
 
                         try {
@@ -1009,7 +1009,7 @@ final class OperationExecutor
                 }
 
                 // ok:1 with writeConcernError. Check for retryable label before collecting.
-                if ($canRetry && ! $retried && $batchStart === 0 && RetryableError::isRetryable($e, $server)) {
+                if ($canRetry && ! $retried && $batchStart === 0 && RetryableError::isRetryable($e, $server, forWrite: true)) {
                     $retried = true;
 
                     try {
@@ -1706,7 +1706,7 @@ final class OperationExecutor
 
             return (array) (iterator_to_array($cursor)[0] ?? []);
         } catch (Throwable $e) {
-            if (! $retryable || ! RetryableError::isRetryable($e, $server)) {
+            if (! $retryable || ! RetryableError::isRetryable($e, $server, forWrite: true)) {
                 throw $e;
             }
         }

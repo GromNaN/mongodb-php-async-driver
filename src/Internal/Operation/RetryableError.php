@@ -29,20 +29,25 @@ final class RetryableError
     /**
      * Returns true when the given exception should trigger a retry attempt.
      *
-     * An error is retryable when:
-     *  - It is a ConnectionException (covers ConnectionTimeoutException via inheritance).
-     *  - It is a CommandException whose result document contains 'RetryableWriteError'
-     *    or 'RetryableError' in its errorLabels array.
-     *  - It is a CommandException from a pre-4.4 server (maxWireVersion < 9) with no
-     *    errorLabels in the result document AND whose error code is in RETRYABLE_ERROR_CODES.
+     * Rules differ slightly between reads and writes:
      *
-     * For MongoDB 4.4+ (maxWireVersion >= 9) the server always adds 'RetryableWriteError'
-     * to errors it considers retryable.  If the label is absent drivers MUST NOT fall back
-     * to the hardcoded error-code list — the absence of the label means "not retryable".
+     * For READS ($forWrite = false):
+     *  - ConnectionException → always retryable.
+     *  - CommandException with 'RetryableWriteError' / 'RetryableError' label → retryable.
+     *  - CommandException with a code in RETRYABLE_ERROR_CODES → retryable (all server versions).
      *
-     * @param InternalServerDescription|null $server Server that produced the error (null = unknown/pre-4.4).
+     * For WRITES ($forWrite = true):
+     *  - ConnectionException → always retryable.
+     *  - CommandException with 'RetryableWriteError' / 'RetryableError' label → retryable.
+     *  - CommandException from a pre-4.4 server (maxWireVersion < 9) with no errorLabels
+     *    AND whose code is in RETRYABLE_ERROR_CODES → retryable.
+     *  - MongoDB 4.4+ always adds 'RetryableWriteError' when the error is retryable; absence
+     *    of the label means the error is NOT retryable (MUST NOT fall back to error codes).
+     *
+     * @param InternalServerDescription|null $server   Server that produced the error (null = unknown/pre-4.4).
+     * @param bool                           $forWrite True when checking retryability for a write operation.
      */
-    public static function isRetryable(Throwable $e, ?InternalServerDescription $server = null): bool
+    public static function isRetryable(Throwable $e, ?InternalServerDescription $server = null, bool $forWrite = false): bool
     {
         if ($e instanceof ConnectionException) {
             return true;
@@ -55,7 +60,7 @@ final class RetryableError
         $resultDoc = $e->getResultDocument();
         $doc       = (array) $resultDoc;
 
-        // Check explicit errorLabels first; if present they are authoritative.
+        // Check explicit errorLabels first; if present they are authoritative for both reads and writes.
         if (array_key_exists('errorLabels', $doc)) {
             $labels = $doc['errorLabels'];
             if (! is_array($labels)) {
@@ -66,15 +71,17 @@ final class RetryableError
                 || in_array('RetryableError', $labels, true);
         }
 
-        // MongoDB 4.4+ (maxWireVersion >= 9): server always adds RetryableWriteError for
-        // retryable errors.  Absence of the label means the error is NOT retryable.
-        $maxWireVersion = (int) ($server?->helloResponse['maxWireVersion'] ?? 0);
+        // For writes on MongoDB 4.4+ (maxWireVersion >= 9): server always adds RetryableWriteError
+        // to retryable errors.  Absence of the label means the error is NOT retryable for writes.
+        if ($forWrite) {
+            $maxWireVersion = (int) ($server?->helloResponse['maxWireVersion'] ?? 0);
 
-        if ($maxWireVersion >= 9) {
-            return false;
+            if ($maxWireVersion >= 9) {
+                return false;
+            }
         }
 
-        // Pre-4.4 server: fall back to hardcoded error codes.
+        // For reads (all server versions) or pre-4.4 writes: fall back to hardcoded error codes.
         return in_array($e->getCode(), self::RETRYABLE_ERROR_CODES, true);
     }
 }
