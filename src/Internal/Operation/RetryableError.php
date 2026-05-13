@@ -6,8 +6,10 @@ namespace MongoDB\Internal\Operation;
 
 use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Driver\Exception\ConnectionException;
+use MongoDB\Internal\Topology\InternalServerDescription;
 use Throwable;
 
+use function array_key_exists;
 use function in_array;
 use function is_array;
 
@@ -29,11 +31,18 @@ final class RetryableError
      *
      * An error is retryable when:
      *  - It is a ConnectionException (covers ConnectionTimeoutException via inheritance).
-     *  - It is a CommandException whose error code is in RETRYABLE_ERROR_CODES.
-     *  - It is a CommandException whose result document's errorLabels array contains
-     *    'RetryableWriteError' or 'RetryableError'.
+     *  - It is a CommandException whose result document contains 'RetryableWriteError'
+     *    or 'RetryableError' in its errorLabels array.
+     *  - It is a CommandException from a pre-4.4 server (maxWireVersion < 9) with no
+     *    errorLabels in the result document AND whose error code is in RETRYABLE_ERROR_CODES.
+     *
+     * For MongoDB 4.4+ (maxWireVersion >= 9) the server always adds 'RetryableWriteError'
+     * to errors it considers retryable.  If the label is absent drivers MUST NOT fall back
+     * to the hardcoded error-code list — the absence of the label means "not retryable".
+     *
+     * @param InternalServerDescription|null $server Server that produced the error (null = unknown/pre-4.4).
      */
-    public static function isRetryable(Throwable $e): bool
+    public static function isRetryable(Throwable $e, ?InternalServerDescription $server = null): bool
     {
         if ($e instanceof ConnectionException) {
             return true;
@@ -43,19 +52,29 @@ final class RetryableError
             return false;
         }
 
-        if (in_array($e->getCode(), self::RETRYABLE_ERROR_CODES, true)) {
-            return true;
-        }
-
         $resultDoc = $e->getResultDocument();
         $doc       = (array) $resultDoc;
-        $labels    = $doc['errorLabels'] ?? [];
 
-        if (! is_array($labels)) {
-            $labels = (array) $labels;
+        // Check explicit errorLabels first; if present they are authoritative.
+        if (array_key_exists('errorLabels', $doc)) {
+            $labels = $doc['errorLabels'];
+            if (! is_array($labels)) {
+                $labels = (array) $labels;
+            }
+
+            return in_array('RetryableWriteError', $labels, true)
+                || in_array('RetryableError', $labels, true);
         }
 
-        return in_array('RetryableWriteError', $labels, true)
-            || in_array('RetryableError', $labels, true);
+        // MongoDB 4.4+ (maxWireVersion >= 9): server always adds RetryableWriteError for
+        // retryable errors.  Absence of the label means the error is NOT retryable.
+        $maxWireVersion = (int) ($server?->helloResponse['maxWireVersion'] ?? 0);
+
+        if ($maxWireVersion >= 9) {
+            return false;
+        }
+
+        // Pre-4.4 server: fall back to hardcoded error codes.
+        return in_array($e->getCode(), self::RETRYABLE_ERROR_CODES, true);
     }
 }

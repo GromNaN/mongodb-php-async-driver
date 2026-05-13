@@ -57,6 +57,7 @@ use function explode;
 use function get_object_vars;
 use function hrtime;
 use function implode;
+use function in_array;
 use function intdiv;
 use function is_array;
 use function is_object;
@@ -186,7 +187,7 @@ final class OperationExecutor
         try {
             return $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer, deadlineNs: $deadlineNs);
         } catch (Throwable $e) {
-            if (! RetryableError::isRetryable($e)) {
+            if (! RetryableError::isRetryable($e, $server)) {
                 throw $e;
             }
         }
@@ -275,7 +276,7 @@ final class OperationExecutor
         try {
             return $this->sendCommand($pool, $db, 'find', $prepared, $server, $maxAwaitTimeMS, null, $session, $callingServer, $query, $deadlineNs);
         } catch (Throwable $e) {
-            if (! RetryableError::isRetryable($e)) {
+            if (! RetryableError::isRetryable($e, $server)) {
                 throw $e;
             }
         }
@@ -792,7 +793,21 @@ final class OperationExecutor
         // A single operationId is shared across all batches for APM correlation.
         $operationId = RequestIdGenerator::next();
 
-        $totalOps   = count($allOps);
+        $totalOps = count($allOps);
+
+        // Retryable writes: acquire an implicit lsid+txnNumber once for all attempts.
+        // The bulkWrite command is retryable when retryWrites is enabled, no explicit
+        // session is provided, the write concern is acknowledged, and no op uses multi:true.
+        $canRetry        = $this->options->retryWrites
+            && $session === null
+            && $acknowledged
+            && ! $this->hasMultiTrueOps($allOps);
+        $retryLsid       = $canRetry ? $this->sessionPool->acquire() : null;
+        $retryTxnNumber  = $canRetry ? $this->nextTxnNumber($retryLsid) : null;
+        $retried         = false;
+
+        attempt:
+
         $batchStart = 0;
 
         // Accumulated results across all batches.
@@ -886,13 +901,23 @@ final class OperationExecutor
                 $command[$opt] = $options[$opt];
             }
 
+            // Suppress writeConcern inside a transaction — the server rejects it (error 72).
+            // The per-transaction writeConcern is sent only on commitTransaction / abortTransaction.
+            $batchWriteConcern = $session !== null && $session->isInTransaction() ? null : $writeConcern;
+
             $prepared = CommandHelper::prepareCommand(
                 command:      $command,
                 db:           'admin',
-                writeConcern: $writeConcern,
+                writeConcern: $batchWriteConcern,
                 session:      $session,
                 serverApi:    $this->serverApi,
             );
+
+            // Inject implicit lsid+txnNumber for retryable writes (no explicit session).
+            if ($retryLsid !== null) {
+                $prepared['lsid']      = $retryLsid;
+                $prepared['txnNumber'] = new Int64($retryTxnNumber);
+            }
 
             // Send this batch using 'ops' as a kind-1 OP_MSG document sequence so that
             // the kind-0 body stays well below maxBsonObjectSize.
@@ -907,13 +932,107 @@ final class OperationExecutor
                     [['id' => 'ops', 'docs' => $remappedOps]],
                     $deadlineNs,
                 );
+
+                // Check for top-level errorLabels with RetryableWriteError from a writeConcernError
+                // response (ok:1, no thrown exception, but server signals the write should be retried).
+                $bodyLabels = is_array($body['errorLabels'] ?? null)
+                    ? $body['errorLabels']
+                    : (array) ($body['errorLabels'] ?? []);
+                if (
+                    $canRetry
+                    && ! $retried
+                    && $batchStart === 0
+                    && in_array('RetryableWriteError', $bodyLabels, true)
+                ) {
+                    $retried = true;
+                    $server  = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY), $this->remainingSelectionMs($deadlineNs));
+                    $pool    = $this->getOrCreatePool($server->host, $server->port);
+                    goto attempt;
+                }
+            } catch (ConnectionException $e) {
+                // Network error — retry once on a fresh server if allowed and on the first batch.
+                if ($canRetry && ! $retried && $batchStart === 0) {
+                    $retried = true;
+
+                    try {
+                        $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY), $this->remainingSelectionMs($deadlineNs));
+                        $pool   = $this->getOrCreatePool($server->host, $server->port);
+                    } catch (Throwable) {
+                        $e->addErrorLabel('RetryableWriteError');
+
+                        throw $e;
+                    }
+
+                    goto attempt;
+                }
+
+                // Retry already done or non-first batch: escalate with RetryableWriteError label.
+                if ($canRetry && $retried) {
+                    $e->addErrorLabel('RetryableWriteError');
+                }
+
+                throw $e;
             } catch (CommandException $e) {
-                throw BulkWriteCommandException::create(
-                    message:        $e->getMessage(),
-                    code:           $e->getCode(),
-                    resultDocument: $e->getResultDocument(),
-                    errorReply:     Document::fromPHP($e->getResultDocument()),
+                $resultDoc = $e->getResultDocument();
+                $resultArr = is_array($resultDoc) ? $resultDoc : (array) $resultDoc;
+
+                // ok:1 with writeConcernError — collect the error and continue processing this batch.
+                // ok:0 (fatal command error) — check if retryable before throwing.
+                if (! ((int) ($resultArr['ok'] ?? 0) === 1)) {
+                    // Retry once on a retryable command error (first batch only).
+                    if ($canRetry && ! $retried && $batchStart === 0 && RetryableError::isRetryable($e, $server)) {
+                        $retried = true;
+
+                        try {
+                            $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY), $this->remainingSelectionMs($deadlineNs));
+                            $pool   = $this->getOrCreatePool($server->host, $server->port);
+                        } catch (Throwable) {
+                            $e->addErrorLabel('RetryableWriteError');
+
+                            throw $e;
+                        }
+
+                        goto attempt;
+                    }
+
+                    // If this was a retry attempt that failed again, add the error label.
+                    if ($canRetry && $retried) {
+                        $e->addErrorLabel('RetryableWriteError');
+                    }
+
+                    throw BulkWriteCommandException::create(
+                        message:        $e->getMessage(),
+                        code:           $e->getCode(),
+                        resultDocument: $resultDoc,
+                        errorReply:     Document::fromPHP($resultDoc),
+                    );
+                }
+
+                // ok:1 with writeConcernError. Check for retryable label before collecting.
+                if ($canRetry && ! $retried && $batchStart === 0 && RetryableError::isRetryable($e, $server)) {
+                    $retried = true;
+
+                    try {
+                        $server = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY), $this->remainingSelectionMs($deadlineNs));
+                        $pool   = $this->getOrCreatePool($server->host, $server->port);
+                    } catch (Throwable) {
+                        $e->addErrorLabel('RetryableWriteError');
+
+                        throw $e;
+                    }
+
+                    goto attempt;
+                }
+
+                $wceData = $resultArr['writeConcernError'] ?? [];
+                $wceArr  = is_array($wceData) ? $wceData : (array) $wceData;
+                $writeConcernErrors[] = WriteConcernError::create(
+                    code:    (int) ($wceArr['code']   ?? 0),
+                    message: (string) ($wceArr['errmsg'] ?? ''),
                 );
+                // Clear writeConcernError so the post-cursor check does not add it again.
+                unset($resultArr['writeConcernError']);
+                $body = $resultArr;
             }
 
             // Accumulate summary counts.
@@ -992,7 +1111,9 @@ final class OperationExecutor
                 $updateResultsDoc = $verboseResults ? Document::fromPHP((object) $updateResultsMap) : null;
                 $deleteResultsDoc = $verboseResults ? Document::fromPHP((object) $deleteResultsMap) : null;
 
-                $partialResult = $anyWriteSucceeded ? BulkWriteCommandResult::createFromInternal(
+                $partialSucceeded = $anyWriteSucceeded
+                    || ($nInserted + $nUpserted + $nMatched + $nDeleted) > 0;
+                $partialResult = $partialSucceeded ? BulkWriteCommandResult::createFromInternal(
                     insertedCount: $acknowledged ? $nInserted : 0,
                     matchedCount:  $acknowledged ? $nMatched : 0,
                     modifiedCount: $acknowledged ? $nModified : 0,
@@ -1046,10 +1167,14 @@ final class OperationExecutor
         );
 
         if ($writeErrors !== [] || $writeConcernErrors !== []) {
+            // Partial result is null when no writes succeeded (e.g. first op failed in ordered mode).
+            $partialSucceeded = $anyWriteSucceeded
+                || ($nInserted + $nUpserted + $nMatched + $nDeleted) > 0;
+
             throw BulkWriteCommandException::create(
                 message:            'Bulk write failed',
                 code:               0,
-                partialResult:      $anyWriteSucceeded ? $result : null,
+                partialResult:      $partialSucceeded ? $result : null,
                 writeErrors:        $writeErrors,
                 writeConcernErrors: $writeConcernErrors,
             );
@@ -1539,6 +1664,25 @@ final class OperationExecutor
     }
 
     /**
+     * Returns true when any of the new-style bulkWrite ops has multi:true (updateMany / deleteMany),
+     * which disqualifies the entire bulkWrite command from retryable-write retry.
+     */
+    private function hasMultiTrueOps(array $allOps): bool
+    {
+        foreach ($allOps as $op) {
+            if (isset($op['update']) && ($op['multi'] ?? false)) {
+                return true;
+            }
+
+            if (isset($op['delete']) && ($op['multi'] ?? false)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Execute a bulk-write batch command, retrying once on a retryable error when
      * $retryable is true.  The caller must have already injected lsid / txnNumber
      * into $prepared if retryable writes are active.
@@ -1562,7 +1706,7 @@ final class OperationExecutor
 
             return (array) (iterator_to_array($cursor)[0] ?? []);
         } catch (Throwable $e) {
-            if (! $retryable || ! RetryableError::isRetryable($e)) {
+            if (! $retryable || ! RetryableError::isRetryable($e, $server)) {
                 throw $e;
             }
         }
@@ -1571,7 +1715,14 @@ final class OperationExecutor
         $retryServer = $this->topology->selectServer(new ReadPreference(ReadPreference::PRIMARY), $this->remainingSelectionMs($deadlineNs));
         $retryPool   = $this->getOrCreatePool($retryServer->host, $retryServer->port);
 
-        $cursor = $this->sendCommand($retryPool, $db, $cmdName, $prepared, $retryServer, 0, null, $session, deadlineNs: $deadlineNs);
+        try {
+            $cursor = $this->sendCommand($retryPool, $db, $cmdName, $prepared, $retryServer, 0, null, $session, deadlineNs: $deadlineNs);
+        } catch (RuntimeException $retryError) {
+            // Per the retryable writes spec: add RetryableWriteError label when the retry fails.
+            $retryError->addErrorLabel('RetryableWriteError');
+
+            throw $retryError;
+        }
 
         return (array) (iterator_to_array($cursor)[0] ?? []);
     }
