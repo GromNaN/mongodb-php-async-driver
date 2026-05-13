@@ -85,6 +85,15 @@ use function substr;
  */
 final class OperationExecutor
 {
+    /**
+     * Commands that support retryable write semantics (lsid + txnNumber injection).
+     *
+     * @see https://github.com/mongodb/specifications/blob/master/source/retryable-writes/retryable-writes.md
+     */
+    private const array RETRYABLE_WRITE_COMMANDS = [
+        'insert', 'update', 'delete', 'findAndModify', 'bulkWrite',
+    ];
+
     /** @var array<string, ConnectionPool> Keyed by "host:port". */
     private array $pools = [];
 
@@ -146,6 +155,7 @@ final class OperationExecutor
         ?WriteConcern $writeConcern = null,
         ?Server $callingServer = null,
         bool $retryRead = false,
+        bool $retryWrite = false,
     ): CursorInterface {
         $this->ensureStarted();
 
@@ -163,6 +173,59 @@ final class OperationExecutor
             ? null
             : $readPreference;
 
+        $maxAwaitTimeMS = (int) ($command->getOptions()['maxAwaitTimeMS'] ?? 0);
+
+        // ---- Retryable Write path ----
+        $canRetryWrite = $retryWrite
+            && in_array($cmdName, self::RETRYABLE_WRITE_COMMANDS, true)
+            && $this->options->retryWrites
+            && $session === null
+            && ($writeConcern === null || $writeConcern->getW() !== 0)
+            && $this->serverSupportsRetryableWrites($server);
+
+        if ($canRetryWrite) {
+            $retryLsid              = $this->sessionPool->acquire();
+            $txnNum                 = $this->nextTxnNumber($retryLsid);
+            $prepared               = CommandHelper::prepareCommand(
+                command:        $rawCmd,
+                db:             $db,
+                readPreference: $effectiveReadPreference,
+                readConcern:    $readConcern,
+                writeConcern:   $writeConcern,
+                session:        $session,
+                serverApi:      $this->serverApi,
+            );
+            $prepared['lsid']       = $retryLsid;
+            $prepared['txnNumber']  = new Int64($txnNum);
+
+            try {
+                $cursor = $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer, deadlineNs: $deadlineNs);
+            } catch (Throwable $e) {
+                if (! RetryableError::isRetryable($e, $server, forWrite: true)) {
+                    $this->sessionPool->release($retryLsid);
+
+                    throw $e;
+                }
+
+                // One retry with a freshly selected server (same lsid + txnNumber).
+                $server = $this->topology->selectServer($readPreference, $this->remainingSelectionMs($deadlineNs));
+                $pool   = $this->getOrCreatePool($server->host, $server->port);
+
+                try {
+                    $cursor = $this->sendCommand($pool, $db, $cmdName, $prepared, $server, $maxAwaitTimeMS, $command, $session, $callingServer, deadlineNs: $deadlineNs);
+                } catch (RuntimeException $retryError) {
+                    $retryError->addErrorLabel('RetryableWriteError');
+                    $this->sessionPool->release($retryLsid);
+
+                    throw $retryError;
+                }
+            }
+
+            $this->sessionPool->release($retryLsid);
+
+            return $cursor;
+        }
+
         $prepared = CommandHelper::prepareCommand(
             command:        $rawCmd,
             db:             $db,
@@ -173,8 +236,7 @@ final class OperationExecutor
             serverApi:      $this->serverApi,
         );
 
-        $maxAwaitTimeMS = (int) ($command->getOptions()['maxAwaitTimeMS'] ?? 0);
-
+        // ---- Retryable Read path ----
         $canRetry = $retryRead
             && $this->options->retryReads
             && ($session === null || ! $session->isInTransaction())
@@ -677,12 +739,20 @@ final class OperationExecutor
         );
 
         if ($batchException !== null) {
-            throw new BulkWriteException(
+            $bulkEx = new BulkWriteException(
                 message:     sprintf('Bulk write failed due to previous %s: %s', $batchException::class, $batchException->getMessage()),
                 code:        0,
                 writeResult: $writeResult,
                 previous:    $batchException,
             );
+
+            // Propagate RetryableWriteError label from the underlying error so callers can
+            // inspect it (e.g. the retryable-writes spec "fails with RetryableWriteError label").
+            if ($batchException instanceof RuntimeException && $batchException->hasErrorLabel('RetryableWriteError')) {
+                $bulkEx->addErrorLabel('RetryableWriteError');
+            }
+
+            throw $bulkEx;
         }
 
         if ($errorReplies !== []) {

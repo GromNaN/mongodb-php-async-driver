@@ -393,7 +393,7 @@ final class Manager
         $writeConcern = $this->extractWriteConcern($options) ?? $this->writeConcern;
         $session      = $this->extractSession($options);
 
-        return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, null, $session, null, $writeConcern));
+        return SyncRunner::run(fn () => $this->executor->executeCommand($db, $command, null, $session, null, $writeConcern, retryWrite: true));
     }
 
     /**

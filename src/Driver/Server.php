@@ -159,7 +159,7 @@ final class Server
         $writeConcern = $options['writeConcern'] ?? null;
         $session      = $options['session'] ?? null;
 
-        return $this->executor->executeCommand($db, $command, null, $session, null, $writeConcern, $this);
+        return $this->executor->executeCommand($db, $command, null, $session, null, $writeConcern, $this, retryWrite: true);
     }
 
     public function executeReadWriteCommand(string $db, Command $command, ?array $options = null): CursorInterface
